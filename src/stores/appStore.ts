@@ -3,13 +3,18 @@ import { api, toErrorMessage } from "@/lib/ipc";
 import type {
   AnalysisSummary,
   AppInfo,
+  Collection,
   DbStatus,
   FileOpRow,
+  FilterCondition,
   MetadataSummary,
   OperationSummary,
   PathsInfo,
   ProgressPayload,
+  SavedView,
   ScanSummary,
+  SimilarityGroup,
+  SimilaritySummary,
   ViewId,
 } from "@/types/api";
 
@@ -41,6 +46,23 @@ interface AppState {
   notice: string | null;
   error: string | null;
 
+  /**
+   * The library filter as structured conditions. Lives in the store (not
+   * in LibraryView) because saved views and session detail apply it from
+   * other views and navigate in.
+   */
+  filterConditions: FilterCondition[];
+  /** Saved views (null = not loaded yet). */
+  savedViews: SavedView[] | null;
+  /** Collections (null = not loaded yet). */
+  collections: Collection[] | null;
+  /** Similarity pass in flight. */
+  findingSimilar: boolean;
+  similarityProgress: ProgressPayload | null;
+  similaritySummary: SimilaritySummary | null;
+  /** Similar + burst groups (null = not loaded yet). */
+  similarityGroups: SimilarityGroup[] | null;
+
   setView: (v: ViewId) => void;
   setAppInfo: (i: AppInfo) => void;
   setPaths: (p: PathsInfo) => void;
@@ -69,6 +91,14 @@ interface AppState {
   /** Set many photos to the same selection (e.g. "select all on page"). */
   setSelectionsBulk: (photoIds: number[], state: SelectionState | null) => void;
   refreshRecentOps: () => Promise<void>;
+
+  setFilterConditions: (conditions: FilterCondition[]) => void;
+  loadSavedViews: () => Promise<void>;
+  loadCollections: () => Promise<void>;
+  setFindingSimilar: (b: boolean) => void;
+  setSimilarityProgress: (p: ProgressPayload | null) => void;
+  setSimilaritySummary: (s: SimilaritySummary | null) => void;
+  loadSimilarityGroups: () => Promise<void>;
 }
 
 let statusInFlight = false;
@@ -95,6 +125,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   metadataSummary: null,
   notice: null,
   error: null,
+  filterConditions: [],
+  savedViews: null,
+  collections: null,
+  findingSimilar: false,
+  similarityProgress: null,
+  similaritySummary: null,
+  similarityGroups: null,
 
   setView: (view) => set({ view }),
   setAppInfo: (appInfo) => set({ appInfo }),
@@ -178,6 +215,36 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ recentOps: await api.recentFileOps(30) });
     } catch {
       // Audit log is non-critical.
+    }
+  },
+
+  setFilterConditions: (filterConditions) => set({ filterConditions }),
+
+  loadSavedViews: async () => {
+    try {
+      set({ savedViews: await api.listSavedViews() });
+    } catch {
+      // Non-critical; the view shows its error state if it really fails.
+    }
+  },
+
+  loadCollections: async () => {
+    try {
+      set({ collections: await api.listCollections() });
+    } catch {
+      // Non-critical.
+    }
+  },
+
+  setFindingSimilar: (findingSimilar) => set({ findingSimilar }),
+  setSimilarityProgress: (similarityProgress) => set({ similarityProgress }),
+  setSimilaritySummary: (similaritySummary) => set({ similaritySummary }),
+
+  loadSimilarityGroups: async () => {
+    try {
+      set({ similarityGroups: await api.listSimilarityGroups(50) });
+    } catch {
+      // Non-critical.
     }
   },
 }));

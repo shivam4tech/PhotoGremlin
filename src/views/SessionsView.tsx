@@ -227,6 +227,14 @@ export function SessionsView() {
     }
   };
 
+  /** Apply a `session_id = N` filter and open the Library on that session. */
+  const openInLibrary = (id: number) => {
+    useAppStore
+      .getState()
+      .setFilterConditions([{ field: "session_id", operator: "=", value: id }]);
+    useAppStore.getState().setView("library");
+  };
+
   const toggleDetail = async (id: number) => {
     if (detailId === id) {
       setDetailId(null);
@@ -295,6 +303,7 @@ export function SessionsView() {
               <th style={{ textAlign: "right" }}>Photos</th>
               <th>Shoot period</th>
               <th>Indexed</th>
+              <th />
             </tr>
           </thead>
           <tbody>
@@ -330,6 +339,15 @@ export function SessionsView() {
                 </td>
                 <td className="faint" style={{ fontSize: 12 }}>
                   {fmtDate(s.created_at)}
+                </td>
+                <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => openInLibrary(s.id)}
+                    title="Show this session's photographs in the Library"
+                  >
+                    Open in library
+                  </button>
                 </td>
               </tr>
             ))}

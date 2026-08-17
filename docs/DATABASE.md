@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 8). Tests assert both expected-table presence and idempotency.
+(currently 9). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -26,8 +26,13 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
 - v8: `selections` table — explicit culling state (one row per photo:
   `selected` | `rejected`) the statistics engine reads for the selection ratio
   (written by the Sprint 7 culling UI via `set_selections`/`clear_selections`)
+- v9: `photos.phash INTEGER` + `photos.phash_source_mtime TEXT` — the
+  64-bit dHash and the RFC3339 file mtime it was computed from (the
+  similarity pass's incremental rule, mirroring the analysis rule in terms of
+  a separate column; see SIMILARITY.md). Added via `ALTER TABLE`, guarded by
+  the same `PRAGMA table_info` probe as v6/v7
 
-## Tables (schema v1–v8)
+## Tables (schema v1–v9)
 
 ### sessions
 A shoot or imported body of work.
@@ -64,6 +69,8 @@ re-scan upserts instead of duplicating).
 | indexed_at | TEXT | |
 | file_mtime | TEXT | file mtime; incremental analysis reuses rows when mtime+size unchanged |
 | exif_at | TEXT | (v7) RFC3339 time the metadata pass read this file; NULL = not yet read. One read per file in v0.1 |
+| phash | INTEGER | (v9) 64-bit dHash of the decoded image, from the similarity pass (Sprint 8); NULL = not yet hashed |
+| phash_source_mtime | TEXT | (v9) RFC3339 file mtime the hash was computed from; drives the re-hash rule |
 
 Indexes: `session_id`, `capture_datetime`, `camera_model`, `lens` (filter +
 dashboard hot paths).
@@ -112,16 +119,30 @@ are normalized 0–100 so filters/UI stay stable across versions.
 
 ### collections / collection_photos
 Manually curated sets (Sprint 8 UI). `collection_photos` is the join table
-with composite PK.
+with composite PK. Deleting a collection removes only its membership rows
+(FK cascade) — never the photographs. A collection may contain a photo that
+is not in any session (NULL `session_id`), and membership is orthogonal to
+culling: adding to a collection never touches `selections` or files.
 
 ### saved_views
 Dynamic filters: `filter_json` holds the full structured filter
 (see FILTER_ENGINE.md), so a view stays correct as the library changes.
-Composite uniqueness on `name`.
+Uniqueness on `name` (saving with an existing name overwrites that view's
+filter + description, keeping the same `id` — `updated_at` moves). The UI's
+live "photograph count" is **not** stored: it is recomputed on demand by
+feeding `filter_json` through the same filter engine the grid uses.
 
 ### similarity_groups / similarity_group_photos
-Groups of visually similar photos (perceptual-hash clusters) and
-burst-like time clusters (`group_type` distinguishes).
+Groups found by the similarity pass (Sprint 8, see SIMILARITY.md).
+`group_type` ∈ `similar` (perceptual-hash cluster within one session) |
+`burst` (photographs captured within `BURST_WINDOW_SECS` of each other);
+`hash` labels the group (hex dHash for similar groups, `burst:<epoch secs>`
+for bursts) and `photo_count` is denormalized. The whole group set is
+**replaced atomically** on each pass (`replace_similarity_groups` in one
+transaction), so a group set always reflects the current hashes — partial
+state is impossible. `similarity_group_photos` is the join with composite
+PK; up to the first 4 member ids (by id order) are surfaced as `cover_photos`
+by the list query for UI cover strips.
 
 ### file_operations
 Audit log for every rename/move/copy/trash: op_type, source, destination,
@@ -148,7 +169,7 @@ Key/value for application state (e.g. `active_folder`).
 ### schema_version
 `version`, `applied_at`.
 
- ## Query surface (as of Sprint 7) 
+  ## Query surface (as of Sprint 8) 
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
   `refresh_all_sessions_times` / `list_sessions` — scanner ingest (Sprint 2).
@@ -203,6 +224,56 @@ Key/value for application state (e.g. `active_folder`).
   else is a friendly validation error.
 - `list_selections(limit)` — the current culling map (id → state), capped at
   20,000.
+
+### Saved views (Sprint 8)
+
+- `list_saved_views()` — all views, alphabetical.
+- `upsert_saved_view(name, filter_json, description) -> id` — create or
+  overwrite by name (names trimmed; blank → validation error; `UNIQUE(name)`
+  violation → "already exists" style friendly error). The view's `filter_json`
+  is validated with the grid's own engine by the command layer before this is
+  called, so a stored view is always evaluable.
+- `rename_saved_view(id, name)` / `delete_saved_view(id)`.
+- (The dynamic count is `photos_where` over the view's filter — see
+  FILTER_ENGINE.md — not a separate surface.)
+
+### Collections (Sprint 8)
+
+- `list_collections()` — with live `photo_count` (subquery per row).
+- `create_collection(name, description) -> id` (names trimmed; uniqueness →
+  friendly error), `rename_collection(id, name)`, `delete_collection(id)`
+  (membership cascades, photos untouched).
+- `add_to_collection(collection_id, photo_ids) -> added` — idempotent
+  (`INSERT OR IGNORE`), returns how many rows were actually new; the
+  collection must exist (friendly error otherwise).
+- `remove_from_collection(collection_id, photo_ids) -> removed`.
+- `collection_photos(collection_id, offset, limit)` — the collection's
+  photographs as `PhotoSummary` pages (join through `collection_photos`
+  ordered by `added_at`), the same row shape the library grid uses.
+- `collection_ids_for_photos(photo_ids)` — which collections contain each
+  given photo (membership badges; dynamic `IN ?` placeholders).
+
+### Similarity (Sprint 8)
+
+- `phash_queue()` — photos that need (re-)hashing: `phash IS NULL` or
+  (`phash_source_mtime` recorded AND `file_mtime` known AND newer than the
+  recorded one), restricted to decodable extensions (the scanner's
+  `DECODABLE_EXT` list), in capture-time order. The mirror of `analysis_queue`
+  for the hash pass.
+- `upsert_phash(photo_id, hash, source_mtime)` — persist one 64-bit hash
+  (stored as `INTEGER`) + the mtime it was computed from.
+- `hashed_photos()` — all rows with `phash IS NOT NULL`, returning
+  `(id, hash, session_id, capture_datetime)` — the similarity pass's
+  grouping input (session + capture time are how groups stay scoped to a
+  shoot, see SIMILARITY.md).
+- `list_similarity_groups(limit)` — current groups, bursts first then by
+  size (stable by `id`), each with ≤4 `cover_photos`.
+- `group_photos(group_id, offset, limit)` — a group's photographs as
+  `PhotoSummary` pages ordered by capture time (an empty/unknown group is a
+  clean `( [], 0 )`, not an error).
+- `replace_similarity_groups([(hash, group_type, photo_ids)]) -> count` — one
+  transaction: delete all groups + memberships, insert the full new set
+  (atomic replacement; the pass is the only writer).
 
 ## Conventions
 

@@ -318,9 +318,27 @@ export interface Collection {
 export interface SimilarityGroup {
   id: number;
   hash: string;
-  group_type: string;
+  group_type: "similar" | "burst";
   photo_count: number;
   created_at: string;
+  /** Up to 4 photo ids (by id order) for a cover strip. */
+  cover_photos: number[];
+}
+
+/** Result of one similarity pass (carried in `similarity-complete`). */
+export interface SimilaritySummary {
+  hashed: number;
+  failed: number;
+  similar_groups: number;
+  burst_groups: number;
+  elapsed_ms: number;
+  cancelled: boolean;
+}
+
+/** `similarity-complete` event payload: exactly one of the two is set. */
+export interface SimilarityCompletePayload {
+  summary: SimilaritySummary | null;
+  error: string | null;
 }
 
 export interface SessionRow {

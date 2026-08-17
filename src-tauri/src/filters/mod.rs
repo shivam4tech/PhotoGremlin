@@ -119,6 +119,7 @@ const APERTURE: FieldDef = FieldDef { kind: Kind::Real, expr: "p.aperture", nega
 const SHUTTER_SPEED: FieldDef = FieldDef { kind: Kind::Real, expr: "p.shutter_speed", negate_bool: false };
 const FOCAL_LENGTH: FieldDef = FieldDef { kind: Kind::Real, expr: "p.focal_length", negate_bool: false };
 const CAPTURE_DATETIME: FieldDef = FieldDef { kind: Kind::DateTime, expr: "p.capture_datetime", negate_bool: false };
+const SESSION_ID: FieldDef = FieldDef { kind: Kind::Int, expr: "p.session_id", negate_bool: false };
 const FACES_PRESENT: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.face_count IS NOT NULL AND a.face_count > 0)", negate_bool: false };
 const FACE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.face_count", negate_bool: false };
 const SMILING: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.smile_count IS NOT NULL AND a.smile_count > 0)", negate_bool: false };
@@ -148,6 +149,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "shutter_speed" => &SHUTTER_SPEED,
         "focal_length" => &FOCAL_LENGTH,
         "capture_datetime" => &CAPTURE_DATETIME,
+        "session_id" => &SESSION_ID,
         "faces_present" => &FACES_PRESENT,
         "face_count" => &FACE_COUNT,
         "smiling" => &SMILING,

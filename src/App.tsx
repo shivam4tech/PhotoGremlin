@@ -9,6 +9,7 @@ import type {
   OperationCompletePayload,
   ProgressPayload,
   ScanCompletePayload,
+  SimilarityCompletePayload,
 } from "@/types/api";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
@@ -171,7 +172,39 @@ export default function App() {
         void s.refreshRecentOps();
         s.bumpLibraryVersion();
       });
-      return [up, upa, uca, upm, ucm, uc, uop, uoc];
+       const usim = await onProgress<ProgressPayload>("similarity-progress", (p) => {
+         const s = state();
+         s.setFindingSimilar(true);
+         s.setSimilarityProgress(p);
+       });
+       const usimc = await onProgress<SimilarityCompletePayload>("similarity-complete", (p) => {
+         const s = state();
+         s.setFindingSimilar(false);
+         s.setSimilarityProgress(null);
+         if (p.summary) {
+           const sum = p.summary;
+           const bits: string[] = [
+             `${sum.similar_groups.toLocaleString()} similar group${sum.similar_groups === 1 ? "" : "s"}`,
+             `${sum.burst_groups.toLocaleString()} burst group${sum.burst_groups === 1 ? "" : "s"}`,
+           ];
+           if (sum.hashed > 0) bits.unshift(`${sum.hashed.toLocaleString()} hashed`);
+           if (sum.failed > 0) bits.push(`${sum.failed.toLocaleString()} unreadable`);
+           bits.push(`${(sum.elapsed_ms / 1000).toFixed(1)}s`);
+           s.setSimilaritySummary(sum);
+           s.setNotice(
+             (sum.cancelled ? "Similarity pass stopped — " : "Similarity complete — ") +
+               bits.join(", ") +
+               ".",
+           );
+           s.setError(null);
+         } else {
+           s.setSimilaritySummary(null);
+           s.setError(p.error ?? "Finding similar photos failed.");
+         }
+         // The group set changed: refresh it.
+         void s.loadSimilarityGroups();
+       });
+       return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc];
     })();
 
     let alive = true;
