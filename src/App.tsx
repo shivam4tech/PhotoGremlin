@@ -3,7 +3,11 @@ import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { useAppStore } from "@/stores/appStore";
 import { api, onProgress, toErrorMessage } from "@/lib/ipc";
-import type { ProgressPayload, ScanCompletePayload } from "@/types/api";
+import type {
+  AnalysisCompletePayload,
+  ProgressPayload,
+  ScanCompletePayload,
+} from "@/types/api";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
@@ -36,13 +40,43 @@ export default function App() {
     };
   }, []);
 
-  // Scan progress/completion stream in from the backend at all times.
+  // Scan + analysis progress/completion stream in from the backend at all
+  // times. The UI keeps the two exclusive (buttons disable each other), so
+  // one shared progress field is honest.
   useEffect(() => {
     const unlisteners = (async () => {
       const state = () => useAppStore.getState();
       const up = await onProgress<ProgressPayload>("scan-progress", (p) => {
         state().setProgress(p);
         state().setScanning(true);
+      });
+      const upa = await onProgress<ProgressPayload>("analysis-progress", (p) => {
+        state().setProgress(p);
+        state().setAnalyzing(true);
+      });
+      const uca = await onProgress<AnalysisCompletePayload>("analysis-complete", (p) => {
+        const s = state();
+        s.setAnalyzing(false);
+        s.setProgress(null);
+        if (p.summary) {
+          const sum = p.summary;
+          const bits: string[] = [
+            `${sum.analyzed.toLocaleString()} photograph${sum.analyzed === 1 ? "" : "s"} measured`,
+            sum.failed > 0 ? `${sum.failed.toLocaleString()} failed` : null,
+            `${(sum.elapsed_ms / 1000).toFixed(1)}s`,
+          ].filter(Boolean) as string[];
+          s.setAnalysisSummary(sum);
+          s.setNotice(
+            sum.cancelled
+              ? `Analysis stopped — ${bits.join(", ")}.`
+              : `Analysis complete — ${bits.join(", ")}.`,
+          );
+          s.setError(null);
+        } else {
+          s.setAnalysisSummary(null);
+          s.setError(p.error ?? "Analysis failed.");
+        }
+        void s.refreshStatus();
       });
       const uc = await onProgress<ScanCompletePayload>("scan-complete", (p) => {
         const s = state();
@@ -61,7 +95,7 @@ export default function App() {
         }
         void s.refreshStatus();
       });
-      return [up, uc];
+      return [up, upa, uca, uc];
     })();
 
     let alive = true;

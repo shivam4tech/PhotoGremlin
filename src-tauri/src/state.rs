@@ -6,15 +6,16 @@ use crate::database::Db;
 use crate::paths::AppPaths;
 use crate::thumbnailer::ThumbService;
 
-/// Live scan job handle. Commands use `running` as a claim and `cancel`
-/// as the cooperative stop flag checked between files by the scanner.
+/// Live background job handle (scan, analysis). Commands use `running` as a
+/// claim and `cancel` as the cooperative stop flag checked between items by
+/// the pipeline.
 #[derive(Clone)]
-pub struct ScanJob {
+pub struct Job {
     pub running: Arc<std::sync::atomic::AtomicBool>,
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
-impl ScanJob {
+impl Job {
     pub fn new() -> Self {
         Self {
             running: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -27,6 +28,9 @@ impl ScanJob {
 pub struct AppState {
     pub db: Arc<Db>,
     pub paths: Arc<AppPaths>,
-    pub scan: Arc<Mutex<Option<Arc<ScanJob>>>>,
+    /// Single scan slot (claim-and-cancel for folder scans).
+    pub scan: Arc<Mutex<Option<Arc<Job>>>>,
+    /// Single analysis slot (claim-and-cancel for the analysis pass).
+    pub analysis: Arc<Mutex<Option<Arc<Job>>>>,
     pub thumb: Arc<ThumbService>,
 }

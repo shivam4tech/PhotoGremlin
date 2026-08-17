@@ -3,10 +3,31 @@
 All core analysis is **deterministic, local, AI-free**. Each measurement is a
 technical estimate, presented as such — never as "image quality".
 
-Pipeline (Sprint 4): `decode (bounded workers) → measure → store row
-(algorithm_version) → progress event`. Decoding is the memory hotspot: at most
-a small fixed number of full-res images in RAM at once, thumbnails generated
-from the same decode pass (Sprint 3).
+Pipeline (Sprint 4, implemented): `queue → decode (bounded workers) →
+measure → store row (algorithm_version, source_mtime) → progress event`.
+`run_analysis` (`src-tauri/src/analysis/mod.rs`) is Tauri-free and
+integration-tested; `commands/analysis.rs` adapts it to a background job with
+a claim-and-cancel slot (like scans) and streams `analysis-progress` /
+`analysis-complete` events.
+
+**Pinned implementation constants:**
+
+- `WORKING_MAX_SIDE = 2048` — images are decoded and downscaled (long side)
+  before measuring, so a 100 MP file cannot explode memory. Both the luma
+  histogram pass and the Laplacian sharpness pass run at this working
+  resolution.
+- `ANALYSIS_WORKERS = 3` — at most 3 images are decoded/measured concurrently;
+  the queue is de-interleaved round-robin into one slice per worker
+  (no channels; item *i* → worker *i* mod N).
+- `MAX_PIXELS ≈ 500 MP` — bigger files are reported as a friendly failure,
+  never decoded.
+- Progress is emitted after every completed or failed item (the scan pattern).
+- **Incremental by design:** a photo is (re)measured only if it has no row,
+  its row's `algorithm_version` is older, or `analysis.source_mtime`
+  differs from `photos.file_mtime` (a re-scan refreshes that after the file
+  changed on disk). A no-op re-run writes nothing.
+- Thumbnails (Sprint 3) are generated lazily on demand by their own engine;
+  analysis does its own bounded decode pass. Both are small and cached.
 
 ## Scores: normalized 0–100
 
@@ -20,10 +41,16 @@ Method: **variance of the Laplacian** of the grayscale image, computed at a
 bounded working resolution (downscaled so a 100 MP file doesn't explode
 memory).
 
-- `score = 100 · sigmoid(log10(var) − μ) / k` — the sigmoid maps the
-  right-tailed Laplacian-variance distribution onto 0–100; `μ`, `k` chosen
-  from measured distributions of typical photo material (values pinned in
-  code with the calibration data noted in a comment).
+- `score = 100 / (1 + exp(−(log10(var) − μ) / k))` — the sigmoid maps the
+  right-tailed Laplacian-variance distribution onto 0–100. Pinned v0.1
+  calibration (in `analysis/metrics.rs` with a comment): at the 2048 px
+  working resolution, sharp photo material measures log10(var) ≈ 3.5–4.5 and
+  visibly soft material below ≈ 2.5, so **`μ = 3.5`, `k = 0.6`**. Recalculate
+  when the working resolution or kernel changes and bump
+  `ANALYSIS_ALGORITHM_VERSION`.
+- Kernel: 4-neighbor Laplacian (`[0 1 0; 1 −4 1; 0 1 0]`) over the image
+  interior; the variance of those values is the edge-energy statistic.
+  Images with fewer than 3 px on a side score 0 (no interior).
 - Output example: `sharpness = 87`.
 - UI language: "sharpness 87", "potentially blurry (sharpness < 40 when
   filtered)". Never "unsharp/bad".
@@ -38,9 +65,12 @@ memory).
 ## Contrast (Sprint 4)
 
 - Luma standard deviation (σ) plus percentile spread (p95 − p5) as a robust
-  companion against outliers.
+  companion against outliers. Percentiles come from the same 256-bin luma
+  histogram used for brightness/clipping (one pass, no sort).
 - `contrast` = blend: `0.6 · scale(σ) + 0.4 · scale(p95 − p5)` → 0–100,
-  saturating at σ ≈ 70 (visually maxed contrast for photos).
+  saturating at σ ≈ 70 (visually maxed contrast for photos) and spread ≈
+  180 gray levels (`CONTRAST_SIGMA_SATURATION` /
+  `CONTRAST_SPREAD_SATURATION` in `analysis/metrics.rs`).
 
 ## Saturation (Sprint 4)
 

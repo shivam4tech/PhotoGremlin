@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 5;
+pub const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -185,6 +185,25 @@ impl Db {
                  ON sessions(root_path) WHERE root_path IS NOT NULL;",
             )
             .map_err(db_err("create sessions root index"))?;
+
+            // v6: record the source file mtime each analysis row was computed
+            // from, so re-analysis is incremental (only re-measure when the
+            // file changed on disk or the algorithm version advanced).
+            let has_source_mtime: bool = conn
+                .prepare("PRAGMA table_info(analysis)")
+                .ok()
+                .and_then(|mut p| {
+                    let cols = p.query_map([], |r| r.get::<_, String>(1)).ok()?;
+                    Some(
+                        cols.into_iter()
+                            .any(|c| c.as_deref().ok() == Some("source_mtime")),
+                    )
+                })
+                .unwrap_or(false);
+            if !has_source_mtime {
+                conn.execute("ALTER TABLE analysis ADD COLUMN source_mtime TEXT", [])
+                    .map_err(db_err("add analysis.source_mtime"))?;
+            }
 
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
@@ -513,11 +532,156 @@ impl Db {
         row.ok_or_else(|| AppError::operation("This photograph is no longer in the library"))
     }
 
+    /// Persist one analyzed photo's metrics (Sprint 4). Idempotent by
+    /// `photo_id` (the analysis PK) — re-analysis overwrites the row, bumps
+    /// `analyzed_at`, and records the `source_mtime` the values were computed
+    /// from so the next run can skip unchanged files.
+    pub fn upsert_analysis(
+        &self,
+        photo_id: i64,
+        m: &crate::analysis::metrics::Metrics,
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO analysis (
+                photo_id, sharpness, brightness, contrast, saturation,
+                highlight_clipping, shadow_clipping, is_monochrome, is_dark, is_bright,
+                algorithm_version, analyzed_at, source_mtime
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+             ON CONFLICT(photo_id) DO UPDATE SET
+                sharpness = excluded.sharpness,
+                brightness = excluded.brightness,
+                contrast = excluded.contrast,
+                saturation = excluded.saturation,
+                highlight_clipping = excluded.highlight_clipping,
+                shadow_clipping = excluded.shadow_clipping,
+                is_monochrome = excluded.is_monochrome,
+                is_dark = excluded.is_dark,
+                is_bright = excluded.is_bright,
+                algorithm_version = excluded.algorithm_version,
+                analyzed_at = excluded.analyzed_at,
+                source_mtime = excluded.source_mtime",
+            params![
+                photo_id,
+                m.sharpness,
+                m.brightness,
+                m.contrast,
+                m.saturation,
+                m.highlight_clipping,
+                m.shadow_clipping,
+                i64::from(m.is_monochrome),
+                i64::from(m.is_dark),
+                i64::from(m.is_bright),
+                ANALYSIS_ALGORITHM_VERSION,
+                crate::time::now_utc(),
+                source_mtime,
+            ],
+        )
+        .map_err(db_err("upsert_analysis"))?;
+        Ok(())
+    }
+
+    /// Photos still needing analysis: decodable pixels, and either no row yet,
+    /// a row from an older algorithm, or a file whose mtime changed after the
+    /// row was written. Order is stable (capture time, then id) so the UI and
+    /// a resumed run see the same sequence.
+    pub fn analysis_queue(&self, extensions: &[&str]) -> AppResult<Vec<AnalysisWork>> {
+        let conn = self.lock()?;
+        let exts: Vec<String> = extensions.iter().map(|s| s.to_string()).collect();
+        // ?1 = current algorithm version, ?2.. = the decodable extension list.
+        let placeholders = (2..=exts.len() + 1)
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut sql = String::from(
+            "SELECT p.id, p.path, p.file_mtime, p.filename
+             FROM photos p
+             LEFT JOIN analysis a ON a.photo_id = p.id
+             WHERE p.extension IN (",
+        );
+        sql.push_str(&placeholders);
+        sql.push_str(
+            ") AND (
+                 a.photo_id IS NULL
+                 OR a.algorithm_version < ?1
+                 OR a.source_mtime IS NOT p.file_mtime)
+             ORDER BY p.capture_datetime IS NULL ASC, p.capture_datetime ASC, p.id ASC",
+        );
+        let mut stmt = conn.prepare(&sql).map_err(db_err("prepare analysis_queue"))?;
+        let mut params: Vec<Box<dyn rusqlite::ToSql>> =
+            vec![Box::new(ANALYSIS_ALGORITHM_VERSION)];
+        for e in &exts {
+            params.push(Box::new(e.clone()));
+        }
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
+        let rows = stmt
+            .query_map(refs.as_slice(), |r| {
+                Ok(AnalysisWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    file_mtime: r.get(2)?,
+                    filename: r.get(3)?,
+                })
+            })
+            .map_err(db_err("query analysis_queue"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read analysis row"))?);
+        }
+        Ok(out)
+    }
+
+    /// (decodable photos, analyzed-of-them) for the "Analyzed N of M" status
+    /// line and the analyze button's enablement.
+    pub fn analysis_progress_counts(&self, extensions: &[&str]) -> AppResult<(i64, i64)> {
+        let conn = self.lock()?;
+        let exts: Vec<String> = extensions.iter().map(|s| s.to_string()).collect();
+        let placeholders = (1..=exts.len())
+            .map(|i| format!("?{}", i))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut sql = String::from("SELECT COUNT(*) FROM photos p WHERE p.extension IN (");
+        sql.push_str(&placeholders);
+        sql.push_str(")");
+        let mut stmt = conn.prepare(&sql).map_err(db_err("prepare decodable count"))?;
+        let refs: Vec<Box<dyn rusqlite::ToSql>> =
+            exts.iter().map(|e| Box::new(e.clone()) as Box<dyn rusqlite::ToSql>).collect();
+        let rrefs: Vec<&dyn rusqlite::ToSql> = refs.iter().map(|b| b.as_ref()).collect();
+        let decodable: i64 = stmt
+            .query_row(rrefs.as_slice(), |r| r.get(0))
+            .map_err(db_err("count decodable"))?;
+
+        let mut sql2 = String::from(
+            "SELECT COUNT(*) FROM photos p JOIN analysis a ON a.photo_id = p.id
+             WHERE p.extension IN (",
+        );
+        sql2.push_str(&placeholders);
+        sql2.push_str(")");
+        let mut stmt2 = conn.prepare(&sql2).map_err(db_err("prepare analyzed count"))?;
+        let analyzed: i64 = stmt2
+            .query_row(rrefs.as_slice(), |r| r.get(0))
+            .map_err(db_err("count analyzed"))?;
+        Ok((decodable, analyzed))
+    }
+
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
         self.conn
             .lock()
             .map_err(|e| AppError::Database(format!("database lock poisoned: {e}")))
     }
+}
+
+/// One queued unit of analysis work: a decodable photo whose row is missing,
+/// stale (older algorithm), or computed from a different file mtime.
+#[derive(Debug, Clone)]
+pub struct AnalysisWork {
+    pub photo_id: i64,
+    pub path: String,
+    /// mtime recorded when the file was indexed; compared against the row's
+    /// `source_mtime` for incremental re-analysis.
+    pub file_mtime: Option<String>,
+    pub filename: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

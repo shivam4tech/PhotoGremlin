@@ -16,8 +16,11 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
 - v4: file_operations audit log
 - v5: partial unique index `sessions(root_path) WHERE root_path IS NOT NULL`
   — one session per imported folder (manual sessions keep `root_path` NULL)
+- v6: `analysis.source_mtime TEXT` (NULL on pre-v6 rows) — the source file
+  mtime each analysis row was computed from (idempotency check, see below);
+  added via `ALTER TABLE`, guarded by a `PRAGMA table_info` probe
 
-## Tables (as of Sprint 1 — schema v1–v4)
+## Tables (schema v1–v6)
 
 ### sessions
 A shoot or imported body of work.
@@ -71,12 +74,22 @@ One row per analyzed photo (`photo_id` PK, FK cascade).
 
 sharpness, brightness, contrast, saturation (0–100), highlight_clipping,
 shadow_clipping (percent), is_monochrome/is_dark/is_bright (0/1),
-face_count, smile_count (nullable until local AI runs), perceptual_hash
-(hex), algorithm_version (INTEGER, see below), analyzed_at.
+face_count, smile_count (nullable until local AI runs, Sprint 9),
+perceptual_hash (hex, Sprint 8), algorithm_version (INTEGER, see below),
+analyzed_at, source_mtime (v6: RFC3339 mtime of the file the row was
+computed from; NULL on pre-v6 rows).
 
-**Versioning rule:** `algorithm_version` records which math produced the row
-(`ANALYSIS_ALGORITHM_VERSION` constant, currently 1). If the constant is
-bumped, the app can offer to re-analyze rows whose version is stale. Scores
+**Versioning + incremental rule:** `algorithm_version` records which math
+produced the row (`ANALYSIS_ALGORITHM_VERSION`, currently 1); bumping it
+makes every stale row re-analyzable. On top of that, `source_mtime` (v6)
+gives per-file incrementality: `analysis_queue` selects a photo iff it has
+no row, `algorithm_version` is older than the current constant, or
+`source_mtime IS NOT file_mtime` (the `IS NOT` is NULL-safe: a pre-v6 row
+and a never-stat'd file compare "equal"). A re-scan refreshes
+`photos.file_mtime`, so a file that changed on disk is picked up by the
+next analysis pass automatically. `upsert_analysis` updates only the columns
+the analysis pass owns — it never clobbers perceptual_hash (Sprint 8) or
+face/smile columns (Sprint 9) when it re-measures brightness etc. Scores
 are normalized 0–100 so filters/UI stay stable across versions.
 
 ### collections / collection_photos
@@ -103,7 +116,7 @@ Key/value for application state (e.g. `active_folder`).
 ### schema_version
 `version`, `applied_at`.
 
-## Query surface (as of Sprint 3)
+## Query surface (as of Sprint 4)
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
   `list_sessions` — scanner ingest (Sprint 2).
@@ -114,6 +127,12 @@ Key/value for application state (e.g. `active_folder`).
 - `get_photo_full(id)` — one photo with its `analysis` row via `LEFT JOIN`
   (analysis fields are `NULL`/`false` until the analysis pass runs), used by
   the viewer's metadata panel.
+- `analysis_queue(extensions)` — photos still needing analysis (left join,
+  NULL-safe mtime comparison, capture-time ordering, see rule above).
+- `upsert_analysis(photo_id, metrics, source_mtime)` — idempotent by
+  `photo_id`; updates only analysis-owned columns.
+- `analysis_progress_counts(extensions)` — (decodable photos, analyzed of
+  them) for the status line.
 
 ## Conventions
 

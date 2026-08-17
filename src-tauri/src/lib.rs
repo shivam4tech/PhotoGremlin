@@ -4,6 +4,7 @@
 //! (scanning, analysis, filtering, statistics) runs locally on the user's
 //! machine.
 
+pub mod analysis;
 pub mod commands;
 pub mod database;
 pub mod error;
@@ -47,6 +48,7 @@ pub fn run() {
                 db,
                 paths: paths.clone(),
                 scan: Arc::new(Mutex::new(None)),
+                analysis: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
                 )),
@@ -62,6 +64,8 @@ pub fn run() {
             commands::get_active_folder,
             commands::start_scan,
             commands::stop_scan,
+            commands::start_analysis,
+            commands::stop_analysis,
             commands::list_sessions,
             commands::list_photos,
             commands::get_photo_full,

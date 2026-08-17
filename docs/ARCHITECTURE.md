@@ -29,10 +29,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
 - `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
-  scan-job slot), shared via Tauri's managed state. Commands take
-  `State<AppState>`. The scan slot holds the live `ScanJob { running, cancel }`
-  Arcs: a claim-and-cancel mechanism shared between `start_scan`, `stop_scan`
-  and the background task.
+  scan-job slot + the analysis-job slot), shared via Tauri's managed state.
+  Commands take `State<AppState>`. Each slot holds the live
+  `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared between
+  `start_*`/`stop_*` and the background task (scan and analysis are separate
+  slots; the UI keeps them mutually exclusive).
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
@@ -51,6 +52,19 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
   (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
   the `State` guard before awaiting — Tauri command futures must be `Send`).
+- `analysis/` (Sprint 4) — local image analysis. `metrics.rs` holds pure,
+  Tauri/I-O-free math on an `RgbImage` (Rec.709 luma → one 256-bin histogram
+  pass yields brightness/contrast/clipping/percentiles; per-pixel saturation;
+  2× monochrome gates; 4-neighbor Laplacian variance → sigmoid-scaled
+  sharpness). All constants are pinned and documented with calibration notes
+  (see IMAGE_ANALYSIS.md). `mod.rs` runs the pass: `analysis_queue` →
+  round-robin slices to `ANALYSIS_WORKERS` std threads → bounded decode at
+  `WORKING_MAX_SIDE` → measure → `upsert_analysis` → per-item progress.
+  Cancellation is cooperative and checked per item.
+- `commands/analysis.rs` — `start_analysis` (claims the analysis slot,
+  `spawn_blocking`s the pass, returns immediately) / `stop_analysis`;
+  `analysis-progress` + `analysis-complete` events carry progress and the
+  `AnalysisSummary { analyzed, failed, cancelled, elapsed_ms, errors }`.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
@@ -76,13 +90,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 
 ## Concurrency model
 
-- Tauri runs commands on its thread pool. Pattern in use (scans, Sprint 2):
-  the command claims a single job slot in `AppState`, spawns the CPU/IO work
-  via `tauri::async_runtime::spawn_blocking`, and returns immediately.
-  Completion + summary are pushed as IPC events (`scan-progress`,
-  `scan-complete`). Analysis and file ops (Sprints 4–7) follow the same
-  shape, with bounded worker counts (decode/analyze at most a handful of
-  full-res images in memory at once).
+- Tauri runs commands on its thread pool. Pattern in use (scans Sprint 2,
+  analysis Sprint 4): the command claims a single job slot in `AppState`,
+  spawns the CPU/IO work via `tauri::async_runtime::spawn_blocking`, and
+  returns immediately. Completion + summary are pushed as IPC events
+  (`scan-progress`/`scan-complete`, `analysis-progress`/`analysis-complete`).
+  The analysis pass runs `ANALYSIS_WORKERS = 3` std threads decoding at a
+  bounded working resolution (at most a handful of images in memory at
+  once); file ops (Sprint 7) follow the same shape.
 - The UI always stays responsive: nothing blocks on the webview thread, and
   progress events keep the spinner honest.
 - SQLite: one writer at a time (the Mutex). Writes are incremental per photo,

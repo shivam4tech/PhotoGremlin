@@ -22,14 +22,28 @@ Per-sprint coverage (✓ = in place today):
   portrait 480×640→256×341); full `get()` lifecycle — miss→generate→hit with
   identical bytes, unknown id → friendly "no longer in the library" error;
   missing file → friendly error.
-- Analysis (Sprint 4): each metric on **synthetic images** —
-  - generated in temp dirs with the `image` crate (gradients, noise,
-    patterns), never shipping real photos in the repo.
-  - bright gradient → high brightness; dark → low; saturated magenta grid →
-    high sat; gray → monochrome + low sat; white patch → highlight clipping
-    > 0; black patch → shadow clipping.
-- Sharpness (Sprint 4): sharp synthetic pattern > blurred pattern, both in
-  0–100 range and monotonic in expected direction.
+- Analysis metrics (Sprint 4): each metric on **synthetic images** built
+  in-memory with the `image` crate (never shipping real photos in the repo)
+  ✓:
+  - Rec.709 luma sanity (pure R/G/B/white/black);
+  - solid grays → expected brightness (±0.5) and the 35/65 dark/bright
+    flags;
+  - sat extremes: magenta → 100, gray → 0; monochrome gating: pure gray and
+    near-gray flagged, color not, and the faded case that passes the sat
+    gate but fails the channel-similarity gate;
+  - clipping: half-white image ≈ 50% highlight, half-black ≈ 50% shadow,
+    mid-gray → 0/0;
+  - sharpness: 8×8 checkerboard ≫ linear ramp (Laplacian of a ramp ≈ 0),
+    both in 0–100; sigmoid scale sane + monotonic;
+  - contrast: striped high-contrast ≫ 4-level band, both in 0–100;
+  - degenerate 1×1/2×2 images score 0 sharpness without panicking.
+- Analysis pipeline (Sprint 4, integration `tests/analysis_integration.rs`)
+  ✓: scan a synthetic shoot → every decodable gets a version-1 row with
+  `source_mtime`, RAW gets none, values order sensibly (bright > dark,
+  sharp ≫ smooth); a second run is a byte-identical no-op; touching one
+  file's mtime + re-scan re-analyzes exactly that one; a deleted file is a
+  friendly per-file failure that names it; cancel-before-start measures
+  nothing and reports `cancelled`.
 - Filters (Sprint 5): each operator against in-memory rows; unknown field →
   validation error; SQL values always bound (no injection path).
 - Statistics (Sprint 6): period resolution (today/week/month/year/custom/all

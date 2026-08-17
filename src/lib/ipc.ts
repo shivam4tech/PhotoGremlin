@@ -26,6 +26,8 @@ export const api = {
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),
   startScan: (path: string): Promise<void> => invoke("start_scan", { path }),
   stopScan: (): Promise<boolean> => invoke("stop_scan"),
+  startAnalysis: (): Promise<void> => invoke("start_analysis"),
+  stopAnalysis: (): Promise<boolean> => invoke("stop_analysis"),
   listPhotos: (offset: number, limit: number): Promise<PhotoPage> =>
     invoke("list_photos", { offset, limit }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
