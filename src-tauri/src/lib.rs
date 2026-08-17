@@ -10,10 +10,11 @@ pub mod error;
 pub mod events;
 mod logging;
 pub mod paths;
+pub mod scanner;
 pub mod state;
 pub mod time;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::paths::AppPaths;
 use tauri::Manager;
@@ -41,7 +42,11 @@ pub fn run() {
             );
             db.migrate().expect("could not migrate schema");
 
-            app.manage(crate::state::AppState { db, paths });
+            app.manage(crate::state::AppState {
+                db,
+                paths,
+                scan: Arc::new(Mutex::new(None)),
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +56,9 @@ pub fn run() {
             commands::pick_folder,
             commands::set_active_folder,
             commands::get_active_folder,
+            commands::start_scan,
+            commands::stop_scan,
+            commands::list_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PhotoGremlin");

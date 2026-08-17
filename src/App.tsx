@@ -2,7 +2,8 @@ import { useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { useAppStore } from "@/stores/appStore";
-import { api, toErrorMessage } from "@/lib/ipc";
+import { api, onProgress, toErrorMessage } from "@/lib/ipc";
+import type { ProgressPayload, ScanCompletePayload } from "@/types/api";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
@@ -32,6 +33,43 @@ export default function App() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Scan progress/completion stream in from the backend at all times.
+  useEffect(() => {
+    const unlisteners = (async () => {
+      const state = () => useAppStore.getState();
+      const up = await onProgress<ProgressPayload>("scan-progress", (p) => {
+        state().setProgress(p);
+        state().setScanning(true);
+      });
+      const uc = await onProgress<ScanCompletePayload>("scan-complete", (p) => {
+        const s = state();
+        s.setScanning(false);
+        s.setProgress(null);
+        if (p.summary) {
+          const msg = p.summary.cancelled
+            ? `Scan stopped — indexed ${p.summary.indexed.toLocaleString()} of ${p.summary.total_files.toLocaleString()} files.`
+            : `Scan complete — ${p.summary.indexed.toLocaleString()} photographs indexed into session “${p.summary.session_name}” in ${(p.summary.elapsed_ms / 1000).toFixed(1)}s${p.summary.ignored ? `, ${p.summary.ignored.toLocaleString()} non-photo files ignored` : ""}.`;
+          s.setScanSummary(p.summary);
+          s.setNotice(msg);
+          s.setError(null);
+        } else {
+          s.setScanSummary(null);
+          s.setError(p.error ?? "Scan failed.");
+        }
+        void s.refreshStatus();
+      });
+      return [up, uc];
+    })();
+
+    let alive = true;
+    unlisteners.then((list) => {
+      if (!alive) list.forEach((u) => u());
+    });
+    return () => {
+      alive = false;
     };
   }, []);
 

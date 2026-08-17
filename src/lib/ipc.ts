@@ -7,7 +7,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
   DbStatus,
-  ProgressPayload,
 } from "@/types/api";
 
 export const api = {
@@ -21,15 +20,29 @@ export const api = {
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),
+  startScan: (path: string): Promise<void> => invoke("start_scan", { path }),
+  stopScan: (): Promise<boolean> => invoke("stop_scan"),
+  listSessions: () =>
+    invoke<
+      {
+        id: number;
+        name: string;
+        root_path: string | null;
+        start_time: string | null;
+        end_time: string | null;
+        photo_count: number;
+        created_at: string;
+      }[]
+    >("list_sessions"),
 };
 
 export type { UnlistenFn };
 
-export function onProgress(
+export function onProgress<T>(
   event: string,
-  handler: (p: ProgressPayload) => void,
+  handler: (p: T) => void,
 ): Promise<UnlistenFn> {
-  return listen<ProgressPayload>(event, (e) => handler(e.payload));
+  return listen<T>(event, (e) => handler(e.payload));
 }
 
 export class IpcError extends Error {

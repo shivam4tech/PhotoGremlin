@@ -98,6 +98,24 @@ export interface ProgressPayload {
   current: string | null;
 }
 
+export interface ScanSummary {
+  session_id: number;
+  session_name: string;
+  total_files: number;
+  indexed: number;
+  ignored: number;
+  /** Friendly per-file problems (capped at 20). */
+  errors: string[];
+  cancelled: boolean;
+  elapsed_ms: number;
+}
+
+/** `scan-complete` event payload: exactly one of the two is set. */
+export interface ScanCompletePayload {
+  summary: ScanSummary | null;
+  error: string | null;
+}
+
 /**
  * Structured filter — the engine's input. `conditions` are ANDed.
  * The Rust backend parses this JSON; keep field names stable.
@@ -136,6 +154,16 @@ export interface SimilarityGroup {
   id: number;
   hash: string;
   group_type: string;
+  photo_count: number;
+  created_at: string;
+}
+
+export interface SessionRow {
+  id: number;
+  name: string;
+  root_path: string | null;
+  start_time: string | null;
+  end_time: string | null;
   photo_count: number;
   created_at: string;
 }

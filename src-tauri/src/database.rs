@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -178,6 +178,14 @@ impl Db {
             )
             .map_err(db_err("create file_operations"))?;
 
+            // v5: one session per imported folder (root_path). Manual sessions
+            // keep root_path NULL (multiple allowed).
+            conn.execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_root
+                 ON sessions(root_path) WHERE root_path IS NOT NULL;",
+            )
+            .map_err(db_err("create sessions root index"))?;
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -251,6 +259,150 @@ impl Db {
         Ok(v)
     }
 
+    /// Upsert a session by its import root. Returns the session id.
+    /// One session per folder (enforced by the v5 partial unique index);
+    /// a re-scan of the same folder keeps the same session (name refreshes).
+    pub fn upsert_session(
+        &self,
+        name: &str,
+        root_path: Option<&str>,
+    ) -> AppResult<i64> {
+        let conn = self.lock()?;
+        if let Some(root) = root_path {
+            let existing: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM sessions WHERE root_path = ?1",
+                    params![root],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(db_err("find session"))?;
+            if let Some(id) = existing {
+                conn.execute(
+                    "UPDATE sessions SET name = ?2 WHERE id = ?1",
+                    params![id, name],
+                )
+                .map_err(db_err("refresh session name"))?;
+                return Ok(id);
+            }
+        }
+        let name_owned = name.to_string();
+        let root_owned = root_path.map(|s| s.to_string());
+        conn.execute(
+            "INSERT INTO sessions (name, root_path, created_at) VALUES (?1, ?2, ?3)",
+            params![name_owned, root_owned, crate::time::now_utc()],
+        )
+        .map_err(db_err("insert session"))?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn session_by_id(&self, id: i64) -> AppResult<Option<SessionRow>> {
+        let conn = self.lock()?;
+        let row: Option<SessionRow> = conn
+            .query_row(
+                "SELECT id, name, root_path, start_time, end_time, photo_count, created_at
+                 FROM sessions WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(SessionRow {
+                        id: r.get(0)?,
+                        name: r.get(1)?,
+                        root_path: r.get(2)?,
+                        start_time: r.get(3)?,
+                        end_time: r.get(4)?,
+                        photo_count: r.get(5)?,
+                        created_at: r.get(6)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_err("session by id"))?;
+        Ok(row)
+    }
+
+    pub fn list_sessions(&self) -> AppResult<Vec<SessionRow>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, root_path, start_time, end_time, photo_count, created_at
+                 FROM sessions ORDER BY created_at DESC",
+            )
+            .map_err(db_err("prepare sessions"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SessionRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    root_path: r.get(2)?,
+                    start_time: r.get(3)?,
+                    end_time: r.get(4)?,
+                    photo_count: r.get(5)?,
+                    created_at: r.get(6)?,
+                })
+            })
+            .map_err(db_err("query sessions"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read session row"))?);
+        }
+        Ok(out)
+    }
+
+    /// Insert-or-update a photo by path. Re-scans refresh size/mtime and
+    /// dimensions, but never blank out values a later pipeline filled in
+    /// (COALESCE) and never rewrite `indexed_at`.
+    pub fn upsert_photo(&self, p: &PhotoUpsert) -> AppResult<i64> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO photos (path, filename, extension, size_bytes, width, height,
+                                 orientation, session_id, indexed_at, file_mtime)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+             ON CONFLICT(path) DO UPDATE SET
+               size_bytes  = excluded.size_bytes,
+               file_mtime  = excluded.file_mtime,
+               width       = COALESCE(excluded.width, photos.width),
+               height      = COALESCE(excluded.height, photos.height),
+               orientation = COALESCE(excluded.orientation, photos.orientation),
+               session_id  = COALESCE(excluded.session_id, photos.session_id)",
+            params![
+                p.path,
+                p.filename,
+                p.extension,
+                p.size_bytes,
+                p.width,
+                p.height,
+                p.orientation,
+                p.session_id,
+                crate::time::now_utc(),
+                p.file_mtime,
+            ],
+        )
+        .map_err(db_err("upsert photo"))?;
+
+        // Recover the id (last_insert_rowid() is not reliable on update).
+        let id: i64 = conn
+            .query_row(
+                "SELECT id FROM photos WHERE path = ?1",
+                params![p.path],
+                |r| r.get(0),
+            )
+            .map_err(db_err("photo id lookup"))?;
+        Ok(id)
+    }
+
+    /// Refresh a session's denormalized counters after a scan pass.
+    pub fn refresh_session_counts(&self, session_id: i64) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE sessions
+             SET photo_count = (SELECT COUNT(*) FROM photos WHERE session_id = ?1)
+             WHERE id = ?1",
+            params![session_id],
+        )
+        .map_err(db_err("refresh session counts"))?;
+        Ok(())
+    }
+
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
         self.conn
             .lock()
@@ -264,6 +416,32 @@ pub struct DbStatus {
     pub session_count: i64,
     pub analyzed_count: i64,
     pub schema_version: i64,
+}
+
+/// Inputs for a photo row upsert (scan-time fields only; EXIF fields are
+/// filled by the metadata step and must never be clobbered here).
+#[derive(Debug, Clone)]
+pub struct PhotoUpsert {
+    pub path: String,
+    pub filename: String,
+    pub extension: String,
+    pub size_bytes: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub orientation: Option<String>,
+    pub session_id: i64,
+    pub file_mtime: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SessionRow {
+    pub id: i64,
+    pub name: String,
+    pub root_path: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub photo_count: i64,
+    pub created_at: String,
 }
 
 fn db_err(context: &str) -> impl Fn(rusqlite::Error) -> AppError + 'static {

@@ -27,18 +27,29 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
-- `state.rs` — `AppState` is an `Arc` of `Db` + `AppPaths`, shared via Tauri's
-  managed state. Commands take `State<AppState>`.
+- `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + the scan-job slot),
+  shared via Tauri's managed state. Commands take `State<AppState>`.
+  The scan slot holds the live `ScanJob { running, cancel }` Arcs: a
+  claim-and-cancel mechanism shared between `start_scan`, `stop_scan` and
+  the background task.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
+- `scanner/` — recursive, two-pass folder scan (enumerate → index).
+  Tauri-free core (`run_scan(db, progress, cancel)`) so the exact pipeline
+  that ships is unit/integration-tested in `tests/scan_integration.rs` with
+  synthetic images. Classifies decodable (jpg/png/webp/tiff), RAW (indexed,
+  no pixels yet) and HEIC (indexed, placeholder preview) vs ignored; skips
+  hidden dot-directories; cancels cooperatively between files.
 - `error.rs` — one `AppError` enum. Its `Display` text is what the UI shows
   (friendly); `tracing::error!` inside constructors keeps the details in the
   local log. `From<AppError> for tauri::ipc::InvokeError` makes `Result<T,
   AppError>` a valid command return type.
-- `events.rs` — IPC event names (`scan-progress`, `analysis-progress`,
-  `db-changed`, `operation-progress`) + `ProgressPayload { total, done, stage,
-  current }`. Progress flows Rust → UI via Tauri events, never by polling.
+- `events.rs` — IPC event names (`scan-progress`, `scan-complete`,
+  `analysis-progress`, `db-changed`, `operation-progress`) +
+  `ProgressPayload { total, done, stage, current }` (stages: discovering,
+  indexing, done). Progress flows Rust → UI via Tauri events, never by
+  polling. `scan-complete` carries `ScanCompletePayload { summary?, error? }`.
 - `logging.rs` — `tracing` with a rolling daily file in the Tauri log dir
   (`<data_dir>/logs/photogremlin.<date>.log` on Linux) + console layer.
   Zero telemetry; the only sink is the local disk.
@@ -46,14 +57,17 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 
 ## Concurrency model
 
-- Tauri runs commands on its thread pool; long-running work (scans, analysis,
-  file ops — Sprints 2–7) runs as background tasks (tokio, already a
-  dependency of Tauri) fed by channels, with bounded worker counts
-  (decode/analyze at most a handful of full-res images in memory at once).
+- Tauri runs commands on its thread pool. Pattern in use (scans, Sprint 2):
+  the command claims a single job slot in `AppState`, spawns the CPU/IO work
+  via `tauri::async_runtime::spawn_blocking`, and returns immediately.
+  Completion + summary are pushed as IPC events (`scan-progress`,
+  `scan-complete`). Analysis and file ops (Sprints 4–7) follow the same
+  shape, with bounded worker counts (decode/analyze at most a handful of
+  full-res images in memory at once).
 - The UI always stays responsive: nothing blocks on the webview thread, and
   progress events keep the spinner honest.
-- SQLite: one writer at a time (the Mutex). Analysis writes batch by photo
-  after each file, so incremental results appear while the pipeline runs.
+- SQLite: one writer at a time (the Mutex). Writes are incremental per photo,
+  so results appear while the pipeline runs.
 
 ## Frontend rules
 

@@ -8,6 +8,13 @@ flaky timing.
 Per-sprint coverage (✓ = in place today):
 
 - Database: schema migration creates expected tables; migration idempotent ✓
+- Photo upserts: idempotent by path; dimensions never blanked on rescan;
+  mtime refreshed; session upsert keyed on root_path ✓
+- Scanner (Sprint 2): extension classification (all §12 formats) ✓;
+  orientation derivation ✓; full pipeline on synthetic shoots — decodables
+  get dimensions+orientation, RAW stays null, hidden dirs skipped,
+  non-photos ignored, re-scan idempotent, cancel semantics, 1,000-file scale
+  test with a time ceiling ✓
 - Analysis (Sprint 4): each metric on **synthetic images** —
   - generated in temp dirs with the `image` crate (gradients, noise,
     patterns), never shipping real photos in the repo.

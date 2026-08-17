@@ -13,6 +13,7 @@ describe("appStore", () => {
       scanning: false,
       analyzing: false,
       progress: null,
+      scanSummary: null,
       notice: null,
       error: null,
     });

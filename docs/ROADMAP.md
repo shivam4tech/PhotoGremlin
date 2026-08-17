@@ -5,7 +5,7 @@
 | # | sprint | status |
 |---|---|---|
 | 1 | Foundation — Tauri+React+Rust+SQLite shell, nav, theme, IPC, DB init, logging, errors | **done** (2026-08-17) |
-| 2 | Photo scanner + database ingestion (recursive walk, upsert, sessions, progress) | next |
+| 2 | Photo scanner + database ingestion (recursive walk, upsert, sessions, progress) | **done** (2026-08-17) |
 | 3 | Thumbnails + library grid (cache, lazy, virtualized) + viewer + metadata panel | |
 | 4 | Local image analysis (sharpness, brightness, contrast, saturation, mono, clipping) + progress | |
 | 5 | EXIF + filter engine (all filter areas, AND composition) | |
