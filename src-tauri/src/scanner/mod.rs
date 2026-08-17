@@ -200,7 +200,7 @@ pub fn run_scan(
             width,
             height,
             orientation: derive_orientation(width, height).map(str::to_string),
-            session_id,
+            session_id: Some(session_id),
             file_mtime: mtime_iso(&meta),
         })?;
         indexed += 1;
@@ -305,7 +305,7 @@ mod tests {
             width: w,
             height: w,
             orientation: derive_orientation(w, w).map(str::to_string),
-            session_id: s,
+            session_id: Some(s),
             file_mtime: Some(mtime.into()),
         };
 

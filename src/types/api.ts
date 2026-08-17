@@ -33,7 +33,74 @@ export interface DbStatus {
   analyzed_count: number;
   /** Photos not yet read by the EXIF/metadata pass. */
   metadata_pending: number;
+  /** Culling state (Sprint 7): photos marked selected / rejected. */
+  selected_count: number;
+  rejected_count: number;
   schema_version: number;
+}
+
+// --- File operations (Sprint 7) -------------------------------------------
+
+/** Culling state for one photograph. */
+export interface SelectionRow {
+  photo_id: number;
+  state: "selected" | "rejected";
+  updated_at: string;
+}
+
+/** One item in an operation plan (the preview). */
+export interface PlanItem {
+  photo_id: number;
+  source: string;
+  destination: string | null;
+  note: string | null;
+  ok: boolean;
+}
+
+/** A full operation plan — everything the UI previews before confirming. */
+export interface FileOpPlan {
+  op: "rename" | "move" | "copy" | "trash";
+  items: PlanItem[];
+  /** In-plan collision (two sources onto one name) aborts the whole plan. */
+  aborted: boolean;
+  /** Destination directory that does not exist yet (move/copy). */
+  will_create_dir: string | null;
+  /** Destructive ops (trash) require explicit confirmation. */
+  destructive: boolean;
+}
+
+export interface OperationItemResult {
+  source: string;
+  destination: string | null;
+  status: "done" | "failed" | "skipped" | "cancelled";
+  detail: string | null;
+}
+
+export interface OperationSummary {
+  op: string;
+  total: number;
+  processed: number;
+  succeeded: number;
+  failed: number;
+  cancelled: boolean;
+  elapsed_ms: number;
+  items: OperationItemResult[];
+}
+
+export interface OperationCompletePayload {
+  summary: OperationSummary | null;
+  error: string | null;
+}
+
+/** One row of the file-operations audit log. */
+export interface FileOpRow {
+  id: number;
+  op_type: string;
+  source_path: string;
+  dest_path: string | null;
+  status: string;
+  detail: string | null;
+  created_at: string;
 }
 
 export type Orientation = "landscape" | "portrait" | "square";

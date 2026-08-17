@@ -8,6 +8,7 @@ pub const METADATA_PROGRESS: &str = "metadata-progress";
 pub const METADATA_COMPLETE: &str = "metadata-complete";
 pub const DB_CHANGED: &str = "db-changed";
 pub const OPERATION_PROGRESS: &str = "operation-progress";
+pub const OPERATION_COMPLETE: &str = "operation-complete";
 
 /// Payload shape shared by scan/analysis/operation progress events.
 #[derive(Clone, serde::Serialize)]

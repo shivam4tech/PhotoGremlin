@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import type { PhotoSummary } from "@/types/api";
+import type { SelectionState } from "@/stores/appStore";
 
 /**
  * Formats for which the Rust core deliberately does not generate previews
@@ -32,9 +33,21 @@ export function isPreviewable(extension: string): boolean {
 export function PhotoTile({
   photo,
   onOpen,
+  selectionMode = false,
+  selection = null,
+  onKeep,
+  onReject,
+  onClear,
 }: {
   photo: PhotoSummary;
   onOpen: (id: number) => void;
+  /** Culling mode (Sprint 7): show keep/reject controls on the tile. */
+  selectionMode?: boolean;
+  /** Current culling state of this photo, if any. */
+  selection?: SelectionState | null;
+  onKeep?: (id: number) => void;
+  onReject?: (id: number) => void;
+  onClear?: (id: number) => void;
 }) {
   const [state, setState] = useState<TileState>({ kind: "loading" });
 
@@ -60,24 +73,55 @@ export function PhotoTile({
 
   const dims = photo.width && photo.height ? `${photo.width}×${photo.height}` : photo.extension.toUpperCase();
 
+  const tileClass =
+    `tile` +
+    (state.kind === "placeholder" || state.kind === "error" ? " tile-muted" : "") +
+    (selection === "selected" ? " tile-kept" : "") +
+    (selection === "rejected" ? " tile-rejected" : "");
+
   return (
-    <button
-      className={`tile${state.kind === "placeholder" || state.kind === "error" ? " tile-muted" : ""}`}
-      onClick={() => onOpen(photo.id)}
-      title={photo.filename}
-    >
-      {state.kind === "loading" && <div className="tile-skeleton" aria-label="Generating preview" />}
-      {state.kind === "ok" && (
-        <img className="tile-img" src={state.url} alt={photo.filename} width={state.width} height={state.height} />
-      )}
-      {state.kind === "placeholder" && <div className="tile-ph">{state.msg}</div>}
-      {state.kind === "error" && <div className="tile-ph tile-ph-err">{state.msg}</div>}
-      <span className="tile-label">
-        <span className="tile-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {photo.filename}
+    <div className={tileClass}>
+      <button
+        className="tile-open"
+        onClick={() => {
+          if (!selectionMode) onOpen(photo.id);
+        }}
+        disabled={selectionMode}
+        title={photo.filename}
+      >
+        {state.kind === "loading" && <div className="tile-skeleton" aria-label="Generating preview" />}
+        {state.kind === "ok" && (
+          <img className="tile-img" src={state.url} alt={photo.filename} width={state.width} height={state.height} />
+        )}
+        {state.kind === "placeholder" && <div className="tile-ph">{state.msg}</div>}
+        {state.kind === "error" && <div className="tile-ph tile-ph-err">{state.msg}</div>}
+        <span className="tile-label">
+          <span className="tile-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {photo.filename}
+          </span>
+          <span className="tile-dim mono">{dims}</span>
         </span>
-        <span className="tile-dim mono">{dims}</span>
-      </span>
-    </button>
+      </button>
+      {selectionMode && (
+        <span className="tile-select">
+          <button
+            className={`tile-sel-btn${selection === "selected" ? " is-on" : ""}`}
+            title="Keep (select)"
+            aria-label="Keep"
+            onClick={() => (selection === "selected" ? onClear?.(photo.id) : onKeep?.(photo.id))}
+          >
+            ✓
+          </button>
+          <button
+            className={`tile-sel-btn tile-sel-reject${selection === "rejected" ? " is-on" : ""}`}
+            title="Reject"
+            aria-label="Reject"
+            onClick={() => (selection === "rejected" ? onClear?.(photo.id) : onReject?.(photo.id))}
+          >
+            ✕
+          </button>
+        </span>
+      )}
+    </div>
   );
 }

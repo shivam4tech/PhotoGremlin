@@ -24,8 +24,8 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   and makes re-runs cheap (one read per file in v0.1); added via
   `ALTER TABLE`, guarded by the same `PRAGMA table_info` helper as v6
 - v8: `selections` table — explicit culling state (one row per photo:
-  `selected` | `rejected`) the statistics engine reads for the selection
-  ratio (the selection UI lands in Sprint 7)
+  `selected` | `rejected`) the statistics engine reads for the selection ratio
+  (written by the Sprint 7 culling UI via `set_selections`/`clear_selections`)
 
 ## Tables (schema v1–v8)
 
@@ -148,7 +148,7 @@ Key/value for application state (e.g. `active_folder`).
 ### schema_version
 `version`, `applied_at`.
 
-## Query surface (as of Sprint 6)
+ ## Query surface (as of Sprint 7) 
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
   `refresh_all_sessions_times` / `list_sessions` — scanner ingest (Sprint 2).
@@ -181,8 +181,28 @@ Key/value for application state (e.g. `active_folder`).
   (`exif_at IS NULL`), in capture-time order, carrying current dimensions.
 - `upsert_exif(photo_id, record)` — merge one file's EXIF extraction
   (`COALESCE`, GPS 0→1 only, stamps `exif_at`); see the photos section.
-- `status()` — returns `metadata_pending` (count of `exif_at IS NULL`)
-  alongside the existing counts.
+- `status()` — returns `metadata_pending` (count of `exif_at IS NULL`),
+  `selected_count` / `rejected_count` (Sprint 7 culling totals), alongside the
+  existing counts.
+
+### File operations (Sprint 7)
+
+- `update_photo_path(id, path, filename, size_bytes, file_mtime)` — re-point a
+  photo after a successful rename/move (pixels unchanged, so the analysis row
+  stays valid; `file_mtime` is refreshed for the incremental rule).
+- `delete_photos(ids)` — remove rows after a successful trash; FK cascade
+  removes their analysis + selection rows.
+- `record_file_op(op_type, source_path, dest_path, status, detail)` — append
+  one row to the `file_operations` audit log (the v4 table, written from Sprint
+  7 on). Every executed/attempted item is recorded with `done`/`failed` + a
+  reason.
+- `recent_file_ops(limit)` — audit log, newest first (limit clamped 1–500).
+- `set_selection(photo_id, state)` / `set_selections(ids, state)` /
+  `clear_selection(id)` / `clear_selections(ids)` — culling state on the v8
+  `selections` table; `state` is a closed set (`selected`/`rejected`), anything
+  else is a friendly validation error.
+- `list_selections(limit)` — the current culling map (id → state), capped at
+  20,000.
 
 ## Conventions
 

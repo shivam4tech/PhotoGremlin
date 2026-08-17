@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
 import { useFilteredPhotos } from "@/hooks/useFilteredPhotos";
@@ -8,6 +8,7 @@ import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
+import { FileOpsPanel } from "@/features/fileops/FileOpsPanel";
 import { draftToFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
 import type { FilterCondition } from "@/types/api";
@@ -22,6 +23,10 @@ export function LibraryView() {
   const analysisSummary = useAppStore((s) => s.analysisSummary);
   const readingMetadata = useAppStore((s) => s.readingMetadata);
   const metadataSummary = useAppStore((s) => s.metadataSummary);
+  const operating = useAppStore((s) => s.operating);
+  const selections = useAppStore((s) => s.selections);
+  const selectionMode = useAppStore((s) => s.selectionMode);
+  const libraryVersion = useAppStore((s) => s.libraryVersion);
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +36,17 @@ export function LibraryView() {
   // consumes (and saved views will store).
   const [filterDraft, setFilterDraft] = useState<FilterCondition[]>([]);
 
-  // Re-fetch the index whenever a scan (re)completes for this folder.
+  // Re-fetch the index when a scan completes, a file operation changed the
+  // files on disk, or the folder changed.
   const refreshKey = useMemo(
-    () => (scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"),
-    [scanSummary],
+    () => `${scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"}:${libraryVersion}`,
+    [scanSummary, libraryVersion],
   );
+
+  // Load persisted culling state once per library so tiles render their marks.
+  useEffect(() => {
+    if (selectionMode) void store().loadSelections();
+  }, [selectionMode, refreshKey]);
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
   const filterJson = useMemo(() => JSON.stringify(draftToFilter(filterDraft)), [filterDraft]);
   const photos = useFilteredPhotos(libraryHasPhotos, filterJson, refreshKey);
@@ -149,6 +160,27 @@ export function LibraryView() {
 
   const hasPhotos = photos.total > 0;
 
+  // Culling: ids marked "selected" drive the file-operations panel.
+  const selectedIds = useMemo(
+    () => Object.keys(selections).filter((k) => selections[Number(k)] === "selected").map(Number),
+    [selections],
+  );
+  const rejectedCount = useMemo(
+    () => Object.values(selections).filter((s) => s === "rejected").length,
+    [selections],
+  );
+  const pageIds = useMemo(() => photos.photos.map((p) => p.id), [photos.photos]);
+
+  function keep(id: number) {
+    store().setSelection(id, "selected");
+  }
+  function reject(id: number) {
+    store().setSelection(id, "rejected");
+  }
+  function clearSel(id: number) {
+    store().setSelection(id, null);
+  }
+
   return (
     <div className="library">
       <div className="library-toolbar">
@@ -191,6 +223,14 @@ export function LibraryView() {
             Stop analysis
           </button>
         )}
+        <button
+          className={`btn btn-sm${selectionMode ? " btn-primary" : ""}`}
+          onClick={() => store().setSelectionMode(!selectionMode)}
+          disabled={anyPassRunning || operating || photos.total === 0}
+          title="Cull the library: mark photographs to keep or reject, then rename, move, copy or trash them."
+        >
+          {selectionMode ? "Done culling" : "Cull"}
+        </button>
       </div>
 
       <FilterBar draft={filterDraft} onChange={setFilterDraft} disabled={anyPassRunning} />
@@ -281,6 +321,34 @@ export function LibraryView() {
         </div>
       ) : null}
 
+      {selectionMode && hasPhotos && (
+        <div className="cullbar">
+          <span>
+            {selectedIds.length.toLocaleString()} keep{selectedIds.length === 1 ? "" : "s"} · {rejectedCount.toLocaleString()} reject{rejectedCount === 1 ? "" : "ed"}
+          </span>
+          <span className="spacer" />
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => store().setSelectionsBulk(pageIds, "selected")}
+            disabled={operating || pageIds.length === 0}
+            title="Mark every photograph on this page to keep"
+          >
+            Keep all shown
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => store().setSelectionsBulk(pageIds, null)}
+            disabled={operating || pageIds.length === 0}
+          >
+            Clear shown
+          </button>
+        </div>
+      )}
+
+      {selectionMode && selectedIds.length > 0 && (
+        <FileOpsPanel photoIds={selectedIds} />
+      )}
+
       <ErrorBanner message={error ?? photos.error} />
 
       {!libraryHasPhotos ? (
@@ -313,7 +381,17 @@ export function LibraryView() {
             <div className="library-grid-area">
               <VirtualGrid
                 itemCount={photos.photos.length}
-                render={(i) => <PhotoTile photo={photos.photos[i]} onOpen={setViewerId} />}
+                render={(i) => (
+                  <PhotoTile
+                    photo={photos.photos[i]}
+                    onOpen={setViewerId}
+                    selectionMode={selectionMode}
+                    selection={selectionMode ? selections[photos.photos[i].id] ?? null : null}
+                    onKeep={keep}
+                    onReject={reject}
+                    onClear={clearSel}
+                  />
+                )}
               />
             </div>
           )}

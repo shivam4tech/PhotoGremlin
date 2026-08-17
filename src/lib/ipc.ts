@@ -7,9 +7,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
   DbStatus,
+  FileOpPlan,
+  FileOpRow,
   PhotoFull,
   PhotoPage,
   PeriodStats,
+  SelectionRow,
   SessionMetrics,
   SessionSummary,
   SessionRow,
@@ -54,6 +57,55 @@ export const api = {
     invoke("session_summary", { sessionId }),
   compareSessions: (sessionIds: number[]): Promise<SessionMetrics[]> =>
     invoke("compare_sessions", { sessionIds }),
+
+  // File operations (Sprint 7). Plan = cheap synchronous preview; start =
+  // background execution streaming operation-progress / operation-complete.
+  planGroupRename: (
+    photoIds: number[],
+    template: string,
+    groupName: string,
+  ): Promise<FileOpPlan> =>
+    invoke("plan_group_rename", { photoIds, template, groupName }),
+  startGroupRename: (
+    photoIds: number[],
+    template: string,
+    groupName: string,
+  ): Promise<void> =>
+    invoke("start_group_rename", { photoIds, template, groupName }),
+  planMoveCopy: (
+    photoIds: number[],
+    destDir: string,
+    op: "move" | "copy",
+    onCollision: "skip" | "avoid-by-renaming",
+  ): Promise<FileOpPlan> =>
+    invoke("plan_move_copy", { photoIds, destDir, op, onCollision }),
+  startMoveCopy: (
+    photoIds: number[],
+    destDir: string,
+    op: "move" | "copy",
+    onCollision: "skip" | "avoid-by-renaming",
+  ): Promise<void> =>
+    invoke("start_move_copy", { photoIds, destDir, op, onCollision }),
+  planTrash: (photoIds: number[]): Promise<FileOpPlan> =>
+    invoke("plan_trash", { photoIds }),
+  startTrash: (photoIds: number[]): Promise<void> =>
+    invoke("start_trash", { photoIds }),
+  stopOperation: (): Promise<boolean> => invoke("stop_operation"),
+
+  // Selection (culling) state.
+  setSelection: (photoId: number, selection: "selected" | "rejected"): Promise<void> =>
+    invoke("set_selection", { photoId, selection }),
+  setSelections: (
+    photoIds: number[],
+    selection: "selected" | "rejected",
+  ): Promise<number> => invoke("set_selections", { photoIds, selection }),
+  clearSelection: (photoId: number): Promise<void> =>
+    invoke("clear_selection", { photoId }),
+  clearSelections: (photoIds: number[]): Promise<number> =>
+    invoke("clear_selections", { photoIds }),
+  listSelections: (): Promise<SelectionRow[]> => invoke("list_selections"),
+  recentFileOps: (limit: number): Promise<FileOpRow[]> =>
+    invoke("recent_file_ops", { limit }),
 };
 
 export type { UnlistenFn };
