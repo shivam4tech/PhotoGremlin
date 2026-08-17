@@ -30,12 +30,13 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
 - `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
-  scan-job slot + the analysis-job slot + the metadata-job slot + the
-  file-operation slot), shared via Tauri's managed state. Commands take
-  `State<AppState>`. Each slot holds the live `Job { running, cancel }` Arcs: a
-  claim-and-cancel mechanism shared between `start_*`/`stop_*` and the
-  background task (scan, analysis, metadata and file operations are separate
-  slots; the UI keeps them mutually exclusive).
+   scan-job slot + the analysis-job slot + the metadata-job slot + the
+   file-operation slot + the similarity slot), shared via Tauri's managed
+   state. Commands take `State<AppState>`. Each slot holds the live
+   `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared between
+   `start_*`/`stop_*` and the background task (scan, analysis, metadata, file
+   operations and similarity are separate slots; the UI keeps them mutually
+   exclusive).
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
@@ -114,9 +115,31 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   when its inputs do not exist; the UI renders that as "unavailable", never
   0. `session_summary` = the same core scoped to one session + duration;
   `compare_sessions` = up to 8 sessions on the same metric rows.
-- `commands/stats.rs` — `period_stats` (arg: `periodJson`),
-  `session_summary(sessionId)`, `compare_sessions(sessionIds)`. Synchronous
-  pure-SQL commands; no background task, no events.
+ - `commands/stats.rs` — `period_stats` (arg: `periodJson`),
+   `session_summary(sessionId)`, `compare_sessions(sessionIds)`. Synchronous
+   pure-SQL commands; no background task, no events.
+- `similarity/` (Sprint 8) — perceptual hashing + grouping, Tauri-free and
+   integration-tested (see SIMILARITY.md). `dhash64` (9×8 difference hash),
+   `hamming`, `photo_hash` (decode → grayscale → hash), `group_similar`
+   (union-find, threshold `SIMILAR_THRESHOLD = 8`, components ≥ 2),
+   `group_bursts` (capture times within `BURST_WINDOW_SECS = 3`, ≥ 2, no
+   time → never joins). `run_similarity(db, progress, cancel)` = the pass:
+   hash `phash_queue()` (incremental on `phash_source_mtime`) → group within
+   each session → `replace_similarity_groups` (atomic swap). Cancellation is
+   per-file; grouping still completes so the app ends on a consistent set.
+- `commands/similarity.rs` — `start_similarity` (claims the similarity slot,
+   `spawn_blocking`s the pass) / `stop_similarity`; `similarity-progress` +
+   `similarity-complete` events carry the `SimilaritySummary { hashed, failed,
+   similar_groups, burst_groups, elapsed_ms, cancelled }`.
+- `commands/views.rs` + `commands/collections.rs` (Sprint 8) — saved views and
+   collections over the v2/v3 tables. Views: `list_saved_views` /
+   `save_view` (validated with the grid's own filter engine before persist) /
+   `rename_saved_view` / `delete_saved_view` / `saved_view_count` (dynamic —
+   recomputes `photos_where` over the stored filter). Collections: `list_` /
+   `create_` / `rename_` / `delete_collection` (deletes membership, never
+   photos) + `add_to_collection` (idempotent, returns count added) /
+   `remove_from_collection` / `collection_photos` (paged `PhotoSummary`, the
+   same shape the grid uses). All synchronous; files are never touched.
 - `filesystem/` (Sprint 7) — rename/move/copy/trash behind the universal
   safety protocol (see FILE_OPERATIONS.md). Tauri-independent
   (`plan_rename` / `plan_move_copy` / `plan_trash` + `run_operation(db, plan,
@@ -147,13 +170,15 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `events.rs` — IPC event names (`scan-progress`, `scan-complete`,
   `analysis-progress`, `analysis-complete`, `metadata-progress`,
   `metadata-complete`, `operation-progress`, `operation-complete`,
-  `db-changed`) + `ProgressPayload { total, done, stage, current }` (stages:
-  discovering, indexing, analyzing, reading metadata, done, and the operation
-  verb rename/move/copy/trash). Progress flows Rust → UI via Tauri events,
-  never by polling. `scan-complete` / `analysis-complete` /
-  `metadata-complete` / `operation-complete` each carry `{ summary?, error? }`
-  (`operation-complete`'s summary is `OperationSummary`: per-item
-  done/failed/skipped/cancelled, capped at 500 for IPC).
+  `similarity-progress`, `similarity-complete`, `db-changed`) +
+  `ProgressPayload { total, done, stage, current }` (stages: discovering,
+  indexing, analyzing, reading metadata, hashing, grouping, done, and the
+  operation verb rename/move/copy/trash). Progress flows Rust → UI via Tauri
+  events, never by polling. `scan-complete` / `analysis-complete` /
+  `metadata-complete` / `operation-complete` / `similarity-complete` each
+  carry `{ summary?, error? }` (`operation-complete`'s summary is
+  `OperationSummary`: per-item done/failed/skipped/cancelled, capped at 500
+  for IPC; `similarity-complete`'s is `SimilaritySummary`, above).
 - `logging.rs` — `tracing` with a rolling daily file in the Tauri log dir
   (`<data_dir>/logs/photogremlin.<date>.log` on Linux) + console layer.
   Zero telemetry; the only sink is the local disk.
@@ -191,13 +216,34 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   (`features/viewer/Viewer.tsx`) loads a viewer-size thumbnail +
   `get_photo_full` for the metadata panel; ←/→ move within the loaded page,
   Esc closes.
-- Filtering (Sprint 5): the active filter is **structured data** held in the
-  Library view (`FilterCondition[]`) and rendered by
-  `features/library/FilterBar.tsx`; the pure registry + helpers live in
-  `features/library/filterFields.ts` (field/operator knowledge, chip labels,
-  condition composition) and are unit-tested in `src/tests/filterFields.test.ts`.
-  Changing the filter re-loads page 0; the exact `Filter` object is stringified
-   and sent to the engine (and is what saved views will store).
+ - Filtering (Sprint 5, hoisted to the store in Sprint 8): the active filter is
+   **structured data** held in `stores/appStore.ts` (`filterConditions:
+   FilterCondition[]`) — in the store (not a view) so the Sessions view
+   ("Open in library") and saved views ("open") can set it from elsewhere and
+   navigate to the Library — and rendered by `features/library/FilterBar.tsx`.
+   The pure registry + helpers live in `features/library/filterFields.ts`
+   (field/operator knowledge, chip labels, condition composition) and are
+   unit-tested in `src/tests/filterFields.test.ts`. Changing the filter
+   re-loads page 0; the exact `Filter` object is stringified and sent to the
+   engine (and is what a saved view stores).
+ - Saved views + collections (Sprint 8): `views/SavedViewsView.tsx` lists
+   views with their **live** counts (recomputed, never stored), applies one by
+   loading its `filter_json` into `filterConditions` + navigating, and
+   renames/deletes. "Save as view" in the Library toolbar captures the current
+   `filterConditions`. `views/CollectionsView.tsx` creates/opens/deletes
+   collections and renders an opened collection in the same grid + viewer
+   (`collection_photos` paged); membership is edited from the Library's
+   culling bar ("Add to collection"). The pure naming/labeling rules
+   (`cleanName`, `groupLabel`) live in `features/organize/labels.ts`
+   (unit-tested, `src/tests/organizeLabels.test.ts`).
+ - Similarity (Sprint 8, frontend): the Library's "Find similar photos"
+   toolbar button starts the pass (progress via `similarity-progress`); on
+   completion the "Similar groups" panel shows group cards (cover strips via
+   `features/similarity/CoverThumb.tsx`, factual labels via `groupLabel`).
+   Clicking a card opens that group's photographs in the same grid + viewer
+   path (`group_photos`), with a back bar. The language is kept factual
+   ("near-identical structure", "captured within seconds") — the user decides
+   via culling + file ops.
 - Statistics (Sprint 6): `views/DashboardView.tsx` renders
   `PeriodStats` for the selected period (+ custom range) — totals,
   analyzed-only averages, shares, the four distributions (pure CSS bars),

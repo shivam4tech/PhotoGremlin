@@ -15,6 +15,7 @@ mod logging;
 pub mod metadata;
 pub mod paths;
 pub mod scanner;
+pub mod similarity;
 pub mod state;
 pub mod statistics;
 pub mod thumbnailer;
@@ -55,6 +56,7 @@ pub fn run() {
                 analysis: Arc::new(Mutex::new(None)),
                 metadata: Arc::new(Mutex::new(None)),
                 operation: Arc::new(Mutex::new(None)),
+                similarity: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
                 )),
@@ -95,6 +97,22 @@ pub fn run() {
             commands::list_photos,
             commands::get_photo_full,
             commands::get_thumbnail,
+            commands::start_similarity,
+            commands::stop_similarity,
+            commands::list_similarity_groups,
+            commands::group_photos,
+            commands::list_collections,
+            commands::create_collection,
+            commands::rename_collection,
+            commands::delete_collection,
+            commands::add_to_collection,
+            commands::remove_from_collection,
+            commands::collection_photos,
+            commands::list_saved_views,
+            commands::save_view,
+            commands::rename_saved_view,
+            commands::delete_saved_view,
+            commands::saved_view_count,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PhotoGremlin");

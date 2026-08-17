@@ -113,8 +113,15 @@ Per-sprint coverage (✓ = in place today):
     move (partial failure keeps successes); trash (Linux) moves the file into
     the OS trash `files` dir and removes the DB row + audit; a pre-set cancel
     processes zero items and reports `cancelled`.
-- Similarity (Sprint 8): identical image → hash distance 0; perturbed →
-  small distance; unrelated → large; clustering groups as expected.
+ - Similarity (Sprint 8, `similarity/mod.rs`) — 9 unit tests ✓: `dhash64` is
+   deterministic for identical pixels; distinct content (ramp vs ramp+stripes)
+   lands **above** `SIMILAR_THRESHOLD` (pinned so a real near-duplicate can't
+   be mistaken for unrelated); mild per-pixel noise (±3 levels) stays **at or
+   under** the threshold; a solid image hashes to 0 without panicking;
+   `group_similar` union-finds close hashes and drops components < 2;
+   `group_bursts` clumps close timestamps into one group, leaves a far photo
+   out, drops singletons, and never joins a photo with no capture time; the
+   RGB→grayscale conversion path compiles + runs.
 
 ## Frontend tests (`npm test`, Vitest)
 
@@ -144,8 +151,14 @@ Per-sprint coverage (✓ = in place today):
      and reports an aborted plan distinctly; `resultHeadline` states "N of M
      &lt;op&gt; complete"; `progressLabel` prefers live progress, then the final
      summary, then a neutral "working…" (never invents a total);
-     `flaggedResults` surfaces everything not `done`; `fileBase` is the preview
-     path label (null-safe, handles `/` and `\`-separated names).
+   `flaggedResults` surfaces everything not `done`; `fileBase` is the preview
+   path label (null-safe, handles `/` and `\`-separated names).
+ - Organize wording (Sprint 8, `src/tests/organizeLabels.test.ts`) ✓: the
+   factual naming/labeling rules — `cleanName` trims, rejects empty/whitespace,
+   rejects overlong names (and shows trimming can bring one under the cap);
+   `groupLabel` stays technical ("2 similar" / "N similar photographs" /
+   "burst · N") and never emits a verdict. These are the strings the group
+   cards and view/collection forms show, so the discipline is pinned by test.
 
 ## Integration (Rust, `tests/`)
 
@@ -157,9 +170,15 @@ write synthetic folder (N images + EXIF via a tiny writer or sidecar JPEG)
   → analyze → assert rows + version
   → apply filter → assert result set
   → statistics → assert aggregates
-  → plan + execute rename/move/copy/trash (temp dirs) → assert FS, DB sync,
-    audit log, collisions, partial failure   (Sprint 7)
-```
+   → plan + execute rename/move/copy/trash (temp dirs) → assert FS, DB sync,
+     audit log, collisions, partial failure   (Sprint 7)
+   → similarity pass on real JPEGs → assert the re-encoded pair forms one
+     similar group, a distinct scene stays out, a ≤3s trio bursts and a 30s
+     later photo does not, the incremental rule re-queues only the modified
+     file, groups persist with covers, an immediate cancel leaves a
+     consistent (empty) set; plus saved-view CRUD + dynamic count and
+     collection CRUD/membership/cascade   (Sprint 8)
+ ```
 
 Run with `cargo test` (same command, `tests/` dir) so one command validates
 the pipeline.

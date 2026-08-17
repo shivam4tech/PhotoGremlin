@@ -26,17 +26,18 @@ field lives.
 `=`, `!=`, `>`, `>=`, `<`, `<=`, `between` (value = `[lo, hi]`),
 `in` (value = array), `is-null`, `not-null`.
 
-## Field registry (Sprint 5)
+ ## Field registry (Sprint 5, + session_id in Sprint 8)
 
-| area | fields | source |
-|---|---|---|
-| technical | sharpness, brightness, contrast, saturation, highlight_clipping, shadow_clipping | analysis |
-| visual | monochrome, color (inverse of monochrome), dark, bright | analysis flags |
-| orientation | landscape, portrait, square | photos (w×h) |
-| camera | camera_model, camera_make, lens | photos (EXIF) |
-| exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
-| time | capture_datetime (point, range via `between`) | photos |
-| local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
+ | area | fields | source |
+ |---|---|---|
+ | technical | sharpness, brightness, contrast, saturation, highlight_clipping, shadow_clipping | analysis |
+ | visual | monochrome, color (inverse of monochrome), dark, bright | analysis flags |
+ | orientation | landscape, portrait, square | photos (w×h) |
+ | camera | camera_model, camera_make, lens | photos (EXIF) |
+ | exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
+ | time | capture_datetime (point, range via `between`) | photos |
+ | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
+ | local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
 
 The registry maps each field to (table, column, type, comparator) so
 conditions validate before hitting SQL, and unknown fields fail with a
@@ -69,9 +70,13 @@ friendly error instead of a SQL error.
   condition** (NULL comparison is false — a photo we have not measured is
   neither "sharpness ≥ 70" nor "monochrome"). `color` is stored as the
   inverse of the `is_monochrome` flag. `faces_present` / `smiling` compare
-  `(face_count IS NOT NULL AND face_count > 0)` — always false until the
-  local-model sprints (9/10) fill those columns. `capture_datetime` is TEXT
-  (UTC RFC3339), so comparisons are lexicographic and equal to time order.
+   `(face_count IS NOT NULL AND face_count > 0)` — always false until the
+   local-model sprints (9/10) fill those columns. `capture_datetime` is TEXT
+   (UTC RFC3339), so comparisons are lexicographic and equal to time order.
+   `session_id` (Sprint 8) is an `Int` on `photos.session_id`: scoping a grid
+   to one shoot (`= <id>`), to several (`in [..]`), or to unassigned photos
+   (`is-null`). It is the engine-level backing for "Open in library" on a
+   session (Sessions view) and for saved views that pin a session.
 - Execution: `commands/filters.rs::list_filtered_photos` = parse → build →
   `Db::photos_where(where_sql, params, offset, limit)`, which appends the
   stable `ORDER BY` and `LIMIT ? OFFSET ?` and returns a `PhotoPage` (same
@@ -83,13 +88,24 @@ friendly error instead of a SQL error.
   bare dates and the upper `between` bound is extended to end-of-day so
   "this day" is inclusive (a visible, stored part of the condition).
 
-## Saved views
+## Saved views (Sprint 8)
 
 `saved_views.filter_json` stores the exact filter object. Views are dynamic:
 apply the filter at open time — the list adapts to library changes, new
 analysis, etc. (Spec: a saved view stores the filter definition, not a static
-list.) Saved-view management UI lands in Sprint 8; the table and engine are
-ready.
+list.)
+
+- **Validation**: `save_view` parses + builds the filter with the grid's own
+  engine *before* persisting, so a stored view can never be one the grid
+  cannot evaluate.
+- **Dynamic count**: the per-view photograph count is recomputed on demand
+  (`photos_where` over the stored filter, 1-row probe) — never stored, so it
+  can't go stale.
+- **Apply**: the frontend parses `filter_json` back to conditions, loads them
+  into the shared library filter, and navigates to the Library. Saving
+  overwrites a same-named view (`upsert`, same `id`, `updated_at` moves).
+- Names: trimmed, 1–60 chars (frontend `cleanName`), uniqueness enforced in
+  the DB.
 
 ## Language rules
 

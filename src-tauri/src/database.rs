@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 8;
+pub const CURRENT_SCHEMA_VERSION: i64 = 9;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -214,6 +214,19 @@ impl Db {
                 [],
             )
             .map_err(db_err("create selections"))?;
+
+            // v9: perceptual-hash columns for the similarity pass (Sprint 8).
+            // `phash_source_mtime` records the file mtime the hash was computed
+            // for, so a modified file is re-hashed on the next pass (same
+            // incremental rule as analysis).
+            if !table_has_column(&conn, "photos", "phash") {
+                conn.execute("ALTER TABLE photos ADD COLUMN phash INTEGER", [])
+                    .map_err(db_err("add photos.phash"))?;
+            }
+            if !table_has_column(&conn, "photos", "phash_source_mtime") {
+                conn.execute("ALTER TABLE photos ADD COLUMN phash_source_mtime TEXT", [])
+                    .map_err(db_err("add photos.phash_source_mtime"))?;
+            }
 
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
@@ -1002,6 +1015,578 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     }
     Ok(out)
 }
+
+    // -----------------------------------------------------------------
+    // Saved views (Sprint 8) — a saved view is a name + a structured filter.
+    // -----------------------------------------------------------------
+
+    pub fn list_saved_views(&self) -> AppResult<Vec<SavedView>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, filter_json, description, created_at, updated_at
+                 FROM saved_views ORDER BY name COLLATE NOCASE",
+            )
+            .map_err(db_err("prepare saved views"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SavedView {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    filter_json: r.get(2)?,
+                    description: r.get(3)?,
+                    created_at: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            })
+            .map_err(db_err("query saved views"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read saved view row"))?);
+        }
+        Ok(out)
+    }
+
+    /// Create or overwrite a saved view by name (UNIQUE). The filter must be
+    /// a valid structured filter (validated by the filter engine before this
+    /// is called).
+    pub fn upsert_saved_view(
+        &self,
+        name: &str,
+        filter_json: &str,
+        description: Option<&str>,
+    ) -> AppResult<i64> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("View name is empty".to_string()));
+        }
+        let conn = self.lock()?;
+        let now = crate::time::now_utc();
+        conn.execute(
+            "INSERT INTO saved_views (name, filter_json, description, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(name) DO UPDATE SET
+               filter_json  = excluded.filter_json,
+               description  = COALESCE(excluded.description, saved_views.description),
+               updated_at   = excluded.updated_at",
+            params![name, filter_json, description, now, now],
+        )
+        .map_err(db_err("upsert saved view"))?;
+        let id: i64 = conn
+            .query_row("SELECT id FROM saved_views WHERE name = ?1", [name], |r| r.get(0))
+            .map_err(db_err("saved view id lookup"))?;
+        Ok(id)
+    }
+
+    pub fn rename_saved_view(&self, id: i64, name: &str) -> AppResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("View name is empty".to_string()));
+        }
+        let conn = self.lock()?;
+        let now = crate::time::now_utc();
+        let n = conn
+            .execute(
+                "UPDATE saved_views SET name = ?2, updated_at = ?3 WHERE id = ?1",
+                params![id, name, now],
+            )
+            .map_err(db_err("rename saved view"))?;
+        if n == 0 {
+            return Err(AppError::FileMissing {
+                target: format!("saved view {id}"),
+                reason: "not found".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_saved_view(&self, id: i64) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM saved_views WHERE id = ?1", [id])
+            .map_err(db_err("delete saved view"))?;
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------
+    // Collections (Sprint 8) — manually curated sets of photographs.
+    // -----------------------------------------------------------------
+
+    pub fn list_collections(&self) -> AppResult<Vec<Collection>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT c.id, c.name, c.description, c.created_at,
+                        (SELECT COUNT(*) FROM collection_photos cp WHERE cp.collection_id = c.id)
+                 FROM collections c ORDER BY c.created_at",
+            )
+            .map_err(db_err("prepare collections"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Collection {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    description: r.get(2)?,
+                    created_at: r.get(3)?,
+                    photo_count: r.get(4)?,
+                })
+            })
+            .map_err(db_err("query collections"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read collection row"))?);
+        }
+        Ok(out)
+    }
+
+    pub fn create_collection(&self, name: &str, description: Option<&str>) -> AppResult<i64> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("Collection name is empty".to_string()));
+        }
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO collections (name, description, created_at) VALUES (?1, ?2, ?3)",
+            params![name, description, crate::time::now_utc()],
+        )
+        .map_err(|e| {
+            if e.to_string().contains("UNIQUE") {
+                AppError::validation(format!("A collection named “{name}” already exists"))
+            } else {
+                db_err("create collection")(e)
+            }
+        })?;
+        let id: i64 = conn
+            .query_row("SELECT id FROM collections WHERE name = ?1", [name], |r| r.get(0))
+            .map_err(db_err("collection id lookup"))?;
+        Ok(id)
+    }
+
+    pub fn rename_collection(&self, id: i64, name: &str) -> AppResult<()> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::validation("Collection name is empty".to_string()));
+        }
+        let conn = self.lock()?;
+        let n = conn
+            .execute("UPDATE collections SET name = ?2 WHERE id = ?1", params![id, name])
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE") {
+                    AppError::validation(format!("A collection named “{name}” already exists"))
+                } else {
+                    db_err("rename collection")(e)
+                }
+            })?;
+        if n == 0 {
+            return Err(AppError::FileMissing {
+                target: format!("collection {id}"),
+                reason: "not found".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub fn delete_collection(&self, id: i64) -> AppResult<()> {
+        let conn = self.lock()?;
+        // `collection_photos` cascade-deletes with the collection; the photos
+        // themselves are untouched.
+        conn.execute("DELETE FROM collections WHERE id = ?1", [id])
+            .map_err(db_err("delete collection"))?;
+        Ok(())
+    }
+
+    /// Add photographs to a collection (idempotent — duplicates are ignored).
+    /// Returns how many were actually added.
+    pub fn add_to_collection(&self, collection_id: i64, photo_ids: Vec<i64>) -> AppResult<usize> {
+        let conn = self.lock()?;
+        if !Self::collection_exists(&conn, collection_id) {
+            return Err(AppError::FileMissing {
+                target: format!("collection {collection_id}"),
+                reason: "not found".into(),
+            });
+        }
+        let now = crate::time::now_utc();
+        let mut added = 0usize;
+        let tx = conn.unchecked_transaction().map_err(db_err("collection add tx"))?;
+        for id in photo_ids {
+            added += tx.execute(
+                "INSERT OR IGNORE INTO collection_photos (collection_id, photo_id, added_at)
+                 VALUES (?1, ?2, ?3)",
+                params![collection_id, id, now],
+            )
+            .map_err(db_err("add to collection"))?;
+        }
+        tx.commit().map_err(db_err("commit collection add"))?;
+        Ok(added)
+    }
+
+    pub fn remove_from_collection(&self, collection_id: i64, photo_ids: Vec<i64>) -> AppResult<usize> {
+        if photo_ids.is_empty() {
+            return Ok(0);
+        }
+        let conn = self.lock()?;
+        let placeholders = photo_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let params: Vec<Box<dyn rusqlite::ToSql>> = photo_ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        let mut refs: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(collection_id)];
+        refs.extend(params);
+        let ref_refs: Vec<&dyn rusqlite::ToSql> = refs.iter().map(|p| p.as_ref()).collect();
+        let n = conn
+            .execute(
+                &format!(
+                    "DELETE FROM collection_photos WHERE collection_id = ?1 AND photo_id IN ({placeholders})"
+                ),
+                ref_refs.as_slice(),
+            )
+            .map_err(db_err("remove from collection"))?;
+        Ok(n)
+    }
+
+    /// One page of a collection's photographs (same summary shape as the grid).
+    pub fn collection_photos(
+        &self,
+        collection_id: i64,
+        offset: i64,
+        limit: i64,
+    ) -> AppResult<(Vec<PhotoSummary>, i64)> {
+        let conn = self.lock()?;
+        let limit = limit.clamp(1, 500);
+        let offset = offset.max(0);
+        if !Self::collection_exists(&conn, collection_id) {
+            return Err(AppError::FileMissing {
+                target: format!("collection {collection_id}"),
+                reason: "not found".into(),
+            });
+        }
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM collection_photos WHERE collection_id = ?1",
+                [collection_id],
+                |r| r.get(0),
+            )
+            .map_err(db_err("count collection photos"))?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.capture_datetime, p.session_id,
+                        (a.photo_id IS NOT NULL) AS has_analysis
+                 FROM collection_photos cp
+                 JOIN photos p ON p.id = cp.photo_id
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE cp.collection_id = ?1
+                 ORDER BY cp.added_at, cp.photo_id
+                 LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(db_err("prepare collection photos"))?;
+        let rows = stmt
+            .query_map(params![collection_id, limit, offset], Self::page_row_to_summary)
+            .map_err(db_err("query collection photos"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read collection photo row"))?);
+        }
+        Ok((out, total))
+    }
+
+    /// Which of these photos are in the collection (for the grid's badges).
+    pub fn collection_ids_for_photos(&self, photo_ids: Vec<i64>) -> AppResult<Vec<i64>> {
+        if photo_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.lock()?;
+        let placeholders = photo_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let params: Vec<Box<dyn rusqlite::ToSql>> = photo_ids
+            .iter()
+            .map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>)
+            .collect();
+        let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT DISTINCT collection_id FROM collection_photos WHERE photo_id IN ({placeholders})"
+            ))
+            .map_err(db_err("prepare collection ids"))?;
+        let rows = stmt
+            .query_map(refs.as_slice(), |r| r.get::<_, i64>(0))
+            .map_err(db_err("query collection ids"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read collection id"))?);
+        }
+        Ok(out)
+    }
+
+    fn collection_exists(conn: &Connection, collection_id: i64) -> bool {
+        conn.query_row(
+            "SELECT 1 FROM collections WHERE id = ?1",
+            [collection_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .ok()
+        .flatten()
+        .is_some()
+    }
+
+    fn page_row_to_summary(r: &rusqlite::Row) -> rusqlite::Result<PhotoSummary> {
+        Ok(PhotoSummary {
+            id: r.get(0)?,
+            filename: r.get(1)?,
+            extension: r.get(2)?,
+            size_bytes: r.get(3)?,
+            width: r.get(4)?,
+            height: r.get(5)?,
+            orientation: r.get(6)?,
+            capture_datetime: r.get(7)?,
+            session_id: r.get(8)?,
+            has_analysis: r.get::<_, i64>(9)? != 0,
+        })
+    }
+
+    // -----------------------------------------------------------------
+    // Similarity groups (Sprint 8) — perceptual-hash clusters + bursts.
+    // -----------------------------------------------------------------
+
+    pub fn list_similarity_groups(&self, limit: i64) -> AppResult<Vec<SimilarityGroup>> {
+        let conn = self.lock()?;
+        let limit = limit.clamp(1, 500);
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, hash, group_type, photo_count, created_at
+                 FROM similarity_groups
+                 ORDER BY (group_type = 'burst') DESC, photo_count DESC, id
+                 LIMIT ?1",
+            )
+            .map_err(db_err("prepare similarity groups"))?;
+        let rows = stmt
+            .query_map([limit], |r| {
+                Ok(SimilarityGroup {
+                    id: r.get(0)?,
+                    hash: r.get(1)?,
+                    group_type: r.get(2)?,
+                    photo_count: r.get(3)?,
+                    created_at: r.get(4)?,
+                    cover_photos: Vec::new(),
+                })
+            })
+            .map_err(db_err("query similarity groups"))?;
+        let mut groups: Vec<SimilarityGroup> = Vec::new();
+        for row in rows {
+            groups.push(row.map_err(db_err("read similarity group row"))?);
+        }
+        // Second pass: a small cover strip per group (bounded, keeps this one
+        // round-trip per group with a tight LIMIT).
+        let mut covers = conn
+            .prepare("SELECT photo_id FROM similarity_group_photos WHERE group_id = ?1 ORDER BY photo_id LIMIT 4")
+            .map_err(db_err("prepare group covers"))?;
+        for g in groups.iter_mut() {
+            let ids = covers
+                .query_map([g.id], |r| r.get::<_, i64>(0))
+                .map_err(db_err("query group covers"))?
+                .collect::<Result<_, _>>()
+                .map_err(db_err("read group covers"))?;
+            g.cover_photos = ids;
+        }
+        Ok(groups)
+    }
+
+    pub fn group_photos(
+        &self,
+        group_id: i64,
+        offset: i64,
+        limit: i64,
+    ) -> AppResult<(Vec<PhotoSummary>, i64)> {
+        let conn = self.lock()?;
+        let limit = limit.clamp(1, 500);
+        let offset = offset.max(0);
+        let total: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM similarity_group_photos WHERE group_id = ?1",
+                [group_id],
+                |r| r.get(0),
+            )
+            .map_err(db_err("count group photos"))?;
+        if total == 0 {
+            return Ok((Vec::new(), 0));
+        }
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.capture_datetime, p.session_id,
+                        (a.photo_id IS NOT NULL) AS has_analysis
+                 FROM similarity_group_photos g
+                 JOIN photos p ON p.id = g.photo_id
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE g.group_id = ?1
+                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
+                 LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(db_err("prepare group photos"))?;
+        let rows = stmt
+            .query_map(params![group_id, limit, offset], Self::page_row_to_summary)
+            .map_err(db_err("query group photos"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read group photo row"))?);
+        }
+        Ok((out, total))
+    }
+
+    /// Replace the whole similarity-group set atomically (the pass recomputes
+    /// all groups from the current hashes). Returns the number of groups.
+    pub fn replace_similarity_groups(
+        &self,
+        groups: &[(String, String, Vec<i64>)],
+    ) -> AppResult<usize> {
+        let conn = self.lock()?;
+        let now = crate::time::now_utc();
+        let tx = conn.unchecked_transaction().map_err(db_err("similarity tx"))?;
+        tx.execute("DELETE FROM similarity_group_photos", [])
+            .map_err(db_err("clear group photos"))?;
+        tx.execute("DELETE FROM similarity_groups", [])
+            .map_err(db_err("clear groups"))?;
+        for (hash, group_type, photo_ids) in groups {
+            if photo_ids.is_empty() {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO similarity_groups (hash, group_type, photo_count, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![hash, group_type, photo_ids.len() as i64, now],
+            )
+            .map_err(db_err("insert group"))?;
+            let gid: i64 =
+                tx.query_row("SELECT last_insert_rowid()", [], |r| r.get(0))
+                    .map_err(db_err("group id"))?;
+            for pid in photo_ids {
+                tx.execute(
+                    "INSERT OR IGNORE INTO similarity_group_photos (group_id, photo_id)
+                     VALUES (?1, ?2)",
+                    params![gid, pid],
+                )
+                .map_err(db_err("insert group photo"))?;
+            }
+        }
+        tx.commit().map_err(db_err("commit similarity"))?;
+        Ok(groups.len())
+    }
+
+    /// All currently hashed photos (id, hash, session, capture datetime) for
+    /// grouping. Groups are computed within a session (see SIMILARITY.md).
+    pub fn hashed_photos(
+        &self,
+    ) -> AppResult<Vec<(i64, i64, Option<i64>, Option<String>)>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare("SELECT id, phash, session_id, capture_datetime
+                      FROM photos WHERE phash IS NOT NULL")
+            .map_err(db_err("prepare hashed photos"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .map_err(db_err("query hashed photos"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read hashed photo"))?);
+        }
+        Ok(out)
+    }
+
+    // --- Perceptual-hash queue + storage (v9) ---
+
+    /// Photos still lacking a phash, or hashed from a now-stale mtime (same
+    /// incremental rule as analysis). Decodable formats only.
+    pub fn phash_queue(&self) -> AppResult<Vec<PhashWork>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, path, extension, file_mtime FROM photos
+                 WHERE extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                   AND (phash IS NULL
+                        OR (phash_source_mtime IS NOT NULL AND file_mtime IS NOT NULL
+                            AND phash_source_mtime < file_mtime))
+                 ORDER BY (capture_datetime IS NULL) ASC, COALESCE(capture_datetime, indexed_at), id",
+            )
+            .map_err(db_err("prepare phash queue"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(PhashWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    extension: r.get(2)?,
+                    file_mtime: r.get(3)?,
+                })
+            })
+            .map_err(db_err("query phash queue"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read phash work row"))?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_phash(
+        &self,
+        photo_id: i64,
+        hash: i64,
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE photos SET phash = ?2, phash_source_mtime = ?3 WHERE id = ?1",
+            params![photo_id, hash, source_mtime],
+        )
+        .map_err(db_err("upsert phash"))?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 8 row types (saved views, collections, similarity, phash)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SavedView {
+    pub id: i64,
+    pub name: String,
+    pub filter_json: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub photo_count: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SimilarityGroup {
+    pub id: i64,
+    pub hash: String,
+    pub group_type: String,
+    pub photo_count: i64,
+    pub created_at: String,
+    /// Up to 4 photo ids (by id order) for a UI cover strip.
+    pub cover_photos: Vec<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PhashWork {
+    pub photo_id: i64,
+    pub path: String,
+    pub extension: String,
+    pub file_mtime: Option<String>,
 }
 
 /// One queued unit of analysis work: a decodable photo whose row is missing,

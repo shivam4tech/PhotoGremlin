@@ -6,16 +6,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
+  Collection,
   DbStatus,
   FileOpPlan,
   FileOpRow,
   PhotoFull,
   PhotoPage,
   PeriodStats,
+  SavedView,
   SelectionRow,
   SessionMetrics,
   SessionSummary,
   SessionRow,
+  SimilarityGroup,
   ThumbData,
   ThumbKind,
 } from "@/types/api";
@@ -106,6 +109,53 @@ export const api = {
   listSelections: (): Promise<SelectionRow[]> => invoke("list_selections"),
   recentFileOps: (limit: number): Promise<FileOpRow[]> =>
     invoke("recent_file_ops", { limit }),
+
+  // Saved views (Sprint 8) — named, dynamic filters.
+  listSavedViews: (): Promise<SavedView[]> => invoke("list_saved_views"),
+  // `filterJson` is validated by the grid's own engine before persisting.
+  saveView: (
+    name: string,
+    filterJson: string,
+    description: string | null,
+  ): Promise<number> => invoke("save_view", { name, filterJson, description }),
+  renameSavedView: (id: number, name: string): Promise<void> =>
+    invoke("rename_saved_view", { id, name }),
+  deleteSavedView: (id: number): Promise<void> =>
+    invoke("delete_saved_view", { id }),
+  /** How many photographs a saved view matches right now (dynamic). */
+  savedViewCount: (id: number): Promise<number> =>
+    invoke("saved_view_count", { id }),
+
+  // Collections (Sprint 8) — curated sets; files are never touched.
+  listCollections: (): Promise<Collection[]> => invoke("list_collections"),
+  createCollection: (name: string, description: string | null): Promise<number> =>
+    invoke("create_collection", { name, description }),
+  renameCollection: (id: number, name: string): Promise<void> =>
+    invoke("rename_collection", { id, name }),
+  deleteCollection: (id: number): Promise<void> =>
+    invoke("delete_collection", { id }),
+  addToCollection: (collectionId: number, photoIds: number[]): Promise<number> =>
+    invoke("add_to_collection", { collectionId, photoIds }),
+  removeFromCollection: (collectionId: number, photoIds: number[]): Promise<number> =>
+    invoke("remove_from_collection", { collectionId, photoIds }),
+  collectionPhotos: (
+    collectionId: number,
+    offset: number,
+    limit: number,
+  ): Promise<PhotoPage> =>
+    invoke("collection_photos", { collectionId, offset, limit }),
+
+  // Similarity (Sprint 8) — background hash + group pass.
+  startSimilarity: (): Promise<void> => invoke("start_similarity"),
+  stopSimilarity: (): Promise<boolean> => invoke("stop_similarity"),
+  listSimilarityGroups: (limit: number): Promise<SimilarityGroup[]> =>
+    invoke("list_similarity_groups", { limit }),
+  groupPhotos: (
+    groupId: number,
+    offset: number,
+    limit: number,
+  ): Promise<PhotoPage> =>
+    invoke("group_photos", { groupId, offset, limit }),
 };
 
 export type { UnlistenFn };
