@@ -164,6 +164,21 @@ export interface ThumbData {
   from_cache: boolean;
 }
 
+/** Payload of the `analysis-complete` event: exactly one field set. */
+export interface AnalysisCompletePayload {
+  summary: AnalysisSummary | null;
+  error: string | null;
+}
+
+/** Result of one analysis pass (carried in `analysis-complete`). */
+export interface AnalysisSummary {
+  analyzed: number;
+  failed: number;
+  cancelled: boolean;
+  elapsed_ms: number;
+  errors: string[];
+}
+
 export interface ScanSummary {
   session_id: number;
   session_name: string;

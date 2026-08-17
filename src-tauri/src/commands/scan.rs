@@ -16,7 +16,7 @@ use crate::database::SessionRow;
 use crate::error::{AppError, AppResult};
 use crate::events;
 use crate::scanner::{self, ScanSummary};
-use crate::state::{AppState, ScanJob};
+use crate::state::{AppState, Job};
 
 /// Payload for the `scan-complete` event: exactly one of the two is set.
 #[derive(Debug, serde::Serialize)]
@@ -51,7 +51,7 @@ pub async fn start_scan(
                 return Err(AppError::operation("A scan is already in progress"));
             }
         }
-        let job = Arc::new(ScanJob::new());
+        let job = Arc::new(Job::new());
         *slot = Some(job.clone());
         job
     };

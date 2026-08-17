@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { api } from "@/lib/ipc";
 import type {
+  AnalysisSummary,
   AppInfo,
   DbStatus,
   PathsInfo,
@@ -19,6 +20,7 @@ interface AppState {
   analyzing: boolean;
   progress: ProgressPayload | null;
   scanSummary: ScanSummary | null;
+  analysisSummary: AnalysisSummary | null;
   notice: string | null;
   error: string | null;
 
@@ -31,6 +33,7 @@ interface AppState {
   setAnalyzing: (b: boolean) => void;
   setProgress: (p: ProgressPayload | null) => void;
   setScanSummary: (s: ScanSummary | null) => void;
+  setAnalysisSummary: (s: AnalysisSummary | null) => void;
   setNotice: (n: string | null) => void;
   setError: (e: string | null) => void;
 
@@ -48,11 +51,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   scanning: false,
   analyzing: false,
   progress: null,
-  scanSummary: null,
-  notice: null,
-  error: null,
+      scanSummary: null,
+      analysisSummary: null,
+      notice: null,
+      error: null,
 
-  setView: (view) => set({ view }),
+      setView: (view) => set({ view }),
   setAppInfo: (appInfo) => set({ appInfo }),
   setPaths: (paths) => set({ paths }),
   setDbStatus: (dbStatus) => set({ dbStatus }),
@@ -60,8 +64,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setScanning: (scanning) => set({ scanning }),
   setAnalyzing: (analyzing) => set({ analyzing }),
   setProgress: (progress) => set({ progress }),
-  setScanSummary: (scanSummary) => set({ scanSummary }),
-  setNotice: (notice) => set({ notice }),
+      setScanSummary: (scanSummary) => set({ scanSummary }),
+      setAnalysisSummary: (analysisSummary) => set({ analysisSummary }),
+      setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
 
   refreshStatus: async () => {

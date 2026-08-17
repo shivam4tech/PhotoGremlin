@@ -15,6 +15,8 @@ export function LibraryView() {
   const scanning = useAppStore((s) => s.scanning);
   const progress = useAppStore((s) => s.progress);
   const scanSummary = useAppStore((s) => s.scanSummary);
+  const analyzing = useAppStore((s) => s.analyzing);
+  const analysisSummary = useAppStore((s) => s.analysisSummary);
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export function LibraryView() {
       await api.setActiveFolder(picked);
       store().setActiveFolder(picked);
       store().setScanSummary(null);
+      store().setAnalysisSummary(null);
       await store().refreshStatus();
     } catch (e) {
       setError(toErrorMessage(e));
@@ -63,6 +66,27 @@ export function LibraryView() {
   async function stopScan() {
     try {
       await api.stopScan();
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }
+
+  async function startAnalysis() {
+    setError(null);
+    try {
+      await api.startAnalysis();
+      store().setAnalyzing(true);
+      store().setProgress({ total: 0, done: 0, stage: "analyzing", current: null });
+      store().setAnalysisSummary(null);
+    } catch (e) {
+      setError(toErrorMessage(e));
+      store().setAnalyzing(false);
+    }
+  }
+
+  async function stopAnalysis() {
+    try {
+      await api.stopAnalysis();
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -99,11 +123,25 @@ export function LibraryView() {
         <span className="mono library-toolbar-path" title={activeFolder}>{activeFolder}</span>
         <span className="spacer" />
         {!scanning ? (
-          <button className="btn btn-sm btn-primary" onClick={startScan} disabled={busy || photos.loading}>
+          <button className="btn btn-sm btn-primary" onClick={startScan} disabled={busy || photos.loading || analyzing}>
             {dbStatus && dbStatus.photo_count > 0 ? "Re-scan" : "Scan folder"}
           </button>
         ) : (
           <button className="btn btn-sm btn-danger" onClick={stopScan}>Stop scan</button>
+        )}
+        {!analyzing ? (
+          <button
+            className="btn btn-sm"
+            onClick={startAnalysis}
+            disabled={scanning || photos.total === 0 || busy}
+            title="Measure every photo that still needs it: sharpness, brightness, contrast, saturation, clipping, monochrome. Re-runs are incremental."
+          >
+            Analyze photos
+          </button>
+        ) : (
+          <button className="btn btn-sm btn-danger" onClick={stopAnalysis}>
+            Stop analysis
+          </button>
         )}
       </div>
 
@@ -136,6 +174,36 @@ export function LibraryView() {
         </div>
       )}
 
+      {analysisSummary && !analyzing && (
+        <div className="library-summaryline mono">
+          Last analysis: {analysisSummary.analyzed.toLocaleString()} measured
+          {analysisSummary.failed > 0 && (
+            <span style={{ color: "var(--warning)" }}> · {analysisSummary.failed.toLocaleString()} failed</span>
+          )}
+          · {(analysisSummary.elapsed_ms / 1000).toFixed(1)}s
+          {analysisSummary.cancelled ? " (stopped)" : ""}
+        </div>
+      )}
+
+      {analyzing && progress && (
+        <div className="library-scanline">
+          <ProgressBar
+            value={progress.done}
+            max={progress.total}
+            label={
+              progress.total > 0
+                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} photographs`
+                : progress.stage
+            }
+          />
+          {progress.current && (
+            <div className="faint mono" style={{ fontSize: 11, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {progress.current}
+            </div>
+          )}
+        </div>
+      )}
+
       <ErrorBanner message={error ?? photos.error} />
 
       {!hasPhotos ? (
@@ -164,8 +232,11 @@ export function LibraryView() {
           <div className="library-statusbar">
             <span>{photos.total.toLocaleString()} photographs</span>
             <span className="faint">Page {photos.page + 1}</span>
+            {dbStatus && dbStatus.analyzed_count > 0 && (
+              <span className="faint">{dbStatus.analyzed_count.toLocaleString()} analyzed</span>
+            )}
             <span className="spacer" />
-            <span className="faint">Local-only index · thumbnails cached on this machine</span>
+            <span className="faint">Local-only index · thumbnails &amp; analysis on this machine</span>
             <button className="btn btn-ghost btn-sm" onClick={photos.reload} disabled={photos.loading}>
               Refresh
             </button>
