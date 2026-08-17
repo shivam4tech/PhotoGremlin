@@ -1,13 +1,16 @@
 import { useMemo, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
-import { usePhotos } from "@/hooks/usePhotos";
+import { useFilteredPhotos } from "@/hooks/useFilteredPhotos";
 import { EmptyState } from "@/components/EmptyState";
 import { ProgressBar } from "@/components/ProgressBar";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
+import { FilterBar } from "@/features/library/FilterBar";
+import { draftToFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
+import type { FilterCondition } from "@/types/api";
 
 export function LibraryView() {
   const activeFolder = useAppStore((s) => s.activeFolder);
@@ -17,19 +20,25 @@ export function LibraryView() {
   const scanSummary = useAppStore((s) => s.scanSummary);
   const analyzing = useAppStore((s) => s.analyzing);
   const analysisSummary = useAppStore((s) => s.analysisSummary);
+  const readingMetadata = useAppStore((s) => s.readingMetadata);
+  const metadataSummary = useAppStore((s) => s.metadataSummary);
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  // Active filter as structured conditions — the exact object the engine
+  // consumes (and saved views will store).
+  const [filterDraft, setFilterDraft] = useState<FilterCondition[]>([]);
 
   // Re-fetch the index whenever a scan (re)completes for this folder.
   const refreshKey = useMemo(
     () => (scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"),
     [scanSummary],
   );
-  const enabled = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
-  const photos = usePhotos(enabled, refreshKey);
+  const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
+  const filterJson = useMemo(() => JSON.stringify(draftToFilter(filterDraft)), [filterDraft]);
+  const photos = useFilteredPhotos(libraryHasPhotos, filterJson, refreshKey);
 
   async function openFolder() {
     setBusy(true);
@@ -92,6 +101,30 @@ export function LibraryView() {
     }
   }
 
+  async function startMetadata() {
+    setError(null);
+    try {
+      store().setMetadataSummary(null);
+      await api.startMetadata();
+      store().setReadingMetadata(true);
+      store().setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+    } catch (e) {
+      setError(toErrorMessage(e));
+      store().setReadingMetadata(false);
+    }
+  }
+
+  async function stopMetadata() {
+    try {
+      await api.stopMetadata();
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }
+
+  const anyPassRunning = scanning || analyzing || readingMetadata;
+  const metadataPending = dbStatus?.metadata_pending ?? 0;
+
   if (!activeFolder) {
     return (
       <>
@@ -123,17 +156,32 @@ export function LibraryView() {
         <span className="mono library-toolbar-path" title={activeFolder}>{activeFolder}</span>
         <span className="spacer" />
         {!scanning ? (
-          <button className="btn btn-sm btn-primary" onClick={startScan} disabled={busy || photos.loading || analyzing}>
+          <button className="btn btn-sm btn-primary" onClick={startScan} disabled={busy || photos.loading || anyPassRunning}>
             {dbStatus && dbStatus.photo_count > 0 ? "Re-scan" : "Scan folder"}
           </button>
         ) : (
           <button className="btn btn-sm btn-danger" onClick={stopScan}>Stop scan</button>
         )}
+        {!readingMetadata && metadataPending > 0 ? (
+          <button
+            className="btn btn-sm"
+            onClick={startMetadata}
+            disabled={scanning || analyzing || busy || !libraryHasPhotos}
+            title={`Read camera metadata (EXIF) from ${metadataPending.toLocaleString()} photograph${metadataPending === 1 ? "" : "s"} that still needs it.`}
+          >
+            Read metadata ({metadataPending.toLocaleString()})
+          </button>
+        ) : null}
+        {readingMetadata ? (
+          <button className="btn btn-sm btn-danger" onClick={stopMetadata}>
+            Stop reading
+          </button>
+        ) : null}
         {!analyzing ? (
           <button
             className="btn btn-sm"
             onClick={startAnalysis}
-            disabled={scanning || photos.total === 0 || busy}
+            disabled={anyPassRunning || photos.total === 0 || busy}
             title="Measure every photo that still needs it: sharpness, brightness, contrast, saturation, clipping, monochrome. Re-runs are incremental."
           >
             Analyze photos
@@ -144,6 +192,8 @@ export function LibraryView() {
           </button>
         )}
       </div>
+
+      <FilterBar draft={filterDraft} onChange={setFilterDraft} disabled={anyPassRunning} />
 
       {scanning && progress && (
         <div className="library-scanline">
@@ -204,9 +254,36 @@ export function LibraryView() {
         </div>
       )}
 
+      {readingMetadata && progress && (
+        <div className="library-scanline">
+          <ProgressBar
+            value={progress.done}
+            max={progress.total}
+            label={
+              progress.total > 0
+                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} photographs`
+                : progress.stage
+            }
+          />
+        </div>
+      )}
+
+      {metadataSummary && !readingMetadata ? (
+        <div className="library-summaryline mono">
+          Last metadata read: {metadataSummary.processed.toLocaleString()} photographs
+          {metadataSummary.failed > 0 && (
+            <span style={{ color: "var(--warning)" }}>
+              {" "}· {metadataSummary.failed.toLocaleString()} unreadable
+            </span>
+          )}
+          {" "}· {(metadataSummary.elapsed_ms / 1000).toFixed(1)}s
+          {metadataSummary.cancelled ? " (stopped)" : ""}
+        </div>
+      ) : null}
+
       <ErrorBanner message={error ?? photos.error} />
 
-      {!hasPhotos ? (
+      {!libraryHasPhotos ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <EmptyState glyph="◫" title="Nothing indexed yet">
             <p>
@@ -214,6 +291,18 @@ export function LibraryView() {
                 ? "Scanning in progress — watch the progress bar above."
                 : "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."}
             </p>
+          </EmptyState>
+        </div>
+      ) : !hasPhotos && filterDraft.length > 0 ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <EmptyState glyph="◫" title="No photographs match these filters">
+            <p>
+              {filterDraft.length} condition{filterDraft.length > 1 ? "s" : ""} selected ·{" "}
+              {(dbStatus?.photo_count ?? 0).toLocaleString()} photographs in the library.
+            </p>
+            <button className="btn btn-sm" onClick={() => setFilterDraft([])}>
+              Clear filters
+            </button>
           </EmptyState>
         </div>
       ) : (
@@ -230,10 +319,21 @@ export function LibraryView() {
           )}
 
           <div className="library-statusbar">
-            <span>{photos.total.toLocaleString()} photographs</span>
+            {filterDraft.length > 0 ? (
+              <span>
+                Showing {photos.total.toLocaleString()} of{" "}
+                {(dbStatus?.photo_count ?? 0).toLocaleString()} photographs (
+                {filterDraft.length} filter{filterDraft.length > 1 ? "s" : ""})
+              </span>
+            ) : (
+              <span>{photos.total.toLocaleString()} photographs</span>
+            )}
             <span className="faint">Page {photos.page + 1}</span>
             {dbStatus && dbStatus.analyzed_count > 0 && (
               <span className="faint">{dbStatus.analyzed_count.toLocaleString()} analyzed</span>
+            )}
+            {metadataPending > 0 && (
+              <span className="faint">{metadataPending.toLocaleString()} awaiting metadata</span>
             )}
             <span className="spacer" />
             <span className="faint">Local-only index · thumbnails &amp; analysis on this machine</span>

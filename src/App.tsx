@@ -5,6 +5,7 @@ import { useAppStore } from "@/stores/appStore";
 import { api, onProgress, toErrorMessage } from "@/lib/ipc";
 import type {
   AnalysisCompletePayload,
+  MetadataCompletePayload,
   ProgressPayload,
   ScanCompletePayload,
 } from "@/types/api";
@@ -54,6 +55,29 @@ export default function App() {
         state().setProgress(p);
         state().setAnalyzing(true);
       });
+      const upm = await onProgress<ProgressPayload>("metadata-progress", (p) => {
+        state().setProgress(p);
+        state().setReadingMetadata(true);
+      });
+      const ucm = await onProgress<MetadataCompletePayload>("metadata-complete", (p) => {
+        const s = state();
+        s.setReadingMetadata(false);
+        s.setProgress(null);
+        if (p.summary) {
+          s.setMetadataSummary(p.summary);
+          if (p.summary.failed > 0 || (p.summary.processed > 0 && !p.summary.cancelled)) {
+            s.setNotice(
+              `Read metadata from ${p.summary.processed.toLocaleString()} photograph` +
+                `${p.summary.processed === 1 ? "" : "s"}${p.summary.failed > 0 ? `, ${p.summary.failed.toLocaleString()} unreadable` : ""}.`,
+            );
+            s.setError(null);
+          }
+        } else {
+          s.setMetadataSummary(null);
+          s.setError(p.error ?? "Reading metadata failed.");
+        }
+        void s.refreshStatus();
+      });
       const uca = await onProgress<AnalysisCompletePayload>("analysis-complete", (p) => {
         const s = state();
         s.setAnalyzing(false);
@@ -94,8 +118,21 @@ export default function App() {
           s.setError(p.error ?? "Scan failed.");
         }
         void s.refreshStatus();
+        // Pipeline: as soon as a scan lands new photographs, read their
+        // camera metadata in the background (a no-op when nothing is new).
+        if (p.summary && p.summary.indexed > 0) {
+          s.setReadingMetadata(true);
+          s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+          api
+            .startMetadata()
+            .catch(() => {
+              const st = useAppStore.getState();
+              st.setReadingMetadata(false);
+              st.setProgress(null);
+            });
+        }
       });
-      return [up, upa, uca, uc];
+      return [up, upa, uca, upm, ucm, uc];
     })();
 
     let alive = true;

@@ -4,6 +4,8 @@ pub const SCAN_PROGRESS: &str = "scan-progress";
 pub const SCAN_COMPLETE: &str = "scan-complete";
 pub const ANALYSIS_PROGRESS: &str = "analysis-progress";
 pub const ANALYSIS_COMPLETE: &str = "analysis-complete";
+pub const METADATA_PROGRESS: &str = "metadata-progress";
+pub const METADATA_COMPLETE: &str = "metadata-complete";
 pub const DB_CHANGED: &str = "db-changed";
 pub const OPERATION_PROGRESS: &str = "operation-progress";
 

@@ -9,12 +9,13 @@ React UI (React 18 + TypeScript + Zustand)
    ▼
 Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    │
-    ├── Domain services
-    │     scanner/     recursive indexing
-    │     thumbnailer  cached thumbnail engine (grid/viewer JPEG, base64 out)
-    │     analysis/    image measurement pipeline (background tasks)
-    │     metadata/    EXIF extraction
-    │     similarity/  perceptual hash + grouping
+     ├── Domain services
+     │     scanner/     recursive indexing
+     │     thumbnailer  cached thumbnail engine (grid/viewer JPEG, base64 out)
+     │     analysis/    image measurement pipeline (background tasks)
+     │     metadata/    EXIF extraction + metadata pass (background tasks)
+     │     filters/     structured filter engine (pure: JSON → parameterized WHERE)
+     │     similarity/  perceptual hash + grouping
     │     statistics/  period-scoped aggregation (UI-independent)
     │     filesystem/  rename/move/copy/trash safety rules
     │     ml/          optional local models (isolated; AI-optional)
@@ -29,11 +30,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
 - `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
-  scan-job slot + the analysis-job slot), shared via Tauri's managed state.
-  Commands take `State<AppState>`. Each slot holds the live
-  `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared between
-  `start_*`/`stop_*` and the background task (scan and analysis are separate
-  slots; the UI keeps them mutually exclusive).
+  scan-job slot + the analysis-job slot + the metadata-job slot), shared via
+  Tauri's managed state. Commands take `State<AppState>`. Each slot holds the
+  live `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared
+  between `start_*`/`stop_*` and the background task (scan, analysis and
+  metadata are separate slots; the UI keeps the passes mutually exclusive).
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
@@ -65,6 +66,34 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `spawn_blocking`s the pass, returns immediately) / `stop_analysis`;
   `analysis-progress` + `analysis-complete` events carry progress and the
   `AnalysisSummary { analyzed, failed, cancelled, elapsed_ms, errors }`.
+- `metadata/` (Sprint 5) — local EXIF extraction + the metadata pass.
+  `exif.rs` is pure (path → `ExifRecord`): opens the file once, reads EXIF
+  with the `kamadak-exif` reader, and maps tags to camera make/model/lens,
+  focal length (1/100 mm → mm), ISO, f-number, exposure seconds, capture
+  datetime (zone-less EXIF clock stored verbatim as UTC RFC3339), and a
+  **presence-only** GPS bit — coordinates never reach the record struct. A
+  readable image with no EXIF is an empty record (not an error); an
+  unparseable file is a friendly error. `mod.rs` runs the pass, mirroring the
+  analysis pipeline: `exif_queue` → round-robin slices to
+  `METADATA_WORKERS = 3` std threads → `upsert_exif` (COALESCE merge, stamps
+  `exif_at`) → per-item progress; cooperative cancel; a 256 MB per-file guard.
+  Re-runs are no-ops (queue drains to `exif_at IS NULL` only).
+- `commands/metadata.rs` — `start_metadata` (claims the metadata slot,
+  `spawn_blocking`s the pass, returns immediately) / `stop_metadata`;
+  `metadata-progress` + `metadata-complete` events carry the
+  `MetadataSummary { processed, failed, cancelled, elapsed_ms, errors }`.
+  The auto-run: the UI fires `start_metadata` as soon as `scan-complete` has
+  indexed new photos (the pass is a cheap no-op when nothing is new).
+- `filters/` (Sprint 5) — the structured filter engine, pure and
+  Tauri/DB-independent (see FILTER_ENGINE.md). Parses + validates the filter
+  JSON (a fixed **field registry** of compile-time SQL expressions maps each
+  field to (expression, kind); unknown fields / operators / value types fail
+  with a friendly `Validation` error before any SQL), then lowers it to a
+  parameterized `WHERE` fragment + an ordered `SqlParam` vector. Column names
+  come only from the registry; **every user value is a bound parameter**
+  (injection-safe). `commands/filters.rs::list_filtered_photos` = parse →
+  build → `Db::photos_where`. The grid, saved views, and statistics all share
+  this one object.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
@@ -79,10 +108,12 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   local log. `From<AppError> for tauri::ipc::InvokeError` makes `Result<T,
   AppError>` a valid command return type.
 - `events.rs` — IPC event names (`scan-progress`, `scan-complete`,
-  `analysis-progress`, `db-changed`, `operation-progress`) +
+  `analysis-progress`, `analysis-complete`, `metadata-progress`,
+  `metadata-complete`, `db-changed`, `operation-progress`) +
   `ProgressPayload { total, done, stage, current }` (stages: discovering,
-  indexing, done). Progress flows Rust → UI via Tauri events, never by
-  polling. `scan-complete` carries `ScanCompletePayload { summary?, error? }`.
+  indexing, analyzing, reading metadata, done). Progress flows Rust → UI via
+  Tauri events, never by polling. `scan-complete` / `analysis-complete` /
+  `metadata-complete` each carry `{ summary?, error? }`.
 - `logging.rs` — `tracing` with a rolling daily file in the Tauri log dir
   (`<data_dir>/logs/photogremlin.<date>.log` on Linux) + console layer.
   Zero telemetry; the only sink is the local disk.
@@ -113,11 +144,20 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   the TS mirror changes in the same commit.
 - The library grid is virtualized (`components/VirtualGrid.tsx`, a
   dependency-free vertical windower) and paginated (96 tiles/page via
-  `hooks/usePhotos.ts`); each tile requests exactly one grid-size thumbnail
-  (`components/PhotoTile.tsx`). The UI must never request full-resolution
-  images for the grid. The viewer (`features/viewer/Viewer.tsx`) loads a
-  viewer-size thumbnail + `get_photo_full` for the metadata panel; ←/→ move
-  within the loaded page, Esc closes.
+  `hooks/useFilteredPhotos.ts`, which always routes through the structured
+  filter — the unfiltered grid is the empty filter); each tile requests
+  exactly one grid-size thumbnail (`components/PhotoTile.tsx`). The UI must
+  never request full-resolution images for the grid. The viewer
+  (`features/viewer/Viewer.tsx`) loads a viewer-size thumbnail +
+  `get_photo_full` for the metadata panel; ←/→ move within the loaded page,
+  Esc closes.
+- Filtering (Sprint 5): the active filter is **structured data** held in the
+  Library view (`FilterCondition[]`) and rendered by
+  `features/library/FilterBar.tsx`; the pure registry + helpers live in
+  `features/library/filterFields.ts` (field/operator knowledge, chip labels,
+  condition composition) and are unit-tested in `src/tests/filterFields.test.ts`.
+  Changing the filter re-loads page 0; the exact `Filter` object is stringified
+  and sent to the engine (and is what saved views will store).
 
 ## Error flow
 

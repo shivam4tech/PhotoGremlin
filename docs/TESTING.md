@@ -44,9 +44,29 @@ Per-sprint coverage (✓ = in place today):
   file's mtime + re-scan re-analyzes exactly that one; a deleted file is a
   friendly per-file failure that names it; cancel-before-start measures
   nothing and reports `cancelled`.
-- Filters (Sprint 5): each operator against in-memory rows; unknown field →
-  validation error; SQL values always bound (no injection path).
-- Statistics (Sprint 6): period resolution (today/week/month/year/custom/all
+ - EXIF extraction (Sprint 5, `metadata/exif.rs`): a JPEG with a real APP1
+   EXIF segment (built with `kamadak-exif`'s `Writer`) round-trips — camera
+   make/model/lens, f-number, exposure seconds, ISO, focal length (1/100 mm→mm),
+   capture datetime (zone-less EXIF → UTC RFC3339), dimensions, and a
+   **presence-only** GPS bit (no coordinate field exists in the record). A file
+   with no EXIF yields an empty record (not an error); blank ("0000:00:00" /
+   empty) values are treated as absent; the datetime parser handles the
+   `[,frac]` suffix and rejects garbage.
+ - Metadata pass (Sprint 5, integration `tests/metadata_integration.rs`) ✓:
+   scan a synthetic shoot → `exif_queue` holds every photo → `run_metadata`
+   reads EXIF, stores camera fields + GPS presence, stamps `exif_at`, and a
+   re-run is a no-op; a file without EXIF is stamped (processed) but keeps
+   NULL camera fields; a deleted file is a friendly per-file failure;
+   cancel-before-start processes nothing and reports `cancelled`.
+ - Filters (Sprint 5, `filters/mod.rs` + integration
+   `tests/filters_integration.rs`): every operator lowered and run against a
+   seeded DB — boundary `>=`/`<`, AND composition, `in` placeholders,
+   `between` (datetime string order == time order), flag semantics
+   (unanalyzed photos never match a flag; `color` = inverse of
+   `is_monochrome`), null-ops, unknown field/op/bad value-type → friendly
+   validation errors, and a SQL-injection-looking value is bound, not spliced
+   (the table survives). Empty filter returns everything, paginated.
+ - Statistics (Sprint 6): period resolution (today/week/month/year/custom/all
   on a fixed "now"); average over analyzed-only subset; distribution binning
   edges (ISO 400 → first of the two boundary bins, rule documented).
 - Rename templates (Sprint 7): token expansion, sanitization, collision
@@ -63,10 +83,16 @@ Per-sprint coverage (✓ = in place today):
   clamping (never past item count, start≤end, zero-item safe, abnormal col
   count) and `computeColumns` fit + min-one-column. The pure math is tested
   so the scroll handler stays a thin wrapper. ✓
-- Filter draft composition (Sprint 5): adding/removing conditions keeps
-  empty-filter semantics.
-- Pure presentation helpers (formatting: ISO→"1/125", focal→"50mm",
-  percentages) as they land.
+ - Filter registry + composition (Sprint 5, `src/tests/filterFields.test.ts`)
+   ✓: the TS registry mirrors the Rust field registry (names/kinds/areas);
+   operators are constrained per kind; `buildCondition` produces well-typed
+   values and rejects empty/invalid input (keeps ISO whole, honors the
+   orientation value set, auto-extends a datetime `between` upper bound to
+   end-of-day); `chipLabel` uses neutral technical language (no verdicts);
+   `draftToFilter` emits the exact wire object the Rust engine parses
+   (round-trip JSON asserted).
+ - Pure presentation helpers (formatting: ISO→"1/125", focal→"50mm",
+   percentages) as they land.
 
 ## Integration (Rust, `tests/`)
 

@@ -4,6 +4,7 @@ import type {
   AnalysisSummary,
   AppInfo,
   DbStatus,
+  MetadataSummary,
   PathsInfo,
   ProgressPayload,
   ScanSummary,
@@ -18,9 +19,11 @@ interface AppState {
   activeFolder: string | null;
   scanning: boolean;
   analyzing: boolean;
+  readingMetadata: boolean;
   progress: ProgressPayload | null;
   scanSummary: ScanSummary | null;
   analysisSummary: AnalysisSummary | null;
+  metadataSummary: MetadataSummary | null;
   notice: string | null;
   error: string | null;
 
@@ -31,9 +34,11 @@ interface AppState {
   setActiveFolder: (p: string | null) => void;
   setScanning: (b: boolean) => void;
   setAnalyzing: (b: boolean) => void;
+  setReadingMetadata: (b: boolean) => void;
   setProgress: (p: ProgressPayload | null) => void;
   setScanSummary: (s: ScanSummary | null) => void;
   setAnalysisSummary: (s: AnalysisSummary | null) => void;
+  setMetadataSummary: (s: MetadataSummary | null) => void;
   setNotice: (n: string | null) => void;
   setError: (e: string | null) => void;
 
@@ -50,9 +55,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeFolder: null,
   scanning: false,
   analyzing: false,
+  readingMetadata: false,
   progress: null,
       scanSummary: null,
       analysisSummary: null,
+      metadataSummary: null,
       notice: null,
       error: null,
 
@@ -63,9 +70,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setActiveFolder: (activeFolder) => set({ activeFolder }),
   setScanning: (scanning) => set({ scanning }),
   setAnalyzing: (analyzing) => set({ analyzing }),
+  setReadingMetadata: (readingMetadata) => set({ readingMetadata }),
   setProgress: (progress) => set({ progress }),
       setScanSummary: (scanSummary) => set({ scanSummary }),
       setAnalysisSummary: (analysisSummary) => set({ analysisSummary }),
+      setMetadataSummary: (metadataSummary) => set({ metadataSummary }),
       setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
 

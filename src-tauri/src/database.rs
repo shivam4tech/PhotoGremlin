@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 6;
+pub const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -189,20 +189,17 @@ impl Db {
             // v6: record the source file mtime each analysis row was computed
             // from, so re-analysis is incremental (only re-measure when the
             // file changed on disk or the algorithm version advanced).
-            let has_source_mtime: bool = conn
-                .prepare("PRAGMA table_info(analysis)")
-                .ok()
-                .and_then(|mut p| {
-                    let cols = p.query_map([], |r| r.get::<_, String>(1)).ok()?;
-                    Some(
-                        cols.into_iter()
-                            .any(|c| c.as_deref().ok() == Some("source_mtime")),
-                    )
-                })
-                .unwrap_or(false);
-            if !has_source_mtime {
+            if !table_has_column(&conn, "analysis", "source_mtime") {
                 conn.execute("ALTER TABLE analysis ADD COLUMN source_mtime TEXT", [])
                     .map_err(db_err("add analysis.source_mtime"))?;
+            }
+
+            // v7: record when the EXIF/metadata pass last touched a photo
+            // (RFC3339). Drives the "metadata pending" count and lets the
+            // pass skip files it has already read.
+            if !table_has_column(&conn, "photos", "exif_at") {
+                conn.execute("ALTER TABLE photos ADD COLUMN exif_at TEXT", [])
+                    .map_err(db_err("add photos.exif_at"))?;
             }
 
             let current_version: i64 = conn
@@ -241,6 +238,12 @@ impl Db {
         let analyzed_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM analysis", [], |r| r.get(0))
             .map_err(db_err("count analysis"))?;
+        // Photos still awaiting the EXIF/metadata pass (never read yet).
+        let metadata_pending: i64 = conn
+            .query_row("SELECT COUNT(*) FROM photos WHERE exif_at IS NULL", [], |r| {
+                r.get(0)
+            })
+            .map_err(db_err("count metadata pending"))?;
         let version: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
@@ -252,6 +255,7 @@ impl Db {
             photo_count,
             session_count,
             analyzed_count,
+            metadata_pending,
             schema_version: version,
         })
     }
@@ -420,55 +424,6 @@ impl Db {
         )
         .map_err(db_err("refresh session counts"))?;
         Ok(())
-    }
-
-    /// Paginated photo list for the grid. Lightweight columns only — the
-    /// grid needs enough to render tiles and drive the viewer, not the full
-    /// analysis blob (fetched on demand via `get_photo_full`).
-    pub fn list_photos(
-        &self,
-        offset: i64,
-        limit: i64,
-    ) -> AppResult<(Vec<PhotoSummary>, i64)> {
-        let conn = self.lock()?;
-        let total: i64 = conn
-            .query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0))
-            .map_err(db_err("count photos"))?;
-
-        let limit = limit.clamp(1, 500);
-        let offset = offset.max(0);
-        let mut stmt = conn
-            .prepare(
-                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
-                        p.orientation, p.capture_datetime, p.session_id,
-                        (a.photo_id IS NOT NULL) AS has_analysis
-                 FROM photos p
-                 LEFT JOIN analysis a ON a.photo_id = p.id
-                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
-                 LIMIT ?1 OFFSET ?2",
-            )
-            .map_err(db_err("prepare list_photos"))?;
-        let rows = stmt
-            .query_map(params![limit, offset], |r| {
-                Ok(PhotoSummary {
-                    id: r.get(0)?,
-                    filename: r.get(1)?,
-                    extension: r.get(2)?,
-                    size_bytes: r.get(3)?,
-                    width: r.get(4)?,
-                    height: r.get(5)?,
-                    orientation: r.get(6)?,
-                    capture_datetime: r.get(7)?,
-                    session_id: r.get(8)?,
-                    has_analysis: r.get::<_, i64>(9)? != 0,
-                })
-            })
-            .map_err(db_err("query list_photos"))?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(db_err("read photo row"))?);
-        }
-        Ok((out, total))
     }
 
     /// One full photo with its analysis row (for the viewer metadata panel).
@@ -665,6 +620,149 @@ impl Db {
         Ok((decodable, analyzed))
     }
 
+    /// Photos still awaiting the EXIF/metadata pass, in stable order.
+    pub fn exif_queue(&self) -> AppResult<Vec<ExifWork>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, path, extension, filename, width, height, orientation
+                 FROM photos WHERE exif_at IS NULL
+                 ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC",
+            )
+            .map_err(db_err("prepare exif_queue"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(ExifWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    extension: r.get(2)?,
+                    filename: r.get(3)?,
+                    width: r.get(4)?,
+                    height: r.get(5)?,
+                    orientation: r.get(6)?,
+                })
+            })
+            .map_err(db_err("query exif_queue"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read exif work row"))?);
+        }
+        Ok(out)
+    }
+
+    /// Persist one photo's EXIF/metadata extraction. Merge semantics:
+    /// scanner-resolved dimensions/orientation always win (COALESCE keeps the
+    /// existing value); GPS presence only ever escalates 0→1; `exif_at` is
+    /// stamped so a re-run's queue skips the file.
+    pub fn upsert_exif(&self, photo_id: i64, e: &crate::metadata::ExifRecord) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE photos SET
+                 width = COALESCE(width, ?1),
+                 height = COALESCE(height, ?2),
+                 orientation = COALESCE(orientation, ?3),
+                 camera_make = COALESCE(camera_make, ?4),
+                 camera_model = COALESCE(camera_model, ?5),
+                 lens = COALESCE(lens, ?6),
+                 focal_length = COALESCE(focal_length, ?7),
+                 iso = COALESCE(iso, ?8),
+                 aperture = COALESCE(aperture, ?9),
+                 shutter_speed = COALESCE(shutter_speed, ?10),
+                 capture_datetime = COALESCE(capture_datetime, ?11),
+                 gps_present = CASE WHEN gps_present = 1 THEN 1 ELSE ?12 END,
+                 exif_at = ?13
+             WHERE id = ?14",
+            params![
+                e.width.map(|v| v as i64),
+                e.height.map(|v| v as i64),
+                e.orientation,
+                e.camera_make,
+                e.camera_model,
+                e.lens,
+                e.focal_length,
+                e.iso,
+                e.aperture,
+                e.shutter_speed,
+                e.capture_datetime,
+                i64::from(e.gps_present),
+                crate::time::now_utc(),
+                photo_id,
+            ],
+        )
+        .map_err(db_err("upsert_exif"))?;
+        Ok(())
+    }
+
+    /// Count + one page of photos matching a pre-built `WHERE` clause.
+    /// `where_sql` must use only positionless `?` placeholders in order, and
+    /// `where_params` must line up with them; `LIMIT ?` / `OFFSET ?` are
+    /// appended (and parametered) by this method. Empty `where_sql` matches
+    /// everything. The shared `LEFT JOIN analysis` gives filters access to
+    /// the analysis columns under alias `a`.
+    pub fn photos_where(
+        &self,
+        where_sql: &str,
+        where_params: Vec<crate::filters::SqlParam>,
+        offset: i64,
+        limit: i64,
+    ) -> AppResult<(Vec<PhotoSummary>, i64)> {
+        let conn = self.lock()?;
+        let limit = limit.clamp(1, 500);
+        let offset = offset.max(0);
+        let base = "FROM photos p LEFT JOIN analysis a ON a.photo_id = p.id";
+
+        // Total for the caller (drives pagination + result count).
+        let count_sql = format!("SELECT COUNT(*) {base} {where_sql}");
+        let total: i64 = conn
+            .query_row(
+                count_sql.as_str(),
+                rusqlite::params_from_iter(where_params.iter().map(|p| p as &dyn rusqlite::ToSql)),
+                |r| r.get(0),
+            )
+            .map_err(db_err("count filtered photos"))?;
+
+        let page_params: Vec<&dyn rusqlite::ToSql> = where_params
+            .iter()
+            .map(|p| p as &dyn rusqlite::ToSql)
+            .chain([&limit as &dyn rusqlite::ToSql, &offset as &dyn rusqlite::ToSql])
+            .collect();
+        let page_sql = format!(
+            "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                    p.orientation, p.capture_datetime, p.session_id,
+                    (a.photo_id IS NOT NULL) AS has_analysis
+             {base} {where_sql}
+             ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
+             LIMIT ? OFFSET ?"
+        );
+        let mut stmt = conn.prepare(page_sql.as_str()).map_err(db_err("prepare filtered photos"))?;
+        let rows = stmt
+            .query_map(page_params.as_slice(), |r| {
+                Ok(PhotoSummary {
+                    id: r.get(0)?,
+                    filename: r.get(1)?,
+                    extension: r.get(2)?,
+                    size_bytes: r.get(3)?,
+                    width: r.get(4)?,
+                    height: r.get(5)?,
+                    orientation: r.get(6)?,
+                    capture_datetime: r.get(7)?,
+                    session_id: r.get(8)?,
+                    has_analysis: r.get::<_, i64>(9)? != 0,
+                })
+            })
+            .map_err(db_err("query filtered photos"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read filtered photo row"))?);
+        }
+        Ok((out, total))
+    }
+
+    /// `list_photos` is the unfiltered page (kept as the default grid path).
+    pub fn list_photos(&self, offset: i64, limit: i64) -> AppResult<(Vec<PhotoSummary>, i64)> {
+        self.photos_where("", Vec::new(), offset, limit)
+    }
+
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
         self.conn
             .lock()
@@ -674,6 +772,20 @@ impl Db {
 
 /// One queued unit of analysis work: a decodable photo whose row is missing,
 /// stale (older algorithm), or computed from a different file mtime.
+/// One queued unit of metadata work: a photo the EXIF/metadata pass hasn't
+/// read yet (`exif_at IS NULL`). Carries the dimensions the scanner already
+/// resolved so the pass only derives orientation where it fills them.
+#[derive(Debug, Clone)]
+pub struct ExifWork {
+    pub photo_id: i64,
+    pub path: String,
+    pub extension: String,
+    pub filename: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub orientation: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AnalysisWork {
     pub photo_id: i64,
@@ -689,6 +801,8 @@ pub struct DbStatus {
     pub photo_count: i64,
     pub session_count: i64,
     pub analyzed_count: i64,
+    /// Photos not yet read by the EXIF/metadata pass (`exif_at IS NULL`).
+    pub metadata_pending: i64,
     pub schema_version: i64,
 }
 
@@ -788,6 +902,18 @@ fn db_err(context: &str) -> impl Fn(rusqlite::Error) -> AppError + 'static {
         tracing::error!(%context, error = %e, "sqlite error");
         AppError::Database(e.to_string())
     }
+}
+
+/// Whether `table` already declares `column` (used to keep `ALTER TABLE`
+/// migrations idempotent across versions).
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.prepare(&format!("PRAGMA table_info({table})"))
+        .ok()
+        .and_then(|mut stmt| {
+            let cols = stmt.query_map([], |r| r.get::<_, String>(1)).ok()?;
+            Some(cols.into_iter().any(|c| c.as_deref().ok() == Some(column)))
+        })
+        .unwrap_or(false)
 }
 
 // Convenience: unit tests build a temp database.
