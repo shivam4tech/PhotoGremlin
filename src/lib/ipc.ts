@@ -7,6 +7,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   AppInfo,
   DbStatus,
+  PhotoFull,
+  PhotoPage,
+  ThumbData,
+  ThumbKind,
 } from "@/types/api";
 
 export const api = {
@@ -22,6 +26,12 @@ export const api = {
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),
   startScan: (path: string): Promise<void> => invoke("start_scan", { path }),
   stopScan: (): Promise<boolean> => invoke("stop_scan"),
+  listPhotos: (offset: number, limit: number): Promise<PhotoPage> =>
+    invoke("list_photos", { offset, limit }),
+  getPhotoFull: (id: number): Promise<PhotoFull> =>
+    invoke("get_photo_full", { id }),
+  getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>
+    invoke("get_thumbnail", { photoId, kind }),
   listSessions: () =>
     invoke<
       {

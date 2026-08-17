@@ -403,6 +403,116 @@ impl Db {
         Ok(())
     }
 
+    /// Paginated photo list for the grid. Lightweight columns only — the
+    /// grid needs enough to render tiles and drive the viewer, not the full
+    /// analysis blob (fetched on demand via `get_photo_full`).
+    pub fn list_photos(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> AppResult<(Vec<PhotoSummary>, i64)> {
+        let conn = self.lock()?;
+        let total: i64 = conn
+            .query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0))
+            .map_err(db_err("count photos"))?;
+
+        let limit = limit.clamp(1, 500);
+        let offset = offset.max(0);
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.capture_datetime, p.session_id,
+                        (a.photo_id IS NOT NULL) AS has_analysis
+                 FROM photos p
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
+                 LIMIT ?1 OFFSET ?2",
+            )
+            .map_err(db_err("prepare list_photos"))?;
+        let rows = stmt
+            .query_map(params![limit, offset], |r| {
+                Ok(PhotoSummary {
+                    id: r.get(0)?,
+                    filename: r.get(1)?,
+                    extension: r.get(2)?,
+                    size_bytes: r.get(3)?,
+                    width: r.get(4)?,
+                    height: r.get(5)?,
+                    orientation: r.get(6)?,
+                    capture_datetime: r.get(7)?,
+                    session_id: r.get(8)?,
+                    has_analysis: r.get::<_, i64>(9)? != 0,
+                })
+            })
+            .map_err(db_err("query list_photos"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read photo row"))?);
+        }
+        Ok((out, total))
+    }
+
+    /// One full photo with its analysis row (for the viewer metadata panel).
+    pub fn get_photo_full(&self, id: i64) -> AppResult<PhotoFull> {
+        let conn = self.lock()?;
+        let row: Option<PhotoFull> = conn
+            .query_row(
+                "SELECT p.id, p.path, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.camera_make, p.camera_model, p.lens, p.focal_length,
+                        p.iso, p.aperture, p.shutter_speed, p.capture_datetime, p.gps_present,
+                        p.session_id, p.indexed_at, p.file_mtime,
+                        a.sharpness, a.brightness, a.contrast, a.saturation,
+                        a.highlight_clipping, a.shadow_clipping, a.is_monochrome, a.is_dark,
+                        a.is_bright, a.face_count, a.smile_count, a.perceptual_hash,
+                        a.algorithm_version, a.analyzed_at
+                 FROM photos p
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE p.id = ?1",
+                params![id],
+                |r| {
+                    Ok(PhotoFull {
+                        id: r.get(0)?,
+                        path: r.get(1)?,
+                        filename: r.get(2)?,
+                        extension: r.get(3)?,
+                        size_bytes: r.get(4)?,
+                        width: r.get(5)?,
+                        height: r.get(6)?,
+                        orientation: r.get(7)?,
+                        camera_make: r.get(8)?,
+                        camera_model: r.get(9)?,
+                        lens: r.get(10)?,
+                        focal_length: r.get(11)?,
+                        iso: r.get(12)?,
+                        aperture: r.get(13)?,
+                        shutter_speed: r.get(14)?,
+                        capture_datetime: r.get(15)?,
+                        gps_present: r.get::<_, i64>(16)? != 0,
+                        session_id: r.get(17)?,
+                        indexed_at: r.get(18)?,
+                        file_mtime: r.get(19)?,
+                        sharpness: r.get(20)?,
+                        brightness: r.get(21)?,
+                        contrast: r.get(22)?,
+                        saturation: r.get(23)?,
+                        highlight_clipping: r.get(24)?,
+                        shadow_clipping: r.get(25)?,
+                        is_monochrome: r.get::<_, Option<i64>>(26)?.unwrap_or(0) != 0,
+                        is_dark: r.get::<_, Option<i64>>(27)?.unwrap_or(0) != 0,
+                        is_bright: r.get::<_, Option<i64>>(28)?.unwrap_or(0) != 0,
+                        face_count: r.get(29)?,
+                        smile_count: r.get(30)?,
+                        perceptual_hash: r.get(31)?,
+                        algorithm_version: r.get(32)?,
+                        analyzed_at: r.get(33)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(db_err("get_photo_full"))?;
+        row.ok_or_else(|| AppError::operation("This photograph is no longer in the library"))
+    }
+
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
         self.conn
             .lock()
@@ -431,6 +541,70 @@ pub struct PhotoUpsert {
     pub orientation: Option<String>,
     pub session_id: i64,
     pub file_mtime: Option<String>,
+}
+
+/// Grid tile row: just enough to render a thumbnail tile and open the
+/// viewer. The full record (path, EXIF, analysis) arrives via
+/// `get_photo_full` — keeping page payloads small for 10k-photo libraries.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PhotoSummary {
+    pub id: i64,
+    pub filename: String,
+    pub extension: String,
+    pub size_bytes: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub orientation: Option<String>,
+    pub capture_datetime: Option<String>,
+    pub session_id: Option<i64>,
+    pub has_analysis: bool,
+}
+
+/// `PhotoPage` is what `list_photos` returns over IPC.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PhotoPage {
+    pub photos: Vec<PhotoSummary>,
+    pub total: i64,
+}
+
+/// Full photo + its analysis row (NULLs when analysis hasn't run yet).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PhotoFull {
+    pub id: i64,
+    pub path: String,
+    pub filename: String,
+    pub extension: String,
+    pub size_bytes: Option<i64>,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub orientation: Option<String>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens: Option<String>,
+    pub focal_length: Option<f64>,
+    pub iso: Option<i64>,
+    pub aperture: Option<f64>,
+    pub shutter_speed: Option<f64>,
+    pub capture_datetime: Option<String>,
+    pub gps_present: bool,
+    pub session_id: Option<i64>,
+    pub indexed_at: String,
+    pub file_mtime: Option<String>,
+    // ---- analysis (NULL before the analysis pass has run) ----
+    pub sharpness: Option<f64>,
+    pub brightness: Option<f64>,
+    pub contrast: Option<f64>,
+    pub saturation: Option<f64>,
+    pub highlight_clipping: Option<f64>,
+    pub shadow_clipping: Option<f64>,
+    pub is_monochrome: bool,
+    pub is_dark: bool,
+    pub is_bright: bool,
+    pub face_count: Option<i64>,
+    pub smile_count: Option<i64>,
+    pub perceptual_hash: Option<String>,
+    pub algorithm_version: Option<u32>,
+    pub analyzed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

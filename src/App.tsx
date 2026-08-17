@@ -95,7 +95,7 @@ export default function App() {
       <Sidebar />
       <main className="main">
         <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description} />
-        <div className="view-scroll">{body}</div>
+        <div className={view === "library" ? "view-scroll library-scroll" : "view-scroll"}>{body}</div>
         {error && (
           <div
             role="alert"

@@ -15,6 +15,13 @@ Per-sprint coverage (✓ = in place today):
   get dimensions+orientation, RAW stays null, hidden dirs skipped,
   non-photos ignored, re-scan idempotent, cancel semantics, 1,000-file scale
   test with a time ceiling ✓
+- Thumbnailer (Sprint 3) ✓: FNV-1a is stable + distinct; base64 round-trips
+  (incl. empty/1/2/3-byte and binary edges); cache key reacts to
+  path/size/mtime/target-width and is deterministic; generate produces a
+  valid decodable JPEG at the expected aspect (landscape 640×480→256×192,
+  portrait 480×640→256×341); full `get()` lifecycle — miss→generate→hit with
+  identical bytes, unknown id → friendly "no longer in the library" error;
+  missing file → friendly error.
 - Analysis (Sprint 4): each metric on **synthetic images** —
   - generated in temp dirs with the `image` crate (gradients, noise,
     patterns), never shipping real photos in the repo.
@@ -38,6 +45,10 @@ Per-sprint coverage (✓ = in place today):
 ## Frontend tests (`npm test`, Vitest)
 
 - Store behavior (view switching, progress payloads) ✓
+- Virtual grid math (Sprint 3): `computeVisibleRange` window/overscan/
+  clamping (never past item count, start≤end, zero-item safe, abnormal col
+  count) and `computeColumns` fit + min-one-column. The pure math is tested
+  so the scroll handler stays a thin wrapper. ✓
 - Filter draft composition (Sprint 5): adding/removing conditions keeps
   empty-filter semantics.
 - Pure presentation helpers (formatting: ISO→"1/125", focal→"50mm",
