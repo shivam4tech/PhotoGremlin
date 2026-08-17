@@ -8,7 +8,14 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 4). Tests assert both expected-table presence and idempotency.
+(currently 5). Tests assert both expected-table presence and idempotency.
+
+- v1: core tables (sessions, photos, analysis, app_settings)
+- v2: collections
+- v3: saved_views + similarity groups
+- v4: file_operations audit log
+- v5: partial unique index `sessions(root_path) WHERE root_path IS NOT NULL`
+  — one session per imported folder (manual sessions keep `root_path` NULL)
 
 ## Tables (as of Sprint 1 — schema v1–v4)
 
@@ -49,6 +56,15 @@ re-scan upserts instead of duplicating).
 
 Indexes: `session_id`, `capture_datetime`, `camera_model`, `lens` (filter +
 dashboard hot paths).
+
+**Upsert semantics (scanner, Sprint 2):** the scanner upserts by `path`.
+Re-scans refresh `size_bytes`/`file_mtime`/`session_id`, merge dimensions with
+`COALESCE` (a scan that can't read pixels never blanks values a later EXIF
+pass filled), and preserve the original `indexed_at`. `upsert_session` is
+keyed on `root_path`: re-scanning a folder keeps the same session and
+refreshes its name; `refresh_session_counts` re-derives `photo_count` after
+each scan pass. Rows for files that vanished from disk are **not** deleted
+silently — they stay until a future reconcile step flags them to the user.
 
 ### analysis
 One row per analyzed photo (`photo_id` PK, FK cascade).

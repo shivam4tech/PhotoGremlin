@@ -5,6 +5,7 @@ import type {
   DbStatus,
   PathsInfo,
   ProgressPayload,
+  ScanSummary,
   ViewId,
 } from "@/types/api";
 
@@ -17,6 +18,7 @@ interface AppState {
   scanning: boolean;
   analyzing: boolean;
   progress: ProgressPayload | null;
+  scanSummary: ScanSummary | null;
   notice: string | null;
   error: string | null;
 
@@ -28,6 +30,7 @@ interface AppState {
   setScanning: (b: boolean) => void;
   setAnalyzing: (b: boolean) => void;
   setProgress: (p: ProgressPayload | null) => void;
+  setScanSummary: (s: ScanSummary | null) => void;
   setNotice: (n: string | null) => void;
   setError: (e: string | null) => void;
 
@@ -45,6 +48,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   scanning: false,
   analyzing: false,
   progress: null,
+  scanSummary: null,
   notice: null,
   error: null,
 
@@ -56,6 +60,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setScanning: (scanning) => set({ scanning }),
   setAnalyzing: (analyzing) => set({ analyzing }),
   setProgress: (progress) => set({ progress }),
+  setScanSummary: (scanSummary) => set({ scanSummary }),
   setNotice: (notice) => set({ notice }),
   setError: (error) => set({ error }),
 

@@ -11,6 +11,7 @@ export function LibraryView() {
   const dbStatus = useAppStore((s) => s.dbStatus);
   const scanning = useAppStore((s) => s.scanning);
   const progress = useAppStore((s) => s.progress);
+  const scanSummary = useAppStore((s) => s.scanSummary);
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
@@ -26,12 +27,35 @@ export function LibraryView() {
       if (!picked) return;
       await api.setActiveFolder(picked);
       store().setActiveFolder(picked);
+      store().setScanSummary(null);
       await store().refreshStatus();
-      setNotice("Folder set as your library. The scanner goes live in the next update — indexed photos appear below as they are ingested.");
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function startScan() {
+    if (!activeFolder) return;
+    setError(null);
+    setNotice(null);
+    try {
+      await api.startScan(activeFolder);
+      store().setScanning(true);
+      store().setProgress({ total: 0, done: 0, stage: "discovering", current: null });
+      store().setScanSummary(null);
+    } catch (e) {
+      setError(toErrorMessage(e));
+      store().setScanning(false);
+    }
+  }
+
+  async function stopScan() {
+    try {
+      await api.stopScan();
+    } catch (e) {
+      setError(toErrorMessage(e));
     }
   }
 
@@ -68,7 +92,7 @@ export function LibraryView() {
 
       {!activeFolder ? (
         <EmptyState
-          glyph={<span style={{ display: "inline-flex" }}><FolderIcon size={40} /></span>}
+          glyph={<FolderIcon size={40} />}
           title="Open a photo folder"
           action={
             <button className="btn btn-primary" onClick={openFolder} disabled={busy}>
@@ -87,27 +111,82 @@ export function LibraryView() {
             <h3>Active library</h3>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <FolderIcon size={20} />
-              <span className="mono" style={{ fontSize: 12.5, wordBreak: "break-all", flex: 1 }}>
+              <span
+                className="mono"
+                style={{ fontSize: 12.5, wordBreak: "break-all", flex: 1 }}
+              >
                 {activeFolder}
               </span>
-              <button className="btn btn-sm" onClick={openFolder} disabled={busy}>
+              <button className="btn btn-sm" onClick={openFolder} disabled={busy || scanning}>
                 Change
               </button>
+              {!scanning ? (
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={startScan}
+                  disabled={busy}
+                >
+                  {dbStatus && dbStatus.photo_count > 0 ? "Re-scan folder" : "Scan folder"}
+                </button>
+              ) : (
+                <button className="btn btn-danger btn-sm" onClick={stopScan}>
+                  Stop scan
+                </button>
+              )}
             </div>
           </div>
 
           {scanning && progress && (
             <div className="card" style={{ marginBottom: 16 }}>
-              <h3>Scanning</h3>
+              <h3>{progress.stage === "done" ? "Finishing" : "Scanning"}</h3>
               <ProgressBar
                 value={progress.done}
                 max={progress.total}
                 label={
-                  progress.current
-                    ? `${progress.stage}: ${progress.current}`
-                    : `${progress.stage} — ${progress.done.toLocaleString()} / ${progress.total.toLocaleString()}`
+                  progress.total > 0
+                    ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} files`
+                    : progress.stage
                 }
               />
+              {progress.current && (
+                <div className="faint mono" style={{ fontSize: 11.5, marginTop: 8, wordBreak: "break-all" }}>
+                  {progress.current}
+                </div>
+              )}
+            </div>
+          )}
+
+          {scanSummary && !scanning && (
+            <div className="card" style={{ marginBottom: 16 }}>
+              <h3>Last scan — {scanSummary.session_name}</h3>
+              <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
+                <StatCard label="Indexed" value={scanSummary.indexed} sub="photographs added" />
+                <StatCard label="Files in folder" value={scanSummary.total_files} />
+                <StatCard label="Ignored" value={scanSummary.ignored} sub="non-photo files" />
+                <StatCard
+                  label="Duration"
+                  value={`${(scanSummary.elapsed_ms / 1000).toFixed(1)}s`}
+                  sub={scanSummary.cancelled ? "scan was stopped" : undefined}
+                />
+              </div>
+              {scanSummary.errors.length > 0 && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: 12.5,
+                    color: "var(--warning)",
+                    display: "grid",
+                    gap: 4,
+                  }}
+                >
+                  {scanSummary.errors.slice(0, 5).map((e) => (
+                    <div key={e}>• {e}</div>
+                  ))}
+                  {scanSummary.errors.length > 5 && (
+                    <div className="faint">… and {scanSummary.errors.length - 5} more (see log)</div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -131,9 +210,9 @@ export function LibraryView() {
           ) : (
             <EmptyState glyph="◫" title="Nothing indexed yet">
               <p>
-                The photo scanner is being wired up next. Once it runs, thousands of
-                photos will index in seconds, and their thumbnails, technical measurements
-                and statistics will appear here.
+                {scanning
+                  ? "Scanning in progress — watch the progress bar above."
+                  : "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."}
               </p>
             </EmptyState>
           )}
