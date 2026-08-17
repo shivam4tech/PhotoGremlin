@@ -9,7 +9,7 @@
 | 3 | Thumbnails + library grid (cache, lazy, virtualized) + viewer + metadata panel | **done** (2026-08-17) |
 | 4 | Local image analysis (sharpness, brightness, contrast, saturation, mono, clipping) + progress | **done** (2026-08-17) |
 | 5 | EXIF + filter engine (all filter areas, AND composition) | **done** (2026-08-17) |
-| 6 | Dashboard + statistics engine (periods, session stats, comparison, trends, camera/lens, distributions, selection infra) | |
+| 6 | Dashboard + statistics engine (periods, session stats, comparison, trends, camera/lens, distributions, selection infra) | **done** (2026-08-17) |
 | 7 | Selection + file operations (group rename, move/copy/trash, collisions, confirmations) | |
 | 8 | Saved views + collections + similarity (perceptual hash, groups, bursts) + session detail | |
 | 9 | Local intelligence (face detection first; smile only if stable — otherwise documented as v0.2) | |

@@ -15,6 +15,7 @@ pub mod metadata;
 pub mod paths;
 pub mod scanner;
 pub mod state;
+pub mod statistics;
 pub mod thumbnailer;
 pub mod time;
 
@@ -72,6 +73,9 @@ pub fn run() {
             commands::start_metadata,
             commands::stop_metadata,
             commands::list_filtered_photos,
+            commands::period_stats,
+            commands::session_summary,
+            commands::compare_sessions,
             commands::list_sessions,
             commands::list_photos,
             commands::get_photo_full,

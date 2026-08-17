@@ -93,7 +93,29 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   come only from the registry; **every user value is a bound parameter**
   (injection-safe). `commands/filters.rs::list_filtered_photos` = parse →
   build → `Db::photos_where`. The grid, saved views, and statistics all share
-  this one object.
+   this one object.
+- `statistics/` (Sprint 6) — the statistics engine, a UI-independent service
+  (see STATISTICS.md). One `Period` model (today / this-week (Monday-based) /
+  this-month / this-year / custom / all) resolves against an injected `now`
+  to an RFC3339 string range; query time source is
+  `COALESCE(p.capture_datetime, p.indexed_at)` — string comparison IS time
+  comparison because the catalog stores UTC RFC3339. `stats_for_scope` runs a
+  fixed set of aggregate queries for a scope (period OR one session): totals,
+  analyzed-only averages, mono/color shares, face/smile shares (only over
+  photos with AI data), the four EXIF histograms (column values fetched,
+  binned by the pure `bins.rs` functions — fixed bins, documented edges),
+  camera/lens usage (top 20 by count, share + analyzed-only avg
+  sharpness/ISO, NULL names → "Unknown camera/lens"), the monthly trend
+  (only months with data, newest 36, chronological out), and the selection
+  ratio (present only when a selection signal exists: `selections` state in
+  scope, or move/copy/rename/trash rows in `file_operations`). **Honest data
+  is a type-level rule**: every average/share is `Option` and stays `None`
+  when its inputs do not exist; the UI renders that as "unavailable", never
+  0. `session_summary` = the same core scoped to one session + duration;
+  `compare_sessions` = up to 8 sessions on the same metric rows.
+- `commands/stats.rs` — `period_stats` (arg: `periodJson`),
+  `session_summary(sessionId)`, `compare_sessions(sessionIds)`. Synchronous
+  pure-SQL commands; no background task, no events.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
@@ -157,7 +179,17 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `features/library/filterFields.ts` (field/operator knowledge, chip labels,
   condition composition) and are unit-tested in `src/tests/filterFields.test.ts`.
   Changing the filter re-loads page 0; the exact `Filter` object is stringified
-  and sent to the engine (and is what saved views will store).
+   and sent to the engine (and is what saved views will store).
+- Statistics (Sprint 6): `views/DashboardView.tsx` renders
+  `PeriodStats` for the selected period (+ custom range) — totals,
+  analyzed-only averages, shares, the four distributions (pure CSS bars),
+  camera/lens usage tables, monthly trend, and the selection section (when a
+  signal exists). `views/SessionsView.tsx` adds 2–8 session comparison
+  (`compare_sessions`) and a per-session detail (`session_summary`). Pure
+  formatting + the honest-"unavailable" rendering live in
+  `features/stats/format.ts` (unit-tested in `src/tests/statsFormat.test.ts`);
+  the language discipline ("sharpness 62", never "you improved") is enforced
+  there and in the view copy.
 
 ## Error flow
 

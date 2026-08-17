@@ -55,6 +55,8 @@ pub async fn start_metadata(
     // post-run slot ownership check (pointer comparison) and final emit.
     let cancel_task = cancel.clone();
     let app_task = app.clone();
+    // A second handle for the short post-run session-time refresh.
+    let db_for_refresh = db.clone();
 
     tauri::async_runtime::spawn(async move {
         let result: AppResult<MetadataSummary> =
@@ -72,6 +74,13 @@ pub async fn start_metadata(
                 Ok(inner) => inner,
                 Err(e) => Err(AppError::operation(format!("metadata task failed: {e}"))),
             };
+
+        // The pass just filled capture datetimes — derive session shoot
+        // periods from them so the sessions view and statistics stay true
+        // (one short blocking lock; no awaits around it).
+        if let Err(e) = db_for_refresh.refresh_all_sessions_times() {
+            tracing::warn!(error = %e, "session time refresh failed");
+        }
 
         // Release the slot (only if we're still the holder) and tell the UI.
         {

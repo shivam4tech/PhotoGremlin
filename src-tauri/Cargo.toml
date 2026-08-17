@@ -30,6 +30,9 @@ walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff"] }
 kamadak-exif = "0.6"
 
+[dev-dependencies]
+chrono = { version = "0.4" }
+
 [profile.release]
 codegen-units = 1
 lto = true

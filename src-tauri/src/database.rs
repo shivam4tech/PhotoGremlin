@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 7;
+pub const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -201,6 +201,19 @@ impl Db {
                 conn.execute("ALTER TABLE photos ADD COLUMN exif_at TEXT", [])
                     .map_err(db_err("add photos.exif_at"))?;
             }
+
+            // v8: explicit selection state (culling: keep/reject). The
+            // selection UI lands in Sprint 7; the statistics engine's
+            // selection-ratio query reads this (and file_operations) now.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS selections (
+                    photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+                    state TEXT NOT NULL CHECK (state IN ('selected', 'rejected')),
+                    updated_at TEXT
+                 );",
+                [],
+            )
+            .map_err(db_err("create selections"))?;
 
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
@@ -414,15 +427,44 @@ impl Db {
     }
 
     /// Refresh a session's denormalized counters after a scan pass.
+    /// Refresh one session's denormalized counters: photo_count plus
+    /// start/end of the shoot, derived from the photos' best-known time
+    /// (`COALESCE(capture_datetime, indexed_at)` — EXIF fills the former as
+    /// the metadata pass runs). Empty sessions get NULL times.
     pub fn refresh_session_counts(&self, session_id: i64) -> AppResult<()> {
         let conn = self.lock()?;
         conn.execute(
-            "UPDATE sessions
-             SET photo_count = (SELECT COUNT(*) FROM photos WHERE session_id = ?1)
+            "UPDATE sessions SET
+                 photo_count = (SELECT COUNT(*) FROM photos WHERE session_id = ?1),
+                 start_time  = (SELECT MIN(COALESCE(capture_datetime, indexed_at))
+                                FROM photos WHERE session_id = ?1
+                                AND COALESCE(capture_datetime, indexed_at) IS NOT NULL),
+                 end_time    = (SELECT MAX(COALESCE(capture_datetime, indexed_at))
+                                FROM photos WHERE session_id = ?1
+                                AND COALESCE(capture_datetime, indexed_at) IS NOT NULL)
              WHERE id = ?1",
             params![session_id],
         )
         .map_err(db_err("refresh session counts"))?;
+        Ok(())
+    }
+
+    /// Same refresh for every session in one statement — used after the
+    /// metadata pass, which is what fills capture datetimes.
+    pub fn refresh_all_sessions_times(&self) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "UPDATE sessions SET
+                 photo_count = (SELECT COUNT(*) FROM photos WHERE session_id = sessions.id),
+                 start_time  = (SELECT MIN(COALESCE(p.capture_datetime, p.indexed_at))
+                                FROM photos p WHERE p.session_id = sessions.id
+                                AND COALESCE(p.capture_datetime, p.indexed_at) IS NOT NULL),
+                 end_time    = (SELECT MAX(COALESCE(p.capture_datetime, p.indexed_at))
+                                FROM photos p WHERE p.session_id = sessions.id
+                                AND COALESCE(p.capture_datetime, p.indexed_at) IS NOT NULL)",
+            [],
+        )
+        .map_err(db_err("refresh all session times"))?;
         Ok(())
     }
 
