@@ -98,6 +98,72 @@ export interface ProgressPayload {
   current: string | null;
 }
 
+/** Grid tile row (lightweight — full record comes via get_photo_full). */
+export interface PhotoSummary {
+  id: number;
+  filename: string;
+  extension: string;
+  size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  orientation: Orientation | null;
+  capture_datetime: string | null;
+  session_id: number | null;
+  has_analysis: boolean;
+}
+
+export interface PhotoPage {
+  photos: PhotoSummary[];
+  total: number;
+}
+
+/** Full photo + analysis (analysis fields NULL until the analysis pass). */
+export interface PhotoFull {
+  id: number;
+  path: string;
+  filename: string;
+  extension: string;
+  size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  orientation: Orientation | null;
+  camera_make: string | null;
+  camera_model: string | null;
+  lens: string | null;
+  focal_length: number | null;
+  iso: number | null;
+  aperture: number | null;
+  shutter_speed: number | null;
+  capture_datetime: string | null;
+  gps_present: boolean;
+  session_id: number | null;
+  indexed_at: string;
+  file_mtime: string | null;
+  sharpness: number | null;
+  brightness: number | null;
+  contrast: number | null;
+  saturation: number | null;
+  highlight_clipping: number | null;
+  shadow_clipping: number | null;
+  is_monochrome: boolean;
+  is_dark: boolean;
+  is_bright: boolean;
+  face_count: number | null;
+  smile_count: number | null;
+  perceptual_hash: string | null;
+  algorithm_version: number | null;
+  analyzed_at: string | null;
+}
+
+export type ThumbKind = "grid" | "viewer";
+
+export interface ThumbData {
+  data_url: string;
+  width: number;
+  height: number;
+  from_cache: boolean;
+}
+
 export interface ScanSummary {
   session_id: number;
   session_name: string;

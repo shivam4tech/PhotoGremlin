@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
+import { usePhotos } from "@/hooks/usePhotos";
 import { EmptyState } from "@/components/EmptyState";
-import { StatCard } from "@/components/StatCard";
 import { ProgressBar } from "@/components/ProgressBar";
+import { VirtualGrid } from "@/components/VirtualGrid";
+import { PhotoTile } from "@/components/PhotoTile";
+import { Viewer } from "@/features/viewer/Viewer";
 import { FolderIcon } from "@/components/Icons";
 
 export function LibraryView() {
@@ -15,13 +18,20 @@ export function LibraryView() {
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [viewerId, setViewerId] = useState<number | null>(null);
+
+  // Re-fetch the index whenever a scan (re)completes for this folder.
+  const refreshKey = useMemo(
+    () => (scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"),
+    [scanSummary],
+  );
+  const enabled = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
+  const photos = usePhotos(enabled, refreshKey);
 
   async function openFolder() {
     setBusy(true);
     setError(null);
-    setNotice(null);
     try {
       const picked = await api.pickFolder();
       if (!picked) return;
@@ -39,7 +49,6 @@ export function LibraryView() {
   async function startScan() {
     if (!activeFolder) return;
     setError(null);
-    setNotice(null);
     try {
       await api.startScan(activeFolder);
       store().setScanning(true);
@@ -59,38 +68,10 @@ export function LibraryView() {
     }
   }
 
-  return (
-    <>
-      {error && (
-        <div
-          style={{
-            padding: "10px 14px",
-            marginBottom: 16,
-            borderRadius: 8,
-            background: "var(--danger-soft)",
-            color: "var(--danger)",
-            fontSize: 12.5,
-          }}
-        >
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div
-          style={{
-            padding: "10px 14px",
-            marginBottom: 16,
-            borderRadius: 8,
-            background: "var(--accent-soft)",
-            color: "var(--accent)",
-            fontSize: 12.5,
-          }}
-        >
-          {notice}
-        </div>
-      )}
-
-      {!activeFolder ? (
+  if (!activeFolder) {
+    return (
+      <>
+        <ErrorBanner message={error} />
         <EmptyState
           glyph={<FolderIcon size={40} />}
           title="Open a photo folder"
@@ -101,123 +82,123 @@ export function LibraryView() {
             </button>
           }
         >
-          Point PhotoGremlin at a folder of photographs. Everything — scanning,
-          thumbnails, analysis, statistics — runs on this machine. Nothing is
-          uploaded, ever.
+          Point PhotoGremlin at a folder of photographs. Everything —
+          scanning, thumbnails, analysis, statistics — runs on this machine.
+          Nothing is uploaded, ever.
         </EmptyState>
-      ) : (
-        <div>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <h3>Active library</h3>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <FolderIcon size={20} />
-              <span
-                className="mono"
-                style={{ fontSize: 12.5, wordBreak: "break-all", flex: 1 }}
-              >
-                {activeFolder}
-              </span>
-              <button className="btn btn-sm" onClick={openFolder} disabled={busy || scanning}>
-                Change
-              </button>
-              {!scanning ? (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={startScan}
-                  disabled={busy}
-                >
-                  {dbStatus && dbStatus.photo_count > 0 ? "Re-scan folder" : "Scan folder"}
-                </button>
-              ) : (
-                <button className="btn btn-danger btn-sm" onClick={stopScan}>
-                  Stop scan
-                </button>
-              )}
-            </div>
-          </div>
+      </>
+    );
+  }
 
-          {scanning && progress && (
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3>{progress.stage === "done" ? "Finishing" : "Scanning"}</h3>
-              <ProgressBar
-                value={progress.done}
-                max={progress.total}
-                label={
-                  progress.total > 0
-                    ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} files`
-                    : progress.stage
-                }
-              />
-              {progress.current && (
-                <div className="faint mono" style={{ fontSize: 11.5, marginTop: 8, wordBreak: "break-all" }}>
-                  {progress.current}
-                </div>
-              )}
-            </div>
-          )}
+  const hasPhotos = photos.total > 0;
 
-          {scanSummary && !scanning && (
-            <div className="card" style={{ marginBottom: 16 }}>
-              <h3>Last scan — {scanSummary.session_name}</h3>
-              <div className="stat-grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
-                <StatCard label="Indexed" value={scanSummary.indexed} sub="photographs added" />
-                <StatCard label="Files in folder" value={scanSummary.total_files} />
-                <StatCard label="Ignored" value={scanSummary.ignored} sub="non-photo files" />
-                <StatCard
-                  label="Duration"
-                  value={`${(scanSummary.elapsed_ms / 1000).toFixed(1)}s`}
-                  sub={scanSummary.cancelled ? "scan was stopped" : undefined}
-                />
-              </div>
-              {scanSummary.errors.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 12,
-                    fontSize: 12.5,
-                    color: "var(--warning)",
-                    display: "grid",
-                    gap: 4,
-                  }}
-                >
-                  {scanSummary.errors.slice(0, 5).map((e) => (
-                    <div key={e}>• {e}</div>
-                  ))}
-                  {scanSummary.errors.length > 5 && (
-                    <div className="faint">… and {scanSummary.errors.length - 5} more (see log)</div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+  return (
+    <div className="library">
+      <div className="library-toolbar">
+        <FolderIcon size={16} />
+        <span className="mono library-toolbar-path" title={activeFolder}>{activeFolder}</span>
+        <span className="spacer" />
+        {!scanning ? (
+          <button className="btn btn-sm btn-primary" onClick={startScan} disabled={busy || photos.loading}>
+            {dbStatus && dbStatus.photo_count > 0 ? "Re-scan" : "Scan folder"}
+          </button>
+        ) : (
+          <button className="btn btn-sm btn-danger" onClick={stopScan}>Stop scan</button>
+        )}
+      </div>
 
-          {dbStatus && dbStatus.photo_count > 0 ? (
-            <div>
-              <div className="section-title">Index status</div>
-              <div className="stat-grid">
-                <StatCard label="Photographs" value={dbStatus.photo_count} />
-                <StatCard label="Sessions" value={dbStatus.session_count} />
-                <StatCard
-                  label="Analyzed"
-                  value={dbStatus.analyzed_count}
-                  sub={
-                    dbStatus.photo_count > 0
-                      ? `${Math.round((dbStatus.analyzed_count / dbStatus.photo_count) * 100)}% of library`
-                      : undefined
-                  }
-                />
-              </div>
+      {scanning && progress && (
+        <div className="library-scanline">
+          <ProgressBar
+            value={progress.done}
+            max={progress.total}
+            label={
+              progress.total > 0
+                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} files`
+                : progress.stage
+            }
+          />
+          {progress.current && (
+            <div className="faint mono" style={{ fontSize: 11, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {progress.current}
             </div>
-          ) : (
-            <EmptyState glyph="◫" title="Nothing indexed yet">
-              <p>
-                {scanning
-                  ? "Scanning in progress — watch the progress bar above."
-                  : "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."}
-              </p>
-            </EmptyState>
           )}
         </div>
       )}
-    </>
+
+      {scanSummary && !scanning && (
+        <div className="library-summaryline mono">
+          Last scan “{scanSummary.session_name}”: {scanSummary.indexed.toLocaleString()} indexed · {scanSummary.ignored.toLocaleString()} ignored
+          {scanSummary.cancelled ? " (stopped)" : ""} · {(scanSummary.elapsed_ms / 1000).toFixed(1)}s
+          {scanSummary.errors.length > 0 && (
+            <span style={{ color: "var(--warning)" }}> · {scanSummary.errors.length} error{scanSummary.errors.length > 1 ? "s" : ""} in log</span>
+          )}
+        </div>
+      )}
+
+      <ErrorBanner message={error ?? photos.error} />
+
+      {!hasPhotos ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <EmptyState glyph="◫" title="Nothing indexed yet">
+            <p>
+              {scanning
+                ? "Scanning in progress — watch the progress bar above."
+                : "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."}
+            </p>
+          </EmptyState>
+        </div>
+      ) : (
+        <>
+          {photos.loading && photos.photos.length === 0 ? (
+            <div className="library-loading">Loading library…</div>
+          ) : (
+            <div className="library-grid-area">
+              <VirtualGrid
+                itemCount={photos.photos.length}
+                render={(i) => <PhotoTile photo={photos.photos[i]} onOpen={setViewerId} />}
+              />
+            </div>
+          )}
+
+          <div className="library-statusbar">
+            <span>{photos.total.toLocaleString()} photographs</span>
+            <span className="faint">Page {photos.page + 1}</span>
+            <span className="spacer" />
+            <span className="faint">Local-only index · thumbnails cached on this machine</span>
+            <button className="btn btn-ghost btn-sm" onClick={photos.reload} disabled={photos.loading}>
+              Refresh
+            </button>
+          </div>
+        </>
+      )}
+
+      {viewerId !== null && (
+        <Viewer
+          photoId={viewerId}
+          ordered={photos.photos}
+          onClose={() => setViewerId(null)}
+          onNavigate={setViewerId}
+        />
+      )}
+    </div>
+  );
+}
+
+function ErrorBanner({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      style={{
+        margin: "0",
+        padding: "7px 32px",
+        background: "var(--danger-soft)",
+        color: "var(--danger)",
+        fontSize: 12.5,
+      }}
+    >
+      {message}
+    </div>
   );
 }

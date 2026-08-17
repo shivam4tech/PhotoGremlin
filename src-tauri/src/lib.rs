@@ -12,6 +12,7 @@ mod logging;
 pub mod paths;
 pub mod scanner;
 pub mod state;
+pub mod thumbnailer;
 pub mod time;
 
 use std::sync::{Arc, Mutex};
@@ -44,8 +45,11 @@ pub fn run() {
 
             app.manage(crate::state::AppState {
                 db,
-                paths,
+                paths: paths.clone(),
                 scan: Arc::new(Mutex::new(None)),
+                thumb: Arc::new(crate::thumbnailer::ThumbService::new(
+                    paths.thumbnails_dir(),
+                )),
             });
             Ok(())
         })
@@ -59,6 +63,9 @@ pub fn run() {
             commands::start_scan,
             commands::stop_scan,
             commands::list_sessions,
+            commands::list_photos,
+            commands::get_photo_full,
+            commands::get_thumbnail,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PhotoGremlin");

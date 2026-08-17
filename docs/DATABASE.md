@@ -103,6 +103,18 @@ Key/value for application state (e.g. `active_folder`).
 ### schema_version
 `version`, `applied_at`.
 
+## Query surface (as of Sprint 3)
+
+- `upsert_photo` / `upsert_session` / `refresh_session_counts` /
+  `list_sessions` — scanner ingest (Sprint 2).
+- `list_photos(offset, limit)` — paginated grid rows (limit clamped to 1–500).
+  Ordered by capture date (unknowns first, then id) so the grid is stable.
+  `LEFT JOIN analysis` only to compute a `has_analysis` flag — the grid
+  payload stays small; full analysis arrives per photo via `get_photo_full`.
+- `get_photo_full(id)` — one photo with its `analysis` row via `LEFT JOIN`
+  (analysis fields are `NULL`/`false` until the analysis pass runs), used by
+  the viewer's metadata panel.
+
 ## Conventions
 
 - All timestamps UTC RFC3339 (see `time.rs`).

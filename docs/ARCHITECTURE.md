@@ -9,15 +9,16 @@ React UI (React 18 + TypeScript + Zustand)
    ▼
 Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    │
-   ├── Domain services
-   │     scanner/     recursive indexing
-   │     analysis/    image measurement pipeline (background tasks)
-   │     metadata/    EXIF extraction
-   │     similarity/  perceptual hash + grouping
-   │     statistics/  period-scoped aggregation (UI-independent)
-   │     filesystem/  rename/move/copy/trash safety rules
-   │     ml/          optional local models (isolated; AI-optional)
-   │
+    ├── Domain services
+    │     scanner/     recursive indexing
+    │     thumbnailer  cached thumbnail engine (grid/viewer JPEG, base64 out)
+    │     analysis/    image measurement pipeline (background tasks)
+    │     metadata/    EXIF extraction
+    │     similarity/  perceptual hash + grouping
+    │     statistics/  period-scoped aggregation (UI-independent)
+    │     filesystem/  rename/move/copy/trash safety rules
+    │     ml/          optional local models (isolated; AI-optional)
+    │
    ├── database.rs    SQLite via rusqlite (bundled), Mutex<Connection>
    │
    └── paths.rs       OS data/cache/log locations (Tauri path resolver)
@@ -27,11 +28,29 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
-- `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + the scan-job slot),
-  shared via Tauri's managed state. Commands take `State<AppState>`.
-  The scan slot holds the live `ScanJob { running, cancel }` Arcs: a
-  claim-and-cancel mechanism shared between `start_scan`, `stop_scan` and
-  the background task.
+- `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
+  scan-job slot), shared via Tauri's managed state. Commands take
+  `State<AppState>`. The scan slot holds the live `ScanJob { running, cancel }`
+  Arcs: a claim-and-cancel mechanism shared between `start_scan`, `stop_scan`
+  and the background task.
+- `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
+  per app holds: the cache dir, a generation semaphore
+  (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
+  in-flight dedup map (waiters poll the cache file with a 10 s bounded
+  deadline instead of decoding twice). `get(db, photo_id, kind)` = photo row
+  lookup → previewable-format check (RAW/HEIC return a friendly unsupported
+  error the UI renders as a labelled placeholder) → missing-file check →
+  cache hit? → else `spawn_blocking` generation: header-only
+  `image_dimensions` check (≤ ~500 MP guard) → `resize_exact` (triangle
+  filter) → JPEG q82 → atomic temp+rename cache write. The UI receives base64
+  data URLs (grid ≤ 256 px wide, viewer ≤ 1600 px) — full-resolution files
+  never enter the webview. Cache key = 16-hex FNV-1a of
+  `path|size|mtime|width|THUMB_VERSION` (std's `DefaultHasher` is randomly
+  seeded and must not be used for cache keys); version bump invalidates all.
+  Base64 is a ~40-line local impl (round-trip tested), not a dependency.
+- `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
+  (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
+  the `State` guard before awaiting — Tauri command futures must be `Send`).
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
@@ -77,8 +96,13 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `toErrorMessage`). No raw `invoke` anywhere in views.
 - `src/types/api.ts` mirrors Rust serde types 1:1 — when a Rust type changes,
   the TS mirror changes in the same commit.
-- Virtualized grid + cached thumbnails come in Sprint 3; the UI must never
-  request full-resolution images for the grid.
+- The library grid is virtualized (`components/VirtualGrid.tsx`, a
+  dependency-free vertical windower) and paginated (96 tiles/page via
+  `hooks/usePhotos.ts`); each tile requests exactly one grid-size thumbnail
+  (`components/PhotoTile.tsx`). The UI must never request full-resolution
+  images for the grid. The viewer (`features/viewer/Viewer.tsx`) loads a
+  viewer-size thumbnail + `get_photo_full` for the metadata panel; ←/→ move
+  within the loaded page, Esc closes.
 
 ## Error flow
 
