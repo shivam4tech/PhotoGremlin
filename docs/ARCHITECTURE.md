@@ -270,6 +270,18 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
     path (`group_photos`), with a back bar. The language is kept factual
     ("near-identical structure", "captured within seconds") — the user decides
     via culling + file ops.
+  - Global shortcuts + notices (Sprint 10): `features/shortcuts.ts` is the
+    pure, unit-tested source of truth — `shortcutFor` maps a key event to
+    an action (⌘/Ctrl+O → open a photo folder, bare 1–6 → views;
+    deliberately claims nothing else) and `SHORTCUTS` is the display
+    catalog the Settings "Keyboard shortcuts" card renders (viewer keys
+    Esc/←/→ documented there too; the viewer implements them with its own
+    listener — no key conflicts). `App.tsx` installs one `window` keydown
+    hook that skips typing targets; the folder action calls the store's
+    `openFolder()` (shared with LibraryView's button). Success notices
+    (set by every `*-complete` handler) render as an auto-dismissing toast
+    (8 s) with a close button — previously the `notice` field was written
+    but never displayed.
   - Local intelligence (Sprint 9, frontend): configured only from the
     Settings "Local intelligence" card (`views/SettingsView.tsx` + pure
     wording helpers in `features/settings/ai.ts`, unit-tested in

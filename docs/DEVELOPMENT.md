@@ -84,6 +84,33 @@ intent, only green reality.
 - 5,000 photos must browse smoothly; 10,000 usable. Memory bounded by the
   worker pool, not by the library size.
 
+## Release (v0.1.0, Sprint 10)
+
+`build:app:release` (`tauri build`) is the release path — the only place the
+`[profile.release]` settings in `src-tauri/Cargo.toml` apply:
+`opt-level = "s"`, `lto = true`, `codegen-units = 1`, `strip = true`,
+`panic = "abort"`. Produces (Linux):
+
+- `src-tauri/target/release/photogremlin` — the stripped binary (~7.7 MB;
+  the entire app + embedded YuNet model + bundled SQLite)
+- `src-tauri/target/release/bundle/deb/PhotoGremlin_0.1.0_amd64.deb`
+  (~3.5 MB)
+
+macOS → `.dmg` / `app`, Windows → `.nsis` (the same command on those
+platforms; `tauri.conf.json` lists `deb`/`app`/`dmg`/`nsis` as targets).
+
+Ship notes:
+
+- **No installer-time downloads, no bundled ONNX Runtime.** A machine
+  without the ONNX Runtime gets the full app with face detection reported
+  unavailable in Settings (see LOCAL_AI.md §Runtime for install options per
+  OS).
+- **Smoke before shipping:** fresh-data-dir headless boot of the release
+  binary (see TESTING.md §Automated smoke), plus the manual per-platform
+  checklist for the owner.
+- `build:app` (debug) stays the sprint-verification bundle — never ship it
+  (large + slow; no LTO).
+
 ## Repo hygiene
 
 - Lockfiles are committed (`package-lock.json`, `Cargo.lock`).

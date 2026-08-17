@@ -8,6 +8,7 @@ import {
   formatModelSize,
   runtimeLine,
 } from "@/features/settings/ai";
+import { SHORTCUTS } from "@/features/shortcuts";
 
 function PathRow({ label, value }: { label: string; value: string }) {
   return (
@@ -226,6 +227,28 @@ export function SettingsView() {
       </div>
 
       <LocalIntelligenceCard />
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Keyboard shortcuts</h3>
+        <div style={{ display: "grid", gap: 6 }}>
+          {SHORTCUTS.map((s) => (
+            <div
+              key={s.id}
+              style={{ display: "flex", gap: 14, alignItems: "center", fontSize: 13 }}
+            >
+              <span className="mono" style={{ minWidth: 110, color: "var(--text-dim)" }}>
+                {s.keys}
+              </span>
+              <span>{s.action}</span>
+              {s.scope === "viewer" && (
+                <span className="faint" style={{ fontSize: 11.5, marginLeft: "auto" }}>
+                  in the viewer
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Privacy contract</h3>

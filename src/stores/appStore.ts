@@ -99,6 +99,13 @@ interface AppState {
   setError: (e: string | null) => void;
 
   refreshStatus: () => Promise<void>;
+  /**
+   * Pick a photo folder and make it active (Sprint 10: shared by the
+   * Library's button and the ⌘/Ctrl+O shortcut). Returns the picked path
+   * (null when the dialog was dismissed); throws on IPC failure so the
+   * caller decides where the error is shown.
+   */
+  openFolder: () => Promise<string | null>;
   loadSelections: () => Promise<void>;
   /** Set one photo's selection (optimistic + persisted). */
   setSelection: (photoId: number, state: SelectionState | null) => void;
@@ -199,6 +206,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     } finally {
       statusInFlight = false;
     }
+  },
+
+  openFolder: async () => {
+    const picked = await api.pickFolder();
+    if (!picked) return null;
+    set({ activeFolder: picked, scanSummary: null, analysisSummary: null });
+    await get().refreshStatus();
+    return picked;
   },
 
   loadSelections: async () => {

@@ -92,12 +92,8 @@ export function LibraryView() {
     setBusy(true);
     setError(null);
     try {
-      const picked = await api.pickFolder();
-      if (!picked) return;
-      store().setActiveFolder(picked);
-      store().setScanSummary(null);
-      store().setAnalysisSummary(null);
-      await store().refreshStatus();
+      // The store action is shared with the ⌘/Ctrl+O shortcut (Sprint 10).
+      await store().openFolder();
     } catch (e) {
       setError(toErrorMessage(e));
     } finally {
@@ -616,10 +612,21 @@ export function LibraryView() {
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <EmptyState glyph="◫" title="Nothing indexed yet">
             <p>
-              {scanning
-                ? "Scanning in progress — watch the progress bar above."
-                : "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."}
+              {scanning ? (
+                "Scanning in progress — watch the progress bar above."
+              ) : scanSummary ? (
+                scanSummary.indexed === 0
+                  ? "The scan finished, but found no supported photos in this folder. JPG, PNG, WebP and TIFF are decoded; RAW and HEIC are indexed without a local preview. You can point at another folder with “Open folder”."
+                  : "This folder no longer has indexed photographs — they may have been trashed or moved. Re-scan to pick up anything new."
+              ) : (
+                "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."
+              )}
             </p>
+            {!scanning && (
+              <button className="btn btn-primary btn-sm" onClick={openFolder}>
+                Open folder
+              </button>
+            )}
           </EmptyState>
         </div>
       ) : !hasPhotos && group === null && filterConditions.length > 0 ? (
