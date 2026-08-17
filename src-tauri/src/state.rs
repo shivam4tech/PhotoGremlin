@@ -38,5 +38,7 @@ pub struct AppState {
     pub operation: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single similarity slot (claim-and-cancel for hashing + grouping).
     pub similarity: Arc<Mutex<Option<Arc<Job>>>>,
+    /// Single face-detection slot (claim-and-cancel for the local-AI pass).
+    pub faces: Arc<Mutex<Option<Arc<Job>>>>,
     pub thumb: Arc<ThumbService>,
 }

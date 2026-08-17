@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AiStatus,
   AppInfo,
   Collection,
   DbStatus,
@@ -154,8 +155,15 @@ export const api = {
     groupId: number,
     offset: number,
     limit: number,
-  ): Promise<PhotoPage> =>
-    invoke("group_photos", { groupId, offset, limit }),
+  ): Promise<PhotoPage> => invoke("group_photos", { groupId, offset, limit }),
+
+  // Local intelligence (Sprint 9) — optional; the whole app works with it
+  // off and without the ONNX Runtime installed.
+  aiStatus: (): Promise<AiStatus> => invoke("ai_status"),
+  setAiEnabled: (enabled: boolean): Promise<void> =>
+    invoke("set_ai_enabled", { enabled }),
+  startFaces: (): Promise<void> => invoke("start_faces"),
+  stopFaces: (): Promise<boolean> => invoke("stop_faces"),
 };
 
 export type { UnlistenFn };

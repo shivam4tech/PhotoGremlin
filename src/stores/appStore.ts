@@ -1,11 +1,13 @@
 import { create } from "zustand";
 import { api, toErrorMessage } from "@/lib/ipc";
 import type {
+  AiStatus,
   AnalysisSummary,
   AppInfo,
   Collection,
   DbStatus,
   FileOpRow,
+  FaceSummary,
   FilterCondition,
   MetadataSummary,
   OperationSummary,
@@ -62,6 +64,18 @@ interface AppState {
   similaritySummary: SimilaritySummary | null;
   /** Similar + burst groups (null = not loaded yet). */
   similarityGroups: SimilarityGroup[] | null;
+  /**
+   * Local intelligence (Sprint 9): the stored preference. AI is off by
+   * default; when on, face detection auto-runs after each scan (and the
+   * user can always run it on demand from Settings).
+   */
+  aiEnabled: boolean;
+  /** ai_status result (null = not loaded yet). */
+  aiStatus: AiStatus | null;
+  /** Face-detection pass in flight. */
+  detectingFaces: boolean;
+  facesProgress: ProgressPayload | null;
+  facesSummary: FaceSummary | null;
 
   setView: (v: ViewId) => void;
   setAppInfo: (i: AppInfo) => void;
@@ -99,6 +113,13 @@ interface AppState {
   setSimilarityProgress: (p: ProgressPayload | null) => void;
   setSimilaritySummary: (s: SimilaritySummary | null) => void;
   loadSimilarityGroups: () => Promise<void>;
+
+  loadAiStatus: () => Promise<void>;
+  /** Persist the AI on/off preference (fire-and-forget, optimistic). */
+  setAiEnabled: (b: boolean) => void;
+  setDetectingFaces: (b: boolean) => void;
+  setFacesProgress: (p: ProgressPayload | null) => void;
+  setFacesSummary: (s: FaceSummary | null) => void;
 }
 
 let statusInFlight = false;
@@ -132,6 +153,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   similarityProgress: null,
   similaritySummary: null,
   similarityGroups: null,
+  aiEnabled: false,
+  aiStatus: null,
+  detectingFaces: false,
+  facesProgress: null,
+  facesSummary: null,
 
   setView: (view) => set({ view }),
   setAppInfo: (appInfo) => set({ appInfo }),
@@ -247,6 +273,25 @@ export const useAppStore = create<AppState>((set, get) => ({
       // Non-critical.
     }
   },
+
+  loadAiStatus: async () => {
+    try {
+      const status = await api.aiStatus();
+      set({ aiStatus: status, aiEnabled: status.enabled });
+    } catch {
+      // Non-critical: the Settings card falls back to "loading".
+    }
+  },
+
+  setAiEnabled: (aiEnabled) => {
+    set({ aiEnabled });
+    const err = (m: string) => set({ error: m, aiEnabled: !aiEnabled });
+    api.setAiEnabled(aiEnabled).catch((e) => err(toErrorMessage(e)));
+  },
+
+  setDetectingFaces: (detectingFaces) => set({ detectingFaces }),
+  setFacesProgress: (facesProgress) => set({ facesProgress }),
+  setFacesSummary: (facesSummary) => set({ facesSummary }),
 }));
 
 /** View metadata for the sidebar. */
