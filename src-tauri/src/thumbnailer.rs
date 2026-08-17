@@ -512,7 +512,7 @@ mod tests {
             width: None,
             height: None,
             orientation: None,
-            session_id: s,
+            session_id: Some(s),
             file_mtime: None,
         })
         .unwrap();

@@ -257,6 +257,15 @@ impl Db {
                 r.get(0)
             })
             .map_err(db_err("count metadata pending"))?;
+        let (selected_count, rejected_count): (i64, i64) = conn
+            .query_row(
+                "SELECT
+                   (SELECT COUNT(*) FROM selections WHERE state = 'selected'),
+                   (SELECT COUNT(*) FROM selections WHERE state = 'rejected')",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .map_err(db_err("count selections"))?;
         let version: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
@@ -269,6 +278,8 @@ impl Db {
             session_count,
             analyzed_count,
             metadata_pending,
+            selected_count,
+            rejected_count,
             schema_version: version,
         })
     }
@@ -810,6 +821,187 @@ impl Db {
             .lock()
             .map_err(|e| AppError::Database(format!("database lock poisoned: {e}")))
     }
+/// Update a photo's location after a successful rename/move. The pixels are
+/// unchanged, so analysis rows stay valid; `file_mtime` is refreshed so the
+/// incremental analysis rule re-checks if the FS changed anything.
+pub fn update_photo_path(
+    &self,
+    id: i64,
+    path: &str,
+    filename: &str,
+    size_bytes: Option<i64>,
+    file_mtime: Option<&str>,
+) -> AppResult<()> {
+    let conn = self.lock()?;
+    conn.execute(
+        "UPDATE photos
+         SET path = ?2, filename = ?3,
+             size_bytes = COALESCE(?4, size_bytes),
+             file_mtime = COALESCE(?5, file_mtime)
+         WHERE id = ?1",
+        params![id, path, filename, size_bytes, file_mtime],
+    )
+    .map_err(db_err("update photo path"))?;
+    Ok(())
+}
+/// Remove photo rows (and, via FK cascade, their analysis + selection rows)
+/// after a successful trash. The filesystem action already happened.
+pub fn delete_photos(&self, ids: Vec<i64>) -> AppResult<usize> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let conn = self.lock()?;
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let params: Vec<Box<dyn rusqlite::ToSql>> =
+        ids.iter().map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>).collect();
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let n = conn
+        .execute(&format!("DELETE FROM photos WHERE id IN ({placeholders})"), refs.as_slice())
+        .map_err(db_err("delete photos"))?;
+    Ok(n)
+}
+/// Append one executed (or attempted) operation. The audit log is the only
+/// permanent record of what happened to files.
+pub fn record_file_op(
+    &self,
+    op_type: &str,
+    source_path: &str,
+    dest_path: Option<&str>,
+    status: &str,
+    detail: Option<&str>,
+) -> AppResult<()> {
+    let conn = self.lock()?;
+    conn.execute(
+        "INSERT INTO file_operations (op_type, source_path, dest_path, status, detail, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![op_type, source_path, dest_path, status, detail, crate::time::now_utc()],
+    )
+    .map_err(db_err("record file op"))?;
+    Ok(())
+}
+pub fn recent_file_ops(&self, limit: i64) -> AppResult<Vec<FileOpRow>> {
+    let conn = self.lock()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, op_type, source_path, dest_path, status, detail, created_at
+             FROM file_operations ORDER BY id DESC LIMIT ?1",
+        )
+        .map_err(db_err("prepare file ops"))?;
+    let rows = stmt
+        .query_map([limit.max(1).min(500)], |r| {
+            Ok(FileOpRow {
+                id: r.get(0)?,
+                op_type: r.get(1)?,
+                source_path: r.get(2)?,
+                dest_path: r.get(3)?,
+                status: r.get(4)?,
+                detail: r.get(5)?,
+                created_at: r.get(6)?,
+            })
+        })
+        .map_err(db_err("query file ops"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(db_err("read file op row"))?);
+    }
+    Ok(out)
+}
+
+    /// Validate a selection state against the closed set (`selected`/`rejected`).
+    pub fn validate_selection_state(state: &str) -> AppResult<&'static str> {
+        SELECTION_STATES
+            .iter()
+            .find(|s| **s == state)
+            .copied()
+            .ok_or_else(|| AppError::validation(format!("Unknown selection state: {state}")))
+    }
+pub fn set_selection(&self, photo_id: i64, state: &str) -> AppResult<()> {
+    let state = Self::validate_selection_state(state)?;
+    let conn = self.lock()?;
+    conn.execute(
+        "INSERT INTO selections (photo_id, state, updated_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(photo_id) DO UPDATE SET state = excluded.state,
+                                                   updated_at = excluded.updated_at",
+        params![photo_id, state, crate::time::now_utc()],
+    )
+    .map_err(db_err("set selection"))?;
+    Ok(())
+}
+/// Batch variant (the UI applies culling in groups).
+pub fn set_selections(&self, photo_ids: Vec<i64>, state: &str) -> AppResult<usize> {
+    let state = Self::validate_selection_state(state)?;
+    if photo_ids.is_empty() {
+        return Ok(0);
+    }
+    let conn = self.lock()?;
+    let now = crate::time::now_utc();
+    let tx = conn.unchecked_transaction().map_err(db_err("selection tx"))?;
+    let mut n = 0usize;
+    for id in &photo_ids {
+        n += tx.execute(
+            "INSERT INTO selections (photo_id, state, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(photo_id) DO UPDATE SET state = excluded.state,
+                                                       updated_at = excluded.updated_at",
+            params![id, state, now],
+        )
+        .map_err(db_err("batch set selection"))?;
+    }
+    tx.commit().map_err(db_err("commit selection tx"))?;
+    Ok(n)
+}
+pub fn clear_selection(&self, photo_id: i64) -> AppResult<()> {
+    let conn = self.lock()?;
+    conn.execute(
+        "DELETE FROM selections WHERE photo_id = ?1",
+        [photo_id],
+    )
+    .map_err(db_err("clear selection"))?;
+    Ok(())
+}
+pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
+    if photo_ids.is_empty() {
+        return Ok(0);
+    }
+    let conn = self.lock()?;
+    let placeholders = photo_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let params: Vec<Box<dyn rusqlite::ToSql>> = photo_ids
+        .iter()
+        .map(|id| Box::new(*id) as Box<dyn rusqlite::ToSql>)
+        .collect();
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let n = conn
+        .execute(
+            &format!("DELETE FROM selections WHERE photo_id IN ({placeholders})"),
+            refs.as_slice(),
+        )
+        .map_err(db_err("clear selections"))?;
+    Ok(n)
+}
+/// Current culling state (photo id + state), most recent first. Capped so a
+/// pathological library can never ship an unbounded payload.
+pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
+    let conn = self.lock()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT photo_id, state, updated_at FROM selections
+             ORDER BY updated_at DESC, photo_id LIMIT ?1",
+        )
+        .map_err(db_err("prepare selections"))?;
+    let rows = stmt
+        .query_map([limit.max(1).min(20_000)], |r| {
+            Ok(SelectionRow {
+                photo_id: r.get(0)?,
+                state: r.get(1)?,
+                updated_at: r.get(2)?,
+            })
+        })
+        .map_err(db_err("query selections"))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(db_err("read selection row"))?);
+    }
+    Ok(out)
+}
 }
 
 /// One queued unit of analysis work: a decodable photo whose row is missing,
@@ -845,8 +1037,52 @@ pub struct DbStatus {
     pub analyzed_count: i64,
     /// Photos not yet read by the EXIF/metadata pass (`exif_at IS NULL`).
     pub metadata_pending: i64,
+    /// Culling state (Sprint 7): photos marked selected / rejected.
+    pub selected_count: i64,
+    pub rejected_count: i64,
     pub schema_version: i64,
 }
+
+
+
+// ---------------------------------------------------------------------------
+// file_operations audit log (Sprint 7)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FileOpRow {
+    pub id: i64,
+    pub op_type: String,
+    pub source_path: String,
+    pub dest_path: Option<String>,
+    /// "done" | "failed" (v0.1 writes exactly these).
+    pub status: String,
+    pub detail: Option<String>,
+    pub created_at: String,
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Selection state (Sprint 7; reads since Sprint 6)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SelectionRow {
+    pub photo_id: i64,
+    pub state: String,
+    pub updated_at: String,
+}
+
+const SELECTION_STATES: [&str; 2] = ["selected", "rejected"];
+
+
+
+
+
+
+
+// ---------------------------------------------------------------------------
 
 /// Inputs for a photo row upsert (scan-time fields only; EXIF fields are
 /// filled by the metadata step and must never be clobbered here).
@@ -859,7 +1095,9 @@ pub struct PhotoUpsert {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub orientation: Option<String>,
-    pub session_id: i64,
+    /// Session the photo belongs to; NULL for copies into non-library
+    /// folders (the row stays reachable via the file-operations audit log).
+    pub session_id: Option<i64>,
     pub file_mtime: Option<String>,
 }
 

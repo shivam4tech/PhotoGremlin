@@ -41,7 +41,7 @@ fn upsert(db: &Db, session_id: i64, filename: &str, w: i64, h: i64) -> i64 {
         width: Some(w),
         height: Some(h),
         orientation: None,
-        session_id,
+        session_id: Some(session_id),
         file_mtime: Some("2026-08-17T00:00:00Z".into()),
     })
     .unwrap()

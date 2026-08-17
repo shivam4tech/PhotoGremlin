@@ -30,11 +30,12 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
   registers commands. No business logic.
 - `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
-  scan-job slot + the analysis-job slot + the metadata-job slot), shared via
-  Tauri's managed state. Commands take `State<AppState>`. Each slot holds the
-  live `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared
-  between `start_*`/`stop_*` and the background task (scan, analysis and
-  metadata are separate slots; the UI keeps the passes mutually exclusive).
+  scan-job slot + the analysis-job slot + the metadata-job slot + the
+  file-operation slot), shared via Tauri's managed state. Commands take
+  `State<AppState>`. Each slot holds the live `Job { running, cancel }` Arcs: a
+  claim-and-cancel mechanism shared between `start_*`/`stop_*` and the
+  background task (scan, analysis, metadata and file operations are separate
+  slots; the UI keeps them mutually exclusive).
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
@@ -116,6 +117,20 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `commands/stats.rs` — `period_stats` (arg: `periodJson`),
   `session_summary(sessionId)`, `compare_sessions(sessionIds)`. Synchronous
   pure-SQL commands; no background task, no events.
+- `filesystem/` (Sprint 7) — rename/move/copy/trash behind the universal
+  safety protocol (see FILE_OPERATIONS.md). Tauri-independent
+  (`plan_rename` / `plan_move_copy` / `plan_trash` + `run_operation(db, plan,
+  progress, cancel)`), integration-tested on real temp dirs. Pure template
+  engine (`expand_template` single-pass, `sanitize_name`, `{sequence}`
+  zero-pad), fixed-bins-free. Rename = atomic in-dir `rename`; in-plan name
+  collisions abort the whole plan, on-disk collisions block the item. Move/copy
+  = `fs::rename` with `CrossesDevices` → staged copy→size-verify→delete; copy
+  never touches the original and indexes the copy. Trash = freedesktop XDG
+  trash (Linux) with `.trashinfo`; never permanent delete. Every executed item
+  updates the photo row (rename/move) or removes it (trash) and appends a
+  `file_operations` audit row. Execution re-checks each destination right
+  before acting so preview→confirm races are per-item failures, not
+  overwrites.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.
@@ -131,11 +146,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   AppError>` a valid command return type.
 - `events.rs` — IPC event names (`scan-progress`, `scan-complete`,
   `analysis-progress`, `analysis-complete`, `metadata-progress`,
-  `metadata-complete`, `db-changed`, `operation-progress`) +
-  `ProgressPayload { total, done, stage, current }` (stages: discovering,
-  indexing, analyzing, reading metadata, done). Progress flows Rust → UI via
-  Tauri events, never by polling. `scan-complete` / `analysis-complete` /
-  `metadata-complete` each carry `{ summary?, error? }`.
+  `metadata-complete`, `operation-progress`, `operation-complete`,
+  `db-changed`) + `ProgressPayload { total, done, stage, current }` (stages:
+  discovering, indexing, analyzing, reading metadata, done, and the operation
+  verb rename/move/copy/trash). Progress flows Rust → UI via Tauri events,
+  never by polling. `scan-complete` / `analysis-complete` /
+  `metadata-complete` / `operation-complete` each carry `{ summary?, error? }`
+  (`operation-complete`'s summary is `OperationSummary`: per-item
+  done/failed/skipped/cancelled, capped at 500 for IPC).
 - `logging.rs` — `tracing` with a rolling daily file in the Tauri log dir
   (`<data_dir>/logs/photogremlin.<date>.log` on Linux) + console layer.
   Zero telemetry; the only sink is the local disk.
@@ -187,9 +205,23 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   signal exists). `views/SessionsView.tsx` adds 2–8 session comparison
   (`compare_sessions`) and a per-session detail (`session_summary`). Pure
   formatting + the honest-"unavailable" rendering live in
-  `features/stats/format.ts` (unit-tested in `src/tests/statsFormat.test.ts`);
-  the language discipline ("sharpness 62", never "you improved") is enforced
-  there and in the view copy.
+   `features/stats/format.ts` (unit-tested in `src/tests/statsFormat.test.ts`);
+   the language discipline ("sharpness 62", never "you improved") is enforced
+   there and in the view copy.
+ - File operations (Sprint 7): culling (keep/reject) renders as per-tile
+   controls in `components/PhotoTile.tsx`, driven by `stores/appStore.ts`
+   (`selections` map + `selectionMode`, persisted to the `selections` table via
+   `set_selections`/`clear_selections`). With photographs kept,
+   `features/fileops/FileOpsPanel.tsx` offers rename / move / copy / trash —
+   every action builds a backend **plan** (`plan_*`) the UI previews (per-item
+   mapping, blocked items, `will_create_dir`, red aborted state) and confirms
+   (trash uses a native `ask` warning) before `start_*` runs it in the
+   background. `operation-progress`/`operation-complete` stream the run; the
+   panel shows a live progress line, a Stop button, and a results summary of
+   anything not `done`. Pure wording helpers (factual verbs, preview/result
+   headlines, progress label) live in `features/fileops/format.ts` (unit-tested
+   in `src/tests/fileopsFormat.test.ts`). After any operation the app
+   refetches status, culling, the audit log, and the grid (`libraryVersion`).
 
 ## Error flow
 

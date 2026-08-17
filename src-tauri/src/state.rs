@@ -34,5 +34,7 @@ pub struct AppState {
     pub analysis: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single metadata slot (claim-and-cancel for the EXIF pass).
     pub metadata: Arc<Mutex<Option<Arc<Job>>>>,
+    /// Single file-operation slot (claim-and-cancel for rename/move/copy/trash).
+    pub operation: Arc<Mutex<Option<Arc<Job>>>>,
     pub thumb: Arc<ThumbService>,
 }

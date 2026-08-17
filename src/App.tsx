@@ -6,6 +6,7 @@ import { api, onProgress, toErrorMessage } from "@/lib/ipc";
 import type {
   AnalysisCompletePayload,
   MetadataCompletePayload,
+  OperationCompletePayload,
   ProgressPayload,
   ScanCompletePayload,
 } from "@/types/api";
@@ -132,7 +133,45 @@ export default function App() {
             });
         }
       });
-      return [up, upa, uca, upm, ucm, uc];
+      const uop = await onProgress<ProgressPayload>("operation-progress", (p) => {
+        const s = state();
+        s.setOperating(true);
+        s.setOpProgress(p);
+      });
+      const uoc = await onProgress<OperationCompletePayload>("operation-complete", (p) => {
+        const s = state();
+        s.setOperating(false);
+        s.setOpProgress(null);
+        if (p.summary) {
+          const sum = p.summary;
+          const verb =
+            sum.op === "rename" ? "renamed" :
+            sum.op === "move" ? "moved" :
+            sum.op === "copy" ? "copied" : "trashed";
+          const bits: string[] = [
+            `${sum.succeeded.toLocaleString()} photograph${sum.succeeded === 1 ? "" : "s"} ${verb}`,
+            sum.failed > 0 ? `${sum.failed.toLocaleString()} failed` : null,
+            `${(sum.elapsed_ms / 1000).toFixed(1)}s`,
+          ].filter(Boolean) as string[];
+          s.setOpSummary(sum);
+          s.setNotice(
+            sum.cancelled
+              ? `Operation stopped — ${bits.join(", ")}.`
+              : `Operation complete — ${bits.join(", ")}.`,
+          );
+          s.setError(null);
+        } else {
+          s.setOpSummary(null);
+          s.setError(p.error ?? "The file operation failed.");
+        }
+        // Files on disk changed: refresh counts, culling state, audit log,
+        // and the grid (paths changed / rows removed).
+        void s.refreshStatus();
+        void s.loadSelections();
+        void s.refreshRecentOps();
+        s.bumpLibraryVersion();
+      });
+      return [up, upa, uca, upm, ucm, uc, uop, uoc];
     })();
 
     let alive = true;

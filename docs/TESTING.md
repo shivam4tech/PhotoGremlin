@@ -89,10 +89,30 @@ Per-sprint coverage (✓ = in place today):
     Monday-based/this-month + year boundary/this-year + year boundary/custom
     bare-date end-of-day extension/all) and the period JSON parse (invalid
     kinds → friendly error).
-- Rename templates (Sprint 7): token expansion, sanitization, collision
-  detection within a plan, sequence width growth.
-- File ops (Sprint 7): collision detection, cross-device move staging,
-  trash target resolution, partial-failure reporting — all against temp dirs.
+- Rename templates (Sprint 7, `filesystem/mod.rs`) ✓: `expand_template` is
+  single-pass (an original name containing a literal `{token}` is inserted
+  verbatim, then sanitized once — no double expansion); `{sequence}` zero-pads
+  to the given width; missing values expand to empty; the extension is always
+  the file's own (template `.ext` stripped + original re-attached);
+  `sanitize_name` collapses separators/spaces/braces to `-`, trims dangling
+  separators, maps empty → `"renamed"`, caps at 150, keeps underscores;
+  `suffixed_path` finds the first free `-n` suffix; op/policy string parsing
+  rejects unknown values with a friendly error.
+- File ops (Sprint 7) ✓:
+  - Unit: the template engine + `suffixed_path` + op/policy parsing above.
+  - Integration (`tests/fileops_integration.rs`), all on real temp dirs with
+    real bytes: group rename actually moves bytes on disk, updates
+    `photos.path` (no dangling rows), and writes a `done` audit row per file;
+    a no-distinguishing-token template maps two sources to one name → the plan
+    **aborts** with an itemized note and executes nothing; a rename onto an
+    existing file blocks just that item with `ALREADY EXISTS`; move removes the
+    source, lands the dest, and syncs the DB path + audit; copy leaves the
+    original and indexes the copy as a second row; `skip` blocks a collision
+    while `avoid-by-renaming` resolves to the first free suffix; deleting one
+    source before execution makes it a **skipped** item while the rest still
+    move (partial failure keeps successes); trash (Linux) moves the file into
+    the OS trash `files` dir and removes the DB row + audit; a pre-set cancel
+    processes zero items and reports `cancelled`.
 - Similarity (Sprint 8): identical image → hash distance 0; perturbed →
   small distance; unrelated → large; clustering groups as expected.
 
@@ -116,8 +136,16 @@ Per-sprint coverage (✓ = in place today):
     "0"/"0%") for `null`; metrics to one decimal; shares as undecimaled
     percent; 0–1 kept-ratio → percent; durations (days vs hours vs unknown);
     EXIF formatters (ISO int, `f/2.8`, `1/125` vs `0.600s` fallback);
-    `monthLabel` for `YYYY-MM` (+ passthrough of garbage); `periodJson` emits
-    the exact wire object the Rust `Period` parses.
+     `monthLabel` for `YYYY-MM` (+ passthrough of garbage); `periodJson` emits
+     the exact wire object the Rust `Period` parses.
+   - File-ops wording (Sprint 7, `src/tests/fileopsFormat.test.ts`) ✓: the
+     factual operation language — `opVerb` maps each op to "be renamed/moved /
+     copied / trashed"; `previewHeadline` counts only the items that will run
+     and reports an aborted plan distinctly; `resultHeadline` states "N of M
+     &lt;op&gt; complete"; `progressLabel` prefers live progress, then the final
+     summary, then a neutral "working…" (never invents a total);
+     `flaggedResults` surfaces everything not `done`; `fileBase` is the preview
+     path label (null-safe, handles `/` and `\`-separated names).
 
 ## Integration (Rust, `tests/`)
 
@@ -129,6 +157,8 @@ write synthetic folder (N images + EXIF via a tiny writer or sidecar JPEG)
   → analyze → assert rows + version
   → apply filter → assert result set
   → statistics → assert aggregates
+  → plan + execute rename/move/copy/trash (temp dirs) → assert FS, DB sync,
+    audit log, collisions, partial failure   (Sprint 7)
 ```
 
 Run with `cargo test` (same command, `tests/` dir) so one command validates
