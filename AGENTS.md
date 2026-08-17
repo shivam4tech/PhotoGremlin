@@ -88,6 +88,31 @@ src-tauri/src/
 docs/                 Engineering documentation (source of truth for design)
 ```
 
+## Branching model (gitflow-lite)
+
+- `main` — stable. Never commit sprint work here. The owner merges
+  `develop` → `main` on their own schedule.
+- `develop` — integration branch. Feature branches start here.
+- Every sprint lives on its own branch: `feat/sprint-N-<slug>`
+  (created **from `develop`**). All sprint work lands there.
+- When a sprint passes its acceptance checks, merge the feature branch
+  **into `develop`** (no fast-forward surprises: use `--no-ff` so each
+  sprint stays visible in history).
+- Do **not** delete feature branches after merging — the owner deletes
+  them later. They are the tracking record of each sprint.
+- No force-pushes. No commits to `main` from agent work, ever.
+
+Example sequence for Sprint N:
+
+```
+git checkout develop && git pull
+git checkout -b feat/sprint-N-slug
+… work, test, build, commit …
+git checkout develop
+git merge --no-ff feat/sprint-N-slug
+git push origin develop
+```
+
 ## Sprint workflow
 
 1. Read this file and the relevant `docs/` pages.
