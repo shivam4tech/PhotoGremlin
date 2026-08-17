@@ -517,6 +517,81 @@ select:focus {
   background: var(--bg-elevated);
 }
 
+/* Filter bar (Sprint 5) — structured conditions, one shared language. */
+.filterbar {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+.filterbar > .btn {
+  width: fit-content;
+  margin: 8px 20px 0;
+}
+.filterbar-panel {
+  padding: 10px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.filterbar-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--accent-soft);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 999px;
+  color: var(--text);
+}
+.chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.chip-x:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.filterbar-compose {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+/* Form controls shared by the filter bar (and future views). */
+.input {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  padding: 5px 8px;
+  min-height: 28px;
+}
+.input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+}
+.filterbar-compose .input[type="date"] {
+  min-width: 130px;
+  color-scheme: dark;
+}
+
 .library-loading {
   flex: 1;
   display: flex;

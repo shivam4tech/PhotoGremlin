@@ -9,7 +9,9 @@ pub mod commands;
 pub mod database;
 pub mod error;
 pub mod events;
+pub mod filters;
 mod logging;
+pub mod metadata;
 pub mod paths;
 pub mod scanner;
 pub mod state;
@@ -49,6 +51,7 @@ pub fn run() {
                 paths: paths.clone(),
                 scan: Arc::new(Mutex::new(None)),
                 analysis: Arc::new(Mutex::new(None)),
+                metadata: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
                 )),
@@ -66,6 +69,9 @@ pub fn run() {
             commands::stop_scan,
             commands::start_analysis,
             commands::stop_analysis,
+            commands::start_metadata,
+            commands::stop_metadata,
+            commands::list_filtered_photos,
             commands::list_sessions,
             commands::list_photos,
             commands::get_photo_full,

@@ -51,12 +51,45 @@ friendly error instead of a SQL error.
    `SELECT COUNT(*)` for the results count and the statistics engine for
    scoped aggregates.
 
+## Implementation (Sprint 5)
+
+- `src-tauri/src/filters/mod.rs` is the engine: pure, Tauri- and
+  DB-independent. `parse_filter(json)` validates the JSON (top-level
+  operator must be `AND`, ≤ 50 conditions); `build_where(filter)` lowers it
+  to a `(WHERE fragment, [SqlParam])` pair. Column names come **only** from a
+  compile-time field registry (`FieldDef { kind, expr, negate_bool }`);
+  every value is a bound parameter (injection-safe). Unknown fields,
+  operators, or value types → friendly `Validation` errors before any SQL.
+- Kind rules: `Real`/`Int` accept `= != > >= < <= between in is-null
+  not-null`; `DateTime` accepts the order/range ops plus null-ops but not
+  `in` (v0.1); `Bool` is `= !=` only; `Text` is `= != in is-null not-null`.
+  `in` lists are capped at 100 items.
+- Storage semantics: technical fields read `analysis.*` through a
+  `LEFT JOIN`, so **unanalyzed photos never match a technical or flag
+  condition** (NULL comparison is false — a photo we have not measured is
+  neither "sharpness ≥ 70" nor "monochrome"). `color` is stored as the
+  inverse of the `is_monochrome` flag. `faces_present` / `smiling` compare
+  `(face_count IS NOT NULL AND face_count > 0)` — always false until the
+  local-model sprints (9/10) fill those columns. `capture_datetime` is TEXT
+  (UTC RFC3339), so comparisons are lexicographic and equal to time order.
+- Execution: `commands/filters.rs::list_filtered_photos` = parse → build →
+  `Db::photos_where(where_sql, params, offset, limit)`, which appends the
+  stable `ORDER BY` and `LIMIT ? OFFSET ?` and returns a `PhotoPage` (same
+  shape as the unfiltered grid — an empty filter is the default path). The
+  same `WHERE` will feed `SELECT COUNT(*)` and the statistics engine
+  (Sprint 10) for scoped aggregates.
+- The UI half (`src/features/library/filterFields.ts` + `FilterBar.tsx`)
+  mirrors the registry 1:1 and emits the exact wire object; date pickers send
+  bare dates and the upper `between` bound is extended to end-of-day so
+  "this day" is inclusive (a visible, stored part of the condition).
+
 ## Saved views
 
 `saved_views.filter_json` stores the exact filter object. Views are dynamic:
 apply the filter at open time — the list adapts to library changes, new
 analysis, etc. (Spec: a saved view stores the filter definition, not a static
-list.)
+list.) Saved-view management UI lands in Sprint 8; the table and engine are
+ready.
 
 ## Language rules
 

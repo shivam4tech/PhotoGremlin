@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 5). Tests assert both expected-table presence and idempotency.
+(currently 7). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -19,8 +19,12 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
 - v6: `analysis.source_mtime TEXT` (NULL on pre-v6 rows) — the source file
   mtime each analysis row was computed from (idempotency check, see below);
   added via `ALTER TABLE`, guarded by a `PRAGMA table_info` probe
+- v7: `photos.exif_at TEXT` (NULL until read) — the RFC3339 time the
+  metadata (EXIF) pass last read a file. Drives the "metadata pending" count
+  and makes re-runs cheap (one read per file in v0.1); added via
+  `ALTER TABLE`, guarded by the same `PRAGMA table_info` helper as v6
 
-## Tables (schema v1–v6)
+## Tables (schema v1–v7)
 
 ### sessions
 A shoot or imported body of work.
@@ -46,16 +50,17 @@ re-scan upserts instead of duplicating).
 | size_bytes | INTEGER | from `stat` |
 | width / height | INTEGER | pixel dimensions (EXIF-orientation-corrected when available) |
 | orientation | TEXT | `landscape` \| `portrait` \| `square`, derived from w×h |
-| camera_make / camera_model / lens | TEXT | EXIF (Sprint 5 fills these) |
-| focal_length | REAL | mm |
+| camera_make / camera_model / lens | TEXT | EXIF, filled by the metadata pass (Sprint 5) |
+| focal_length | REAL | mm (1/100 mm EXIF tag converted to mm) |
 | iso | INTEGER | |
-| aperture | REAL | e.g. 2.8 |
-| shutter_speed | REAL | seconds |
-| capture_datetime | TEXT | UTC RFC3339, from EXIF |
+| aperture | REAL | f-number, e.g. 2.8 |
+| shutter_speed | REAL | seconds (e.g. 1/250 = 0.004) |
+| capture_datetime | TEXT | UTC RFC3339, from EXIF. EXIF stores a zone-less local clock time; PhotoGremlin stores that wall-clock time **verbatim as UTC** (a documented decision — the catalog stays lexicographically sortable for filters without silently assuming the user's timezone) |
 | gps_present | INTEGER | 0/1 — presence only. **Coordinates are never stored** (see PRIVACY.md) |
 | session_id | INTEGER → sessions | ON DELETE SET NULL |
 | indexed_at | TEXT | |
 | file_mtime | TEXT | file mtime; incremental analysis reuses rows when mtime+size unchanged |
+| exif_at | TEXT | (v7) RFC3339 time the metadata pass read this file; NULL = not yet read. One read per file in v0.1 |
 
 Indexes: `session_id`, `capture_datetime`, `camera_model`, `lens` (filter +
 dashboard hot paths).
@@ -68,6 +73,16 @@ keyed on `root_path`: re-scanning a folder keeps the same session and
 refreshes its name; `refresh_session_counts` re-derives `photo_count` after
 each scan pass. Rows for files that vanished from disk are **not** deleted
 silently — they stay until a future reconcile step flags them to the user.
+
+**Metadata (EXIF) merge (Sprint 5):** the metadata pass (`exif_queue` →
+`upsert_exif`) reads each file once and stamps `exif_at`, so re-runs are
+no-ops and `status().metadata_pending` (count of `exif_at IS NULL`) drives
+the UI. `upsert_exif` merges with `COALESCE`: dimensions/orientation already
+resolved by the scanner win, GPS presence only escalates 0→1, and the other
+EXIF columns are filled from the extraction. A readable image with no EXIF
+segment is a *success* (empty record, still stamped), not a failure; a file
+that cannot be parsed at all is a friendly per-file error. Orientation is
+derived from the best-known (scanner ∪ EXIF) width×h by the pass.
 
 ### analysis
 One row per analyzed photo (`photo_id` PK, FK cascade).
@@ -116,23 +131,35 @@ Key/value for application state (e.g. `active_folder`).
 ### schema_version
 `version`, `applied_at`.
 
-## Query surface (as of Sprint 4)
+## Query surface (as of Sprint 5)
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
   `list_sessions` — scanner ingest (Sprint 2).
-- `list_photos(offset, limit)` — paginated grid rows (limit clamped to 1–500).
-  Ordered by capture date (unknowns first, then id) so the grid is stable.
-  `LEFT JOIN analysis` only to compute a `has_analysis` flag — the grid
-  payload stays small; full analysis arrives per photo via `get_photo_full`.
-- `get_photo_full(id)` — one photo with its `analysis` row via `LEFT JOIN`
-  (analysis fields are `NULL`/`false` until the analysis pass runs), used by
-  the viewer's metadata panel.
+- `photos_where(where_sql, where_params, offset, limit)` — the single
+  paginated grid query (limit clamped to 1–500). Takes a pre-built,
+  **parameterized** `WHERE` clause (produced by the filter engine; see
+  FILTER_ENGINE.md) plus its bound parameters in order; `LIMIT ?`/`OFFSET ?`
+  are appended. `LEFT JOIN analysis` gives filters (and `has_analysis`)
+  access to analysis columns under alias `a`. Ordered by capture date
+  (unknowns first, then id) so the grid is stable. Full analysis arrives per
+  photo via `get_photo_full`.
+- `list_photos(offset, limit)` — thin unfiltered alias of `photos_where`
+  (`WHERE ""`), the default grid path.
+- `get_photo_full(id)` — one photo with its EXIF + `analysis` row via
+  `LEFT JOIN` (analysis fields are `NULL`/`false` until the analysis pass
+  runs), used by the viewer's metadata panel.
 - `analysis_queue(extensions)` — photos still needing analysis (left join,
   NULL-safe mtime comparison, capture-time ordering, see rule above).
 - `upsert_analysis(photo_id, metrics, source_mtime)` — idempotent by
   `photo_id`; updates only analysis-owned columns.
 - `analysis_progress_counts(extensions)` — (decodable photos, analyzed of
   them) for the status line.
+- `exif_queue()` — photos the metadata pass hasn't read yet
+  (`exif_at IS NULL`), in capture-time order, carrying current dimensions.
+- `upsert_exif(photo_id, record)` — merge one file's EXIF extraction
+  (`COALESCE`, GPS 0→1 only, stamps `exif_at`); see the photos section.
+- `status()` — returns `metadata_pending` (count of `exif_at IS NULL`)
+  alongside the existing counts.
 
 ## Conventions
 

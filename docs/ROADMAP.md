@@ -8,7 +8,7 @@
 | 2 | Photo scanner + database ingestion (recursive walk, upsert, sessions, progress) | **done** (2026-08-17) |
 | 3 | Thumbnails + library grid (cache, lazy, virtualized) + viewer + metadata panel | **done** (2026-08-17) |
 | 4 | Local image analysis (sharpness, brightness, contrast, saturation, mono, clipping) + progress | **done** (2026-08-17) |
-| 5 | EXIF + filter engine (all filter areas, AND composition) | |
+| 5 | EXIF + filter engine (all filter areas, AND composition) | **done** (2026-08-17) |
 | 6 | Dashboard + statistics engine (periods, session stats, comparison, trends, camera/lens, distributions, selection infra) | |
 | 7 | Selection + file operations (group rename, move/copy/trash, collisions, confirmations) | |
 | 8 | Saved views + collections + similarity (perceptual hash, groups, bursts) + session detail | |

@@ -2,10 +2,14 @@
 
 pub mod analysis;
 pub mod app;
+pub mod filters;
+pub mod metadata;
 pub mod photos;
 pub mod scan;
 
 pub use analysis::*;
 pub use app::*;
+pub use filters::*;
+pub use metadata::*;
 pub use photos::*;
 pub use scan::*;

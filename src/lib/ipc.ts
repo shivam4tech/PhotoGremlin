@@ -28,8 +28,16 @@ export const api = {
   stopScan: (): Promise<boolean> => invoke("stop_scan"),
   startAnalysis: (): Promise<void> => invoke("start_analysis"),
   stopAnalysis: (): Promise<boolean> => invoke("stop_analysis"),
+  startMetadata: (): Promise<void> => invoke("start_metadata"),
+  stopMetadata: (): Promise<boolean> => invoke("stop_metadata"),
   listPhotos: (offset: number, limit: number): Promise<PhotoPage> =>
     invoke("list_photos", { offset, limit }),
+  // `filterJson` is the exact structured-filter object ("" = no filter).
+  listFilteredPhotos: (
+    filterJson: string,
+    offset: number,
+    limit: number,
+  ): Promise<PhotoPage> => invoke("list_filtered_photos", { filterJson, offset, limit }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>

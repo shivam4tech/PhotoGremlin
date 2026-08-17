@@ -31,6 +31,8 @@ export interface DbStatus {
   photo_count: number;
   session_count: number;
   analyzed_count: number;
+  /** Photos not yet read by the EXIF/metadata pass. */
+  metadata_pending: number;
   schema_version: number;
 }
 
@@ -173,6 +175,21 @@ export interface AnalysisCompletePayload {
 /** Result of one analysis pass (carried in `analysis-complete`). */
 export interface AnalysisSummary {
   analyzed: number;
+  failed: number;
+  cancelled: boolean;
+  elapsed_ms: number;
+  errors: string[];
+}
+
+/** `metadata-complete` event payload: exactly one of the two is set. */
+export interface MetadataCompletePayload {
+  summary: MetadataSummary | null;
+  error: string | null;
+}
+
+/** Result of one metadata (EXIF) pass (carried in `metadata-complete`). */
+export interface MetadataSummary {
+  processed: number;
   failed: number;
   cancelled: boolean;
   elapsed_ms: number;
