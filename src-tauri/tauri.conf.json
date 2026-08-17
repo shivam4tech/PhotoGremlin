@@ -33,6 +33,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "Photography",
+    "shortDescription": "Privacy-first local photo intelligence and organization",
+    "longDescription": "PhotoGremlin is a local-first desktop application that indexes your photo folders on your own machine: scanning, thumbnails, EXIF extraction, image analysis, quality filtering, similarity grouping, saved views and collections. Optional local face detection runs on-device. Photos never leave your computer, and the app makes no network requests at runtime.",
+    "homepage": "https://github.com/shivam4tech/PhotoGremlin",
+    "licenseFile": "../LICENSE",
+    "publisher": "PhotoGremlin contributors",
+    "linux": {
+      "deb": {
+        "section": "graphics"
+      }
+    }
   }
 }

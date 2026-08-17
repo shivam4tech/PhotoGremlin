@@ -111,6 +111,39 @@ Ship notes:
 - `build:app` (debug) stays the sprint-verification bundle — never ship it
   (large + slow; no LTO).
 
+### Package anatomy (Linux `.deb`)
+
+The bundle is fully self-contained — the installed application needs no
+repository, no Node, no Python, no Rust toolchain:
+
+- `usr/bin/photogremlin` — the entire desktop app (frontend assets and the
+  YuNet model embedded in the binary; system dependency: WebKitGTK 4.1 +
+  GTK 3, declared in the deb control)
+- `usr/share/applications/PhotoGremlin.desktop` — launcher entry
+  (`Name=PhotoGremlin`, `Icon=photogremlin`, `Terminal=false`,
+  `Categories=Graphics;Photography;` set via `bundle.category`)
+- `usr/share/icons/hicolor/{32x32,128x128,256x256@2}/apps/photogremlin.png`
+  — hicolor icons generated from the existing app icon set in
+  `src-tauri/icons/`
+
+Install with `sudo apt install ./PhotoGremlin_<ver>_amd64.deb` (or
+`dpkg -i`) and launch "PhotoGremlin" from the application launcher.
+
+Packaging metadata lives in `src-tauri/tauri.conf.json` (`bundle.*`:
+`productName`, `identifier`, `category`, `shortDescription`,
+`longDescription`, `homepage`, `publisher`, `licenseFile`,
+`linux.deb.section`). `icons/` holds the single PhotoGremlin icon identity;
+all platform variants (`.png` sizes, `.ico`, `.icns`) are generated forms of
+that one artwork — never introduce a second design.
+
+### Cross-platform artifacts
+
+`bundle.targets` = `deb` (Linux), `dmg` + `app` (macOS), `nsis` (Windows).
+Each target only builds on its own OS: a Linux machine produces the `.deb`,
+a Mac produces the `.dmg`/`.app`, Windows produces the `.exe` installer.
+Run the same `npm run build:app:release` command on each platform; nothing
+in the core code is platform-branching.
+
 ## Repo hygiene
 
 - Lockfiles are committed (`package-lock.json`, `Cargo.lock`).

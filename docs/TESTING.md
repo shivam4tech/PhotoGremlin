@@ -237,3 +237,30 @@ is discarded (the user's data is never touched). This runs in the sprint
 10 gauntlet; per-platform manual passes (macOS/Windows) are release-day
 work for the owner — nothing in the app is platform-branching, so Linux
 green is the meaningful signal here.
+
+### Installed-application verification (release packaging pass, Linux)
+
+Beyond the raw binary smoke, the final packaging pass verified the
+**installed package** (payload installed under a local prefix + XDG
+desktop entry, launched standalone with a sanitized environment — no repo,
+no Node/Python, minimal `PATH`):
+
+- clean first run: data dir created, `schema migrated from=0 to=10`, log
+  clean, frontend loaded (WebKit content process up; WebKit cache/storage
+  populated), Settings card exercised the real `ai_status` → ONNX
+  runtime-dlopen chain.
+- upgrade path: an existing **v8** data directory booted the installed
+  app → `schema migrated from=8 to=10`, rows preserved, `phash`/`faces_at`
+  columns present.
+- view navigation: all six views (Library/Dashboard/Sessions/Collections/
+  Saved Views/Settings) rendered via the global keyboard shortcuts through
+  real X input under Xvfb.
+- privacy: `strace` over the running installed app during live activity —
+  **zero** `AF_INET` connect calls; `ldd` shows no Node/Python deps; the
+  binary contains no API-key or external-endpoint strings.
+- graceful shutdown on SIGTERM, no orphaned WebKit processes.
+- Known headless limitation: pixel-level mouse clicks (e.g. driving the
+  native GTK folder dialog) are not automatable under this Xvfb
+  environment (WebKitGTK's webview event window degenerates to 1×1 and no
+  stable WM is available) — those UI paths are covered by the manual
+  per-platform checklist above.

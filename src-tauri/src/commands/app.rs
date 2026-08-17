@@ -82,28 +82,21 @@ pub fn get_active_folder(state: State<AppState>) -> AppResult<Option<String>> {
 
 /// Open a native folder picker. Runs the dialog via the dialog plugin so GTK
 /// thread-ownership stays correct. Returns `None` when the user cancels.
+///
+/// The command is async: the dialog plugin fires the callback on the main GTK
+/// loop once the user picks or cancels, and we await that result on the async
+/// runtime without ever blocking the main thread (a sync command here would
+/// freeze the UI and crash the app). A timeout protects against a dialog
+/// backend that never fires the callback.
 #[tauri::command]
-pub fn pick_folder(app: AppHandle) -> Option<String> {
+pub async fn pick_folder(app: AppHandle) -> Option<String> {
     use tauri_plugin_dialog::DialogExt;
-    let (tx, rx) = std::sync::mpsc::channel::<Option<String>>();
-    let builder = app.dialog().file();
-    // The plugin API is callback-based; bridge to a blocking channel so the
-    // command can return a plain value.
-    builder
-        .pick_folder(move |selection| {
-            let _ = tx.send(selection.map(|p| p.to_string()));
-        });
-    // Block briefly for user interaction.
-    let mut result = None;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
-    while std::time::Instant::now() < deadline {
-        match rx.recv_timeout(std::time::Duration::from_millis(50)) {
-            Ok(v) => {
-                result = v;
-                break;
-            }
-            Err(_) => {}
-        }
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    app.dialog().file().pick_folder(move |selection| {
+        let _ = tx.send(selection.map(|p| p.to_string()));
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(15 * 60), rx).await {
+        Ok(Ok(path)) => path,
+        _ => None,
     }
-    result
 }
