@@ -9,6 +9,10 @@ import type {
   DbStatus,
   PhotoFull,
   PhotoPage,
+  PeriodStats,
+  SessionMetrics,
+  SessionSummary,
+  SessionRow,
   ThumbData,
   ThumbKind,
 } from "@/types/api";
@@ -42,18 +46,14 @@ export const api = {
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>
     invoke("get_thumbnail", { photoId, kind }),
-  listSessions: () =>
-    invoke<
-      {
-        id: number;
-        name: string;
-        root_path: string | null;
-        start_time: string | null;
-        end_time: string | null;
-        photo_count: number;
-        created_at: string;
-      }[]
-    >("list_sessions"),
+  listSessions: (): Promise<SessionRow[]> => invoke("list_sessions"),
+  // Statistics engine (Sprint 6). Synchronous, local aggregation.
+  periodStats: (periodJson: string): Promise<PeriodStats> =>
+    invoke("period_stats", { periodJson }),
+  sessionSummary: (sessionId: number): Promise<SessionSummary> =>
+    invoke("session_summary", { sessionId }),
+  compareSessions: (sessionIds: number[]): Promise<SessionMetrics[]> =>
+    invoke("compare_sessions", { sessionIds }),
 };
 
 export type { UnlistenFn };

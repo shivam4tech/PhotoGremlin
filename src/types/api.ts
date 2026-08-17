@@ -265,3 +265,120 @@ export interface SessionRow {
   photo_count: number;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// Statistics engine (Sprint 6). Mirrors src-tauri/src/statistics — `null`
+// means "honest unavailable" (no inputs), never zero.
+// ---------------------------------------------------------------------------
+
+/** The one period model; sent as JSON to the engine. */
+export type Period =
+  | { kind: "today" }
+  | { kind: "this-week" }
+  | { kind: "this-month" }
+  | { kind: "this-year" }
+  | { kind: "all" }
+  | { kind: "custom"; from: string; to: string };
+
+export function periodJson(kind: string, from?: string, to?: string): string {
+  switch (kind) {
+    case "today":
+      return JSON.stringify({ kind: "today" });
+    case "this-week":
+      return JSON.stringify({ kind: "this-week" });
+    case "this-month":
+      return JSON.stringify({ kind: "this-month" });
+    case "this-year":
+      return JSON.stringify({ kind: "this-year" });
+    case "custom":
+      return JSON.stringify({ kind: "custom", from, to });
+    default:
+      return JSON.stringify({ kind: "all" });
+  }
+}
+
+export interface BinCount {
+  label: string;
+  count: number;
+}
+
+export interface UsageCount {
+  name: string;
+  photos: number;
+  share: number;
+  avg_sharpness: number | null;
+  avg_iso: number | null;
+}
+
+export interface TrendPoint {
+  /** "YYYY-MM" */
+  month: string;
+  photos: number;
+  sessions: number;
+  avg_sharpness: number | null;
+  avg_iso: number | null;
+  /** share of the month's analyzed photos that are color */
+  color_share: number | null;
+}
+
+export interface SelectionStats {
+  imported: number;
+  selected: number;
+  rejected: number;
+  trashed: number;
+  /** selected / imported (0..1); null when imported is 0 */
+  kept_ratio: number | null;
+}
+
+export interface PeriodStats {
+  period: string;
+  photos: number;
+  sessions: number;
+  photos_per_session: number | null;
+  /** analyzed subset size — denominator of the averages */
+  analyzed: number;
+  avg_sharpness: number | null;
+  avg_brightness: number | null;
+  avg_contrast: number | null;
+  avg_saturation: number | null;
+  /** shares 0..100 over analyzed photos */
+  monochrome_share: number | null;
+  color_share: number | null;
+  /** shares over photos with AI face/smile data; null when none */
+  faces_present_share: number | null;
+  smiling_share: number | null;
+  iso_histogram: BinCount[];
+  aperture_histogram: BinCount[];
+  focal_histogram: BinCount[];
+  shutter_histogram: BinCount[];
+  camera_usage: UsageCount[];
+  lens_usage: UsageCount[];
+  trend: TrendPoint[];
+  /** null when no selection signal exists at all */
+  selection: SelectionStats | null;
+}
+
+export interface SessionMetrics {
+  id: number;
+  name: string;
+  photos: number;
+  analyzed: number;
+  avg_sharpness: number | null;
+  avg_brightness: number | null;
+  avg_contrast: number | null;
+  avg_saturation: number | null;
+  monochrome_share: number | null;
+  color_share: number | null;
+  avg_iso: number | null;
+  avg_aperture: number | null;
+  avg_shutter: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  duration_days: number | null;
+}
+
+export interface SessionSummary {
+  session: SessionRow;
+  duration_days: number | null;
+  stats: PeriodStats;
+}

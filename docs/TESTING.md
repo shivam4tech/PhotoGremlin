@@ -58,17 +58,37 @@ Per-sprint coverage (✓ = in place today):
    re-run is a no-op; a file without EXIF is stamped (processed) but keeps
    NULL camera fields; a deleted file is a friendly per-file failure;
    cancel-before-start processes nothing and reports `cancelled`.
- - Filters (Sprint 5, `filters/mod.rs` + integration
-   `tests/filters_integration.rs`): every operator lowered and run against a
-   seeded DB — boundary `>=`/`<`, AND composition, `in` placeholders,
-   `between` (datetime string order == time order), flag semantics
-   (unanalyzed photos never match a flag; `color` = inverse of
-   `is_monochrome`), null-ops, unknown field/op/bad value-type → friendly
-   validation errors, and a SQL-injection-looking value is bound, not spliced
-   (the table survives). Empty filter returns everything, paginated.
- - Statistics (Sprint 6): period resolution (today/week/month/year/custom/all
-  on a fixed "now"); average over analyzed-only subset; distribution binning
-  edges (ISO 400 → first of the two boundary bins, rule documented).
+  - Filters (Sprint 5, `filters/mod.rs` + integration
+    `tests/filters_integration.rs`): every operator lowered and run against a
+    seeded DB — boundary `>=`/`<`, AND composition, `in` placeholders,
+    `between` (datetime string order == time order), flag semantics
+    (unanalyzed photos never match a flag; `color` = inverse of
+    `is_monochrome`), null-ops, unknown field/op/bad value-type → friendly
+    validation errors, and a SQL-injection-looking value is bound, not spliced
+    (the table survives). Empty filter returns everything, paginated.
+  - Statistics engine (Sprint 6, integration `tests/statistics_integration.rs`)
+    ✓: a two-session, four-photo seed (two analyzed+EXIF, one unanalyzed
+    EXIF, one photo with no EXIF at all — its `indexed_at` pinned so the
+    `COALESCE` fallback is deterministic) proves: totals + photos/session;
+    analyzed-only averages with the denominator; mono/color and AI face/smile
+    shares (present vs `None`); all four fixed-bin histograms; camera/lens
+    usage incl. the "Unknown camera/lens" grouping and analyzed-only group
+    averages; the monthly trend (only months with data, chronological,
+    per-month analyzed-only averages); custom-period scoping incl. scoped
+    selection counts vs the global trash count; the empty-period honest zero
+    (every average `None`, selection section present-with-zero when a signal
+    exists); selection hidden when no signal exists; session summary scoping
+    + duration; side-by-side comparison (same metric rows, per-session
+    averages); compare size/unknown-id validation; and
+    `refresh_all_sessions_times` deriving start/end from the photos.
+  - Statistics (Sprint 6, `statistics/bins.rs` + `statistics/mod.rs`) ✓:
+    binning edges for all four distributions (ISO 400 → "400–800" boundary
+    documented, below-range clips into the first bin, focal nearest-of-set,
+    shutter overflow bucket), `bin_counts` keeps zero bins in fixed label
+    order; period resolution on a pinned "now" (today/this-week
+    Monday-based/this-month + year boundary/this-year + year boundary/custom
+    bare-date end-of-day extension/all) and the period JSON parse (invalid
+    kinds → friendly error).
 - Rename templates (Sprint 7): token expansion, sanitization, collision
   detection within a plan, sequence width growth.
 - File ops (Sprint 7): collision detection, cross-device move staging,
@@ -83,16 +103,21 @@ Per-sprint coverage (✓ = in place today):
   clamping (never past item count, start≤end, zero-item safe, abnormal col
   count) and `computeColumns` fit + min-one-column. The pure math is tested
   so the scroll handler stays a thin wrapper. ✓
- - Filter registry + composition (Sprint 5, `src/tests/filterFields.test.ts`)
-   ✓: the TS registry mirrors the Rust field registry (names/kinds/areas);
-   operators are constrained per kind; `buildCondition` produces well-typed
-   values and rejects empty/invalid input (keeps ISO whole, honors the
-   orientation value set, auto-extends a datetime `between` upper bound to
-   end-of-day); `chipLabel` uses neutral technical language (no verdicts);
-   `draftToFilter` emits the exact wire object the Rust engine parses
-   (round-trip JSON asserted).
- - Pure presentation helpers (formatting: ISO→"1/125", focal→"50mm",
-   percentages) as they land.
+  - Filter registry + composition (Sprint 5, `src/tests/filterFields.test.ts`)
+    ✓: the TS registry mirrors the Rust field registry (names/kinds/areas);
+    operators are constrained per kind; `buildCondition` produces well-typed
+    values and rejects empty/invalid input (keeps ISO whole, honors the
+    orientation value set, auto-extends a datetime `between` upper bound to
+    end-of-day); `chipLabel` uses neutral technical language (no verdicts);
+    `draftToFilter` emits the exact wire object the Rust engine parses
+    (round-trip JSON asserted).
+  - Statistics formatting (Sprint 6, `src/tests/statsFormat.test.ts`) ✓: the
+    honest-data rendering — every formatter returns "unavailable" (never
+    "0"/"0%") for `null`; metrics to one decimal; shares as undecimaled
+    percent; 0–1 kept-ratio → percent; durations (days vs hours vs unknown);
+    EXIF formatters (ISO int, `f/2.8`, `1/125` vs `0.600s` fallback);
+    `monthLabel` for `YYYY-MM` (+ passthrough of garbage); `periodJson` emits
+    the exact wire object the Rust `Period` parses.
 
 ## Integration (Rust, `tests/`)
 

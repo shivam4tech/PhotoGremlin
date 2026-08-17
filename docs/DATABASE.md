@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 7). Tests assert both expected-table presence and idempotency.
+(currently 8). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -23,8 +23,11 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   metadata (EXIF) pass last read a file. Drives the "metadata pending" count
   and makes re-runs cheap (one read per file in v0.1); added via
   `ALTER TABLE`, guarded by the same `PRAGMA table_info` helper as v6
+- v8: `selections` table — explicit culling state (one row per photo:
+  `selected` | `rejected`) the statistics engine reads for the selection
+  ratio (the selection UI lands in Sprint 7)
 
-## Tables (schema v1–v7)
+## Tables (schema v1–v8)
 
 ### sessions
 A shoot or imported body of work.
@@ -34,8 +37,8 @@ A shoot or imported body of work.
 | id | INTEGER PK | |
 | name | TEXT | human name (e.g. folder name) |
 | root_path | TEXT | the scanned folder, if any |
-| start_time / end_time | TEXT | UTC RFC3339, from photo capture datetimes |
-| photo_count | INTEGER | denormalized counter, maintained on ingest |
+| start_time / end_time | TEXT | UTC RFC3339 — the shoot period, derived from the photos' `COALESCE(capture_datetime, indexed_at)` (NULLs while the session has no dated photos) |
+| photo_count | INTEGER | denormalized counter, refreshed by the scan (per session) and the metadata pass (all sessions) |
 | created_at | TEXT | |
 
 ### photos
@@ -125,16 +128,36 @@ Audit log for every rename/move/copy/trash: op_type, source, destination,
 status, detail, timestamp. This underpins "what happened to my files?" and
 the selection-ratio statistics.
 
+### selections
+Culling state (v8, Sprint 6 infrastructure; written by the Sprint 7
+selection UI): one row per photo.
+
+| column | type | notes |
+|---|---|---|
+| photo_id | INTEGER PK → photos | ON DELETE CASCADE |
+| state | TEXT | `selected` \| `rejected` (CHECK constraint) |
+| updated_at | TEXT | RFC3339 |
+
+The statistics engine treats it as *a* selection signal; an empty table (plus
+no move/copy/rename/trash operations) means "no selection signal" and the
+ratio section is hidden entirely, not zeroed.
+
 ### app_settings
 Key/value for application state (e.g. `active_folder`).
 
 ### schema_version
 `version`, `applied_at`.
 
-## Query surface (as of Sprint 5)
+## Query surface (as of Sprint 6)
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
-  `list_sessions` — scanner ingest (Sprint 2).
+  `refresh_all_sessions_times` / `list_sessions` — scanner ingest (Sprint 2).
+  `refresh_session_counts(id)` re-derives one session's `photo_count` and
+  its `start_time`/`end_time` from
+  `COALESCE(capture_datetime, indexed_at)` (empty sessions → NULL times);
+  `refresh_all_sessions_times()` does the same for every session in one
+  statement and runs after each scan pass and after the metadata pass (the
+  pass is what fills capture datetimes).
 - `photos_where(where_sql, where_params, offset, limit)` — the single
   paginated grid query (limit clamped to 1–500). Takes a pre-built,
   **parameterized** `WHERE` clause (produced by the filter engine; see
