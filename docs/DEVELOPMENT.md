@@ -36,6 +36,25 @@ Reconstruction recipe (if the sysroot is ever wiped):
 On a root-ful machine the normal path works: `apt install <same pkg list>`
 and skip the sysroot entirely.
 
+## ONNX Runtime (local intelligence, optional)
+
+The Sprint 9 face detector runs the embedded YuNet model through the system
+ONNX Runtime, dlopened at runtime (nothing bundled, nothing downloaded). It
+is **optional**: without it the app works fully and face detection reports
+itself unavailable from Settings.
+
+- Dev box install here: the runtime is present at
+  `/usr/lib/x86_64-linux-gnu/libonnxruntime.so.1.23` — note there is **no
+  unversioned `.so.1` symlink** on this machine, which is why the resolver
+  in `ml/mod.rs` also scans standard lib dirs for `libonnxruntime.so.1.*`
+  (see LOCAL_AI.md §Runtime). If the library is missing, the integration
+  pass tests skip (the queue/storage invariants still run).
+- The `ort`/`ort-sys` pinning is deliberate and documented in LOCAL_AI.md —
+  do not "upgrade" it: ort 1.x is yanked, `load-dynamic` died after
+  `2.0.0-rc.9`, and ort rc.9 does not compile against ort-sys rc.10+.
+- Rust `cargo test` needs nothing extra (the `ml` unit tests are pure; the
+  integration tests detect the runtime at runtime).
+
 ## Day-to-day commands
 
 | task | command (from repo root; source ~/pg-env.sh first on Linux here) |

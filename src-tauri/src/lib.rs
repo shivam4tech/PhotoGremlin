@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod filters;
 mod logging;
 pub mod metadata;
+pub mod ml;
 pub mod paths;
 pub mod scanner;
 pub mod similarity;
@@ -57,6 +58,7 @@ pub fn run() {
                 metadata: Arc::new(Mutex::new(None)),
                 operation: Arc::new(Mutex::new(None)),
                 similarity: Arc::new(Mutex::new(None)),
+                faces: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
                 )),
@@ -113,6 +115,10 @@ pub fn run() {
             commands::rename_saved_view,
             commands::delete_saved_view,
             commands::saved_view_count,
+            commands::ai_status,
+            commands::set_ai_enabled,
+            commands::start_faces,
+            commands::stop_faces,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PhotoGremlin");

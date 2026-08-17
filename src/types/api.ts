@@ -36,7 +36,44 @@ export interface DbStatus {
   /** Culling state (Sprint 7): photos marked selected / rejected. */
   selected_count: number;
   rejected_count: number;
+  /** Photos with a local-AI face result (Sprint 9). */
+  faces_done: number;
   schema_version: number;
+}
+
+// --- Local intelligence (Sprint 9) -----------------------------------------
+
+/** Local-AI status — the Settings "Local intelligence" card. */
+export interface AiStatus {
+  /** Stored preference (ai_enabled); AI is off by default. */
+  enabled: boolean;
+  /** True when the ONNX Runtime loaded on this machine. */
+  runtime_available: boolean;
+  /** Friendly reason when unavailable (null when available). */
+  runtime_note: string | null;
+  /** The shipped local model, reported as-is for transparency. */
+  model: string;
+  model_bytes: number;
+  /** Photos with a stored face result / photos in the library. */
+  faces_done: number;
+  photo_count: number;
+}
+
+/** Result of one face-detection pass (carried in `faces-complete`). */
+export interface FaceSummary {
+  processed: number;
+  with_faces: number;
+  failed: number;
+  cancelled: boolean;
+  elapsed_ms: number;
+  /** First few friendly per-file messages (the log has the full detail). */
+  errors: string[];
+}
+
+/** `faces-complete` event payload: exactly one of the two is set. */
+export interface FaceCompletePayload {
+  summary: FaceSummary | null;
+  error: string | null;
 }
 
 // --- File operations (Sprint 7) -------------------------------------------

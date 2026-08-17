@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 9;
+pub const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -228,6 +228,17 @@ impl Db {
                     .map_err(db_err("add photos.phash_source_mtime"))?;
             }
 
+            // v10: face-detection stamp for the local-AI pass (Sprint 9).
+            // `faces_at` records the file mtime when faces were last
+            // detected (re-detect when the file gets newer), mirroring
+            // `phash_source_mtime`. Lives with `face_count` on `analysis`;
+            // a face-only row (no measurements yet) is created by the face
+            // pass and filled in by the analysis pass later.
+            if !table_has_column(&conn, "analysis", "faces_at") {
+                conn.execute("ALTER TABLE analysis ADD COLUMN faces_at TEXT", [])
+                    .map_err(db_err("add analysis.faces_at"))?;
+            }
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -286,6 +297,13 @@ impl Db {
                 |r| r.get(0),
             )
             .map_err(db_err("read version"))?;
+        let faces_done: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM analysis WHERE face_count IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(db_err("count faces done"))?;
         Ok(DbStatus {
             photo_count,
             session_count,
@@ -293,6 +311,7 @@ impl Db {
             metadata_pending,
             selected_count,
             rejected_count,
+            faces_done,
             schema_version: version,
         })
     }
@@ -1545,6 +1564,81 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         .map_err(db_err("upsert phash"))?;
         Ok(())
     }
+
+    // --- Face-detection queue + storage (v10, Sprint 9 local AI) ---
+
+    /// Photos still lacking a face result, or detected from a now-stale
+    /// mtime (same incremental rule as the phash pass). Decodable formats
+    /// only. Carries the stored dimensions so the pass can apply its pixel
+    /// guard before decoding.
+    pub fn faces_queue(&self) -> AppResult<Vec<FaceWork>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.path, p.width, p.height, p.file_mtime
+                 FROM photos p
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                   AND (a.face_count IS NULL
+                        OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
+                            AND a.faces_at < p.file_mtime))
+                 ORDER BY (p.capture_datetime IS NULL) ASC,
+                          COALESCE(p.capture_datetime, p.indexed_at), p.id",
+            )
+            .map_err(db_err("prepare faces queue"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(FaceWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    width: r.get(2)?,
+                    height: r.get(3)?,
+                    file_mtime: r.get(4)?,
+                })
+            })
+            .map_err(db_err("query faces queue"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read face work row"))?);
+        }
+        Ok(out)
+    }
+
+    /// Store one photo's face result. A photo without an `analysis` row gets
+    /// a face-only row (measurements stay NULL until the analysis pass runs;
+    /// `analyzed_at`/`algorithm_version` are filled so the NOT NULL
+    /// constraints hold — the row then re-enters the analysis queue
+    /// naturally via the NULL-safe `source_mtime` comparison). The update
+    /// path never touches columns the analysis pass owns, and vice versa.
+    pub fn upsert_faces(
+        &self,
+        photo_id: i64,
+        face_count: i64,
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO analysis (photo_id, face_count, faces_at, analyzed_at, algorithm_version)
+             VALUES (?1, ?2, ?3, ?4, 1)
+             ON CONFLICT(photo_id) DO UPDATE SET
+                face_count = excluded.face_count,
+                faces_at = excluded.faces_at",
+            params![photo_id, face_count, source_mtime, crate::time::now_utc()],
+        )
+        .map_err(db_err("upsert faces"))?;
+        Ok(())
+    }
+
+    /// How many photos carry a face result (the Settings "N of M" line).
+    pub fn faces_done(&self) -> AppResult<i64> {
+        let conn = self.lock()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM analysis WHERE face_count IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(db_err("count faces done"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1589,6 +1683,15 @@ pub struct PhashWork {
     pub file_mtime: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct FaceWork {
+    pub photo_id: i64,
+    pub path: String,
+    pub width: Option<i64>,
+    pub height: Option<i64>,
+    pub file_mtime: Option<String>,
+}
+
 /// One queued unit of analysis work: a decodable photo whose row is missing,
 /// stale (older algorithm), or computed from a different file mtime.
 /// One queued unit of metadata work: a photo the EXIF/metadata pass hasn't
@@ -1625,6 +1728,8 @@ pub struct DbStatus {
     /// Culling state (Sprint 7): photos marked selected / rejected.
     pub selected_count: i64,
     pub rejected_count: i64,
+    /// Photos with a local-AI face result (Sprint 9; `face_count` set).
+    pub faces_done: i64,
     pub schema_version: i64,
 }
 

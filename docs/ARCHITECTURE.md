@@ -31,12 +31,12 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   registers commands. No business logic.
 - `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
    scan-job slot + the analysis-job slot + the metadata-job slot + the
-   file-operation slot + the similarity slot), shared via Tauri's managed
-   state. Commands take `State<AppState>`. Each slot holds the live
-   `Job { running, cancel }` Arcs: a claim-and-cancel mechanism shared between
-   `start_*`/`stop_*` and the background task (scan, analysis, metadata, file
-   operations and similarity are separate slots; the UI keeps them mutually
-   exclusive).
+   file-operation slot + the similarity slot + the faces slot), shared via
+   Tauri's managed state. Commands take `State<AppState>`. Each slot holds
+   the live `Job { running, cancel }` Arcs: a claim-and-cancel mechanism
+   shared between `start_*`/`stop_*` and the background task (scan, analysis,
+   metadata, file operations, similarity and face detection are separate
+   slots; the UI keeps them mutually exclusive).
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
@@ -131,8 +131,33 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    `spawn_blocking`s the pass) / `stop_similarity`; `similarity-progress` +
    `similarity-complete` events carry the `SimilaritySummary { hashed, failed,
    similar_groups, burst_groups, elapsed_ms, cancelled }`.
+- `ml/` (Sprint 9) — local intelligence: face detection behind the
+  isolation boundary (see LOCAL_AI.md). The model (YuNet 2023mar, 232 KB,
+  Apache-2.0) is `include_bytes!`-ed into the binary; the ONNX Runtime is
+  dlopened from the system via ort in `load-dynamic` mode (pinned
+  `ort = 2.0.0-rc.9` / `ort-sys = 2.0.0-rc.9` — the details of why are in
+  LOCAL_AI.md). `runtime_status()` probes the library with `libloading`
+  **before** any ort call (ort panics instead of erroring on a missing
+  library), so a machine without the runtime gets a friendly status + a
+  refusing pass, never a crash. Pure, unit-tested halves: `build_blob`
+  (640² distorted linear resize, BGR, per-channel mean 104/177/123, CHW
+  f32) and `decode_detections` (offset-0 anchors, stride-scaled deltas,
+  `exp` sizes, `sqrt(cls·obj)` score, NMS IoU 0.3, top-100) plus `iou`/`nms`.
+  `run_faces_pass(db, progress, cancel)` = the pass: `faces_queue()` →
+  per-file guards (256 MB / 250 MP) → decode → one shared `ort::Session`
+  (`Send + Sync`, built once per pass) → `upsert_faces` + stamp. Sequential
+  by design (independent per-file work; the queue is small because it is
+  incremental); cancellation between files.
+- `commands/ai.rs` — `ai_status` (enabled, runtime availability + friendly
+  note, model provenance/size, `faces_done`/`photo_count`), `set_ai_enabled`
+  (persists the preference; does not start anything), `start_faces`
+  (claims the faces slot, `spawn_blocking`s the pass) / `stop_faces`;
+  `faces-progress` + `faces-complete` events carry the `FaceSummary
+  { processed, with_faces, failed, cancelled, elapsed_ms, errors }`.
+  Auto-run: the UI starts the pass after a scan that indexed new photos,
+  only when the stored `ai_enabled` preference is on.
 - `commands/views.rs` + `commands/collections.rs` (Sprint 8) — saved views and
-   collections over the v2/v3 tables. Views: `list_saved_views` /
+    collections over the v2/v3 tables. Views: `list_saved_views` /
    `save_view` (validated with the grid's own filter engine before persist) /
    `rename_saved_view` / `delete_saved_view` / `saved_view_count` (dynamic —
    recomputes `photos_where` over the stored filter). Collections: `list_` /
@@ -170,15 +195,16 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `events.rs` — IPC event names (`scan-progress`, `scan-complete`,
   `analysis-progress`, `analysis-complete`, `metadata-progress`,
   `metadata-complete`, `operation-progress`, `operation-complete`,
-  `similarity-progress`, `similarity-complete`, `db-changed`) +
+  `similarity-progress`, `similarity-complete`, `faces-progress`,
+  `faces-complete`, `db-changed`) +
   `ProgressPayload { total, done, stage, current }` (stages: discovering,
-  indexing, analyzing, reading metadata, hashing, grouping, done, and the
-  operation verb rename/move/copy/trash). Progress flows Rust → UI via Tauri
-  events, never by polling. `scan-complete` / `analysis-complete` /
-  `metadata-complete` / `operation-complete` / `similarity-complete` each
-  carry `{ summary?, error? }` (`operation-complete`'s summary is
+  indexing, analyzing, reading metadata, hashing, grouping, detecting faces,
+  done, and the operation verb rename/move/copy/trash). Progress flows
+  Rust → UI via Tauri events, never by polling. Every `*-complete` event
+  carries `{ summary?, error? }` (`operation-complete`'s summary is
   `OperationSummary`: per-item done/failed/skipped/cancelled, capped at 500
-  for IPC; `similarity-complete`'s is `SimilaritySummary`, above).
+  for IPC; `similarity-complete`'s is `SimilaritySummary`, above;
+  `faces-complete`'s is `FaceSummary` above).
 - `logging.rs` — `tracing` with a rolling daily file in the Tauri log dir
   (`<data_dir>/logs/photogremlin.<date>.log` on Linux) + console layer.
   Zero telemetry; the only sink is the local disk.
@@ -236,14 +262,25 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    culling bar ("Add to collection"). The pure naming/labeling rules
    (`cleanName`, `groupLabel`) live in `features/organize/labels.ts`
    (unit-tested, `src/tests/organizeLabels.test.ts`).
- - Similarity (Sprint 8, frontend): the Library's "Find similar photos"
-   toolbar button starts the pass (progress via `similarity-progress`); on
-   completion the "Similar groups" panel shows group cards (cover strips via
-   `features/similarity/CoverThumb.tsx`, factual labels via `groupLabel`).
-   Clicking a card opens that group's photographs in the same grid + viewer
-   path (`group_photos`), with a back bar. The language is kept factual
-   ("near-identical structure", "captured within seconds") — the user decides
-   via culling + file ops.
+  - Similarity (Sprint 8, frontend): the Library's "Find similar photos"
+    toolbar button starts the pass (progress via `similarity-progress`); on
+    completion the "Similar groups" panel shows group cards (cover strips via
+    `features/similarity/CoverThumb.tsx`, factual labels via `groupLabel`).
+    Clicking a card opens that group's photographs in the same grid + viewer
+    path (`group_photos`), with a back bar. The language is kept factual
+    ("near-identical structure", "captured within seconds") — the user decides
+    via culling + file ops.
+  - Local intelligence (Sprint 9, frontend): configured only from the
+    Settings "Local intelligence" card (`views/SettingsView.tsx` + pure
+    wording helpers in `features/settings/ai.ts`, unit-tested in
+    `src/tests/settingsAi.test.ts`): on/off toggle (off by default), runtime
+    availability line (with the friendly note when ONNX Runtime is missing),
+    model provenance + embedded size, "N of M checked for faces", run-now /
+    stop buttons with live progress, last-pass summary. `App.tsx` owns the
+    `faces-progress` / `faces-complete` listeners and the post-scan auto-run
+    (only when the stored preference is on). The dashboard's face statistics
+    (`faces_present_share`) were already wired in Sprint 6 against the
+    `face_count` column and now get their data from this pass.
 - Statistics (Sprint 6): `views/DashboardView.tsx` renders
   `PeriodStats` for the selected period (+ custom range) — totals,
   analyzed-only averages, shares, the four distributions (pure CSS bars),

@@ -11,6 +11,8 @@ pub const OPERATION_PROGRESS: &str = "operation-progress";
 pub const OPERATION_COMPLETE: &str = "operation-complete";
 pub const SIMILARITY_PROGRESS: &str = "similarity-progress";
 pub const SIMILARITY_COMPLETE: &str = "similarity-complete";
+pub const FACES_PROGRESS: &str = "faces-progress";
+pub const FACES_COMPLETE: &str = "faces-complete";
 
 /// Payload shape shared by scan/analysis/operation progress events.
 #[derive(Clone, serde::Serialize)]

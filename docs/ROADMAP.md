@@ -12,7 +12,7 @@
 | 6 | Dashboard + statistics engine (periods, session stats, comparison, trends, camera/lens, distributions, selection infra) | **done** (2026-08-17) |
 | 7 | Selection + file operations (group rename, move/copy/trash, collisions, confirmations) | **done** (2026-08-17) |
 | 8 | Saved views + collections + similarity (perceptual hash, groups, bursts) + session detail | **done** (2026-08-17) |
-| 9 | Local intelligence (face detection first; smile only if stable — otherwise documented as v0.2) | |
+| 9 | Local intelligence (face detection first; smile only if stable — otherwise documented as v0.2) | **done** (2026-08-17) — YuNet 2023mar local face detection (face_count); smile detection documented as v0.2 in LOCAL_AI.md |
 | 10 | Polish + release (shortcuts, empty/loading/error states, settings, onboarding, privacy messaging, release builds, smoke test) | |
 
 Priority order under time pressure (never sacrifice 1–10 for 11–14):
@@ -23,7 +23,9 @@ file ops → saved views → similarity → local AI → contact sheets → poli
 
 Stronger RAW support (decode provider), better similarity, contact sheets,
 ratings/flags/color labels, GPS removal (careful, destructive metadata
-edit), metadata editing, smile detection (if deferred from v0.1).
+edit), metadata editing, **smile detection (deferred from v0.1 — Sprint 9
+shipped face detection; the smile model is the v0.2 follow-up, see
+LOCAL_AI.md)**.
 
 ## v0.3
 

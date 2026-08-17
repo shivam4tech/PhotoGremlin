@@ -122,6 +122,16 @@ Per-sprint coverage (✓ = in place today):
    `group_bursts` clumps close timestamps into one group, leaves a far photo
    out, drops singletons, and never joins a photo with no capture time; the
    RGB→grayscale conversion path compiles + runs.
+- Local intelligence (Sprint 9, `ml/mod.rs`) — 6 unit tests ✓: `build_blob`
+  is CHW / BGR / per-channel-mean-subtracted (a 1×1 pixel replicated to the
+  640² grid pins all three layouts at once); `decode_detections` uses
+  offset-0 anchors, stride-scaled deltas, `exp` box sizes and the
+  `sqrt(cls·obj)` score (a single confident cell at a known (r, c) is
+  decoded to its exact box); sub-threshold scores are rejected; `nms`
+  suppresses a lower-scored overlapping box, keeps a far one, and is
+  deterministic (sorted out); `iou` is 0 when disjoint and 1 when equal;
+  `runtime_status` is consistent and cached (and, when unavailable, its note
+  names the library).
 
 ## Frontend tests (`npm test`, Vitest)
 
@@ -159,6 +169,13 @@ Per-sprint coverage (✓ = in place today):
    `groupLabel` stays technical ("2 similar" / "N similar photographs" /
    "burst · N") and never emits a verdict. These are the strings the group
    cards and view/collection forms show, so the discipline is pinned by test.
+- Local-intelligence wording (Sprint 9, `src/tests/settingsAi.test.ts`) ✓:
+  the Settings card strings — `formatModelSize` (B/KB/MB, no fake precision);
+  `formatFacesProgressLine` is honest at every stage ("no photographs yet",
+  "none checked yet", "42 of 1,000 checked" — a count of checks, never a
+  judgment); `formatFaceSummaryLine` (completed vs stopped, singular/plural,
+  elapsed in s); `runtimeLine` (available / a friendly note verbatim / a
+  full default note).
 
 ## Integration (Rust, `tests/`)
 
@@ -178,6 +195,16 @@ write synthetic folder (N images + EXIF via a tiny writer or sidecar JPEG)
      file, groups persist with covers, an immediate cancel leaves a
      consistent (empty) set; plus saved-view CRUD + dynamic count and
      collection CRUD/membership/cascade   (Sprint 8)
+   → face pass (real embedded model, `tests/ml_integration.rs`) → the
+     committed public-domain portrait yields ≥ 1 face while two synthetic
+     striped JPEGs yield exactly 0, a second run is a no-op, a newer
+     file_mtime re-queues exactly the touched photo, a face-only row is
+     re-queued by analysis and survives `upsert_analysis` (count + stamp
+     preserved, `photos.file_mtime` untouched), a pre-set cancel stops
+     before any work, a missing file is a friendly failure that stamps
+     nothing, and the pass outcome agrees with `runtime_status()` on both
+     paths (when the machine lacks ONNX Runtime the pass tests skip — the
+     storage/queue invariants above still run)   (Sprint 9)
  ```
 
 Run with `cargo test` (same command, `tests/` dir) so one command validates

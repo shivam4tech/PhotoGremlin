@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 9). Tests assert both expected-table presence and idempotency.
+(currently 10). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -31,8 +31,13 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   similarity pass's incremental rule, mirroring the analysis rule in terms of
   a separate column; see SIMILARITY.md). Added via `ALTER TABLE`, guarded by
   the same `PRAGMA table_info` probe as v6/v7
+- v10: `analysis.faces_at TEXT` (NULL until the local-AI face pass stamps
+  it) — the file mtime the `face_count` was computed from, driving the face
+  pass's incremental rule exactly like `phash_source_mtime` does (see
+  LOCAL_AI.md). Added via `ALTER TABLE`, guarded by the same
+  `PRAGMA table_info` probe
 
-## Tables (schema v1–v9)
+## Tables (schema v1–v10)
 
 ### sessions
 A shoot or imported body of work.
@@ -99,10 +104,12 @@ One row per analyzed photo (`photo_id` PK, FK cascade).
 
 sharpness, brightness, contrast, saturation (0–100), highlight_clipping,
 shadow_clipping (percent), is_monochrome/is_dark/is_bright (0/1),
-face_count, smile_count (nullable until local AI runs, Sprint 9),
+face_count, smile_count (nullable until local AI runs; face_count is
+written by the Sprint 9 face pass, smile_count is v0.2 and stays NULL),
 perceptual_hash (hex, Sprint 8), algorithm_version (INTEGER, see below),
 analyzed_at, source_mtime (v6: RFC3339 mtime of the file the row was
-computed from; NULL on pre-v6 rows).
+computed from; NULL on pre-v6 rows), faces_at (v10: the file mtime the
+face pass stamped `face_count` from; NULL until it runs).
 
 **Versioning + incremental rule:** `algorithm_version` records which math
 produced the row (`ANALYSIS_ALGORITHM_VERSION`, currently 1); bumping it
@@ -116,6 +123,16 @@ next analysis pass automatically. `upsert_analysis` updates only the columns
 the analysis pass owns — it never clobbers perceptual_hash (Sprint 8) or
 face/smile columns (Sprint 9) when it re-measures brightness etc. Scores
 are normalized 0–100 so filters/UI stay stable across versions.
+
+**Face-only rows (Sprint 9):** the face pass can store a count for a photo
+the analysis pass hasn't measured yet. `upsert_faces` then inserts a row
+with `face_count`/`faces_at` set and every measurement `NULL` (its
+`analyzed_at`/`algorithm_version` are filled so the NOT NULL constraints
+hold). Such a row is exactly like a row awaiting analysis: `source_mtime`
+is `NULL`, so the NULL-safe `source_mtime IS NOT file_mtime` comparison
+keeps it in `analysis_queue()` until the analysis pass fills the
+measurements — and that pass's upsert preserves the face columns (integrated-
+tested in `tests/ml_integration.rs`).
 
 ### collections / collection_photos
 Manually curated sets (Sprint 8 UI). `collection_photos` is the join table
@@ -164,12 +181,15 @@ no move/copy/rename/trash operations) means "no selection signal" and the
 ratio section is hidden entirely, not zeroed.
 
 ### app_settings
-Key/value for application state (e.g. `active_folder`).
+Key/value for application state. Keys in use: `active_folder` (the scanned
+folder), `ai_enabled` (Sprint 9: local-intelligence preference, `"true"` /
+`"false"`, **off by default** — turning it on gates the post-scan face pass
+auto-run, it never forces inference).
 
 ### schema_version
 `version`, `applied_at`.
 
-  ## Query surface (as of Sprint 8) 
+  ## Query surface (as of Sprint 9) 
 
 - `upsert_photo` / `upsert_session` / `refresh_session_counts` /
   `refresh_all_sessions_times` / `list_sessions` — scanner ingest (Sprint 2).
@@ -203,7 +223,8 @@ Key/value for application state (e.g. `active_folder`).
 - `upsert_exif(photo_id, record)` — merge one file's EXIF extraction
   (`COALESCE`, GPS 0→1 only, stamps `exif_at`); see the photos section.
 - `status()` — returns `metadata_pending` (count of `exif_at IS NULL`),
-  `selected_count` / `rejected_count` (Sprint 7 culling totals), alongside the
+  `selected_count` / `rejected_count` (Sprint 7 culling totals),
+  `faces_done` (Sprint 9: count of `face_count IS NOT NULL`), alongside the
   existing counts.
 
 ### File operations (Sprint 7)
@@ -274,6 +295,18 @@ Key/value for application state (e.g. `active_folder`).
 - `replace_similarity_groups([(hash, group_type, photo_ids)]) -> count` — one
   transaction: delete all groups + memberships, insert the full new set
   (atomic replacement; the pass is the only writer).
+
+### Local intelligence (Sprint 9)
+
+- `faces_queue()` — photos the face pass must (re-)detect: `face_count IS
+  NULL` or `file_mtime` newer than the `faces_at` stamp, decodable
+  extensions only, capture-time order. The mirror of `phash_queue` for the
+  face pass (see LOCAL_AI.md).
+- `upsert_faces(photo_id, face_count, source_mtime)` — store one photo's
+  result, idempotent by `photo_id`; creates a face-only analysis row where
+  needed (see the analysis section) and the update path touches only the
+  face columns — never the measurements, never `source_mtime`.
+- `faces_done()` — count of photos with a stored result (Settings line).
 
 ## Conventions
 

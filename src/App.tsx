@@ -5,12 +5,14 @@ import { useAppStore } from "@/stores/appStore";
 import { api, onProgress, toErrorMessage } from "@/lib/ipc";
 import type {
   AnalysisCompletePayload,
+  FaceCompletePayload,
   MetadataCompletePayload,
   OperationCompletePayload,
   ProgressPayload,
   ScanCompletePayload,
   SimilarityCompletePayload,
 } from "@/types/api";
+import { formatFaceSummaryLine } from "@/features/settings/ai";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
@@ -132,6 +134,15 @@ export default function App() {
               st.setReadingMetadata(false);
               st.setProgress(null);
             });
+          // …and, when the user turned local intelligence on, detect faces
+          // in the new photographs too (a no-op when nothing is queued).
+          if (useAppStore.getState().aiEnabled) {
+            api.startFaces().catch(() => {
+              const st = useAppStore.getState();
+              st.setDetectingFaces(false);
+              st.setFacesProgress(null);
+            });
+          }
         }
       });
       const uop = await onProgress<ProgressPayload>("operation-progress", (p) => {
@@ -201,10 +212,32 @@ export default function App() {
            s.setSimilaritySummary(null);
            s.setError(p.error ?? "Finding similar photos failed.");
          }
-         // The group set changed: refresh it.
-         void s.loadSimilarityGroups();
+          // The group set changed: refresh it.
+          void s.loadSimilarityGroups();
+        });
+       const uf = await onProgress<ProgressPayload>("faces-progress", (p) => {
+         const s = state();
+         s.setDetectingFaces(true);
+         s.setFacesProgress(p);
        });
-       return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc];
+       const ufc = await onProgress<FaceCompletePayload>("faces-complete", (p) => {
+         const s = state();
+         s.setDetectingFaces(false);
+         s.setFacesProgress(null);
+         if (p.summary) {
+           s.setFacesSummary(p.summary);
+           if (p.summary.processed > 0 || p.summary.failed > 0 || !p.summary.cancelled) {
+             s.setNotice(formatFaceSummaryLine(p.summary));
+             s.setError(null);
+           }
+         } else {
+           s.setFacesSummary(null);
+           s.setError(p.error ?? "Face detection failed.");
+         }
+         void s.refreshStatus();
+         void s.loadAiStatus();
+       });
+        return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc, uf, ufc];
     })();
 
     let alive = true;
