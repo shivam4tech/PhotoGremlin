@@ -13,7 +13,7 @@
 | 7 | Selection + file operations (group rename, move/copy/trash, collisions, confirmations) | **done** (2026-08-17) |
 | 8 | Saved views + collections + similarity (perceptual hash, groups, bursts) + session detail | **done** (2026-08-17) |
 | 9 | Local intelligence (face detection first; smile only if stable — otherwise documented as v0.2) | **done** (2026-08-17) — YuNet 2023mar local face detection (face_count); smile detection documented as v0.2 in LOCAL_AI.md |
-| 10 | Polish + release (shortcuts, empty/loading/error states, settings, onboarding, privacy messaging, release builds, smoke test) | |
+| 10 | Polish + release (shortcuts, empty/loading/error states, settings, onboarding, privacy messaging, release builds, smoke test) | **done** (2026-08-17) — global shortcuts + Settings card, success-notice toast, empty-folder states, release bundle + smoke (see DEVELOPMENT.md §Release) |
 
 Priority order under time pressure (never sacrifice 1–10 for 11–14):
 launch → scan → grid → analysis → EXIF → filters → dashboard → selection →

@@ -13,6 +13,7 @@ import type {
   SimilarityCompletePayload,
 } from "@/types/api";
 import { formatFaceSummaryLine } from "@/features/settings/ai";
+import { isTypingTarget, shortcutFor } from "@/features/shortcuts";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
@@ -21,9 +22,45 @@ import { SavedViewsView } from "@/views/SavedViewsView";
 import { SettingsView } from "@/views/SettingsView";
 import { VIEW_META } from "@/stores/appStore";
 
+/**
+ * Global keyboard shortcuts (Sprint 10): ⌘/Ctrl+O opens a photo folder,
+ * bare 1–6 switch views. The viewer adds Esc/arrows with its own listener
+ * (no key conflict). Never fires while the user is typing.
+ */
+function useAppShortcuts() {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (isTypingTarget(e.target as HTMLElement | null)) return;
+      const action = shortcutFor(e);
+      if (!action) return;
+      e.preventDefault();
+      const s = useAppStore.getState();
+      if (action.kind === "open-folder") {
+        s.openFolder().catch((err) => s.setError(toErrorMessage(err)));
+      } else {
+        s.setView(action.view);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+
 export default function App() {
   const view = useAppStore((s) => s.view);
   const error = useAppStore((s) => s.error);
+  const notice = useAppStore((s) => s.notice);
+  const setNotice = useAppStore((s) => s.setNotice);
+
+  // Success notices are set by the pass-complete handlers and should be
+  // transient: auto-dismiss after a few seconds, or immediately on ×.
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [notice, setNotice]);
+
+  useAppShortcuts();
 
   useEffect(() => {
     let cancelled = false;
@@ -272,6 +309,40 @@ export default function App() {
       <main className="main">
         <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description} />
         <div className={view === "library" ? "view-scroll library-scroll" : "view-scroll"}>{body}</div>
+        {notice && (
+          <div
+            role="status"
+            style={{
+              padding: "8px 34px 8px 20px",
+              background: "var(--accent-soft)",
+              color: "var(--text)",
+              borderTop: "1px solid rgba(74,222,128,0.3)",
+              fontSize: 12.5,
+              position: "relative",
+            }}
+          >
+            {notice}
+            <button
+              aria-label="Dismiss"
+              onClick={() => setNotice(null)}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "none",
+                border: "none",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 4,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
         {error && (
           <div
             role="alert"

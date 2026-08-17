@@ -169,6 +169,11 @@ Per-sprint coverage (✓ = in place today):
    `groupLabel` stays technical ("2 similar" / "N similar photographs" /
    "burst · N") and never emits a verdict. These are the strings the group
    cards and view/collection forms show, so the discipline is pinned by test.
+- Global shortcuts (Sprint 10, `src/tests/shortcuts.test.ts`) ✓: `shortcutFor`
+  maps ⌘/Ctrl+O and bare 1–6 (and nothing else — no stray modifier combos,
+  no digits outside the set); the display catalog covers exactly those
+  global actions plus the documented viewer keys (Esc/←/→); `isTypingTarget`
+  gates on editable targets so typing never triggers shortcuts.
 - Local-intelligence wording (Sprint 9, `src/tests/settingsAi.test.ts`) ✓:
   the Settings card strings — `formatModelSize` (B/KB/MB, no fake precision);
   `formatFacesProgressLine` is honest at every stage ("no photographs yet",
@@ -224,3 +229,11 @@ small folder · large folder (multi-thousand) · missing file mid-session ·
 unsupported format · duplicate import · rename collision · move · copy ·
 trash · filter · saved view · dashboard · session comparison · offline mode
 (network disabled).
+
+**Automated smoke (Sprint 10, Linux):** the **release** binary is booted
+headless (`xvfb-run`) against a fresh data directory: clean start,
+`schema migrated from=0 to=10` in the log, zero errors, then the directory
+is discarded (the user's data is never touched). This runs in the sprint
+10 gauntlet; per-platform manual passes (macOS/Windows) are release-day
+work for the owner — nothing in the app is platform-branching, so Linux
+green is the meaningful signal here.
