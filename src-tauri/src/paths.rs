@@ -2,12 +2,12 @@
 //!
 //!   data_dir        ~/.local/share/com.photogremlin.app   (Linux example)
 //!   cache_dir       ~/.cache/com.photogremlin.app
-//!   log_dir         ~/.local/state/com.photogremlin.app
+//!   log_dir         <data_dir>/logs                        (Tauri log dir)
 //!
 //! Layout:
-//!   data_dir/database.sqlite   - the local catalog
-//!   cache_dir/thumbnails/      - generated thumbnails
-//!   log_dir/photogremlin.log   - rolling local log
+//!   data_dir/database.sqlite        - the local catalog
+//!   cache_dir/thumbnails/           - generated thumbnails
+//!   log_dir/photogremlin.<date>.log - rolling local log
 
 use std::path::PathBuf;
 

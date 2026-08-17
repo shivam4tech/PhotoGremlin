@@ -1,0 +1,96 @@
+# Database
+
+SQLite, single file: `<data_dir>/database.sqlite` (see DEVELOPMENT.md for
+per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
+`Mutex<Connection>` in `src-tauri/src/database.rs`.
+
+## Migration policy
+
+Version stored in `schema_version (version, applied_at)`. Migrations are
+idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
+(currently 4). Tests assert both expected-table presence and idempotency.
+
+## Tables (as of Sprint 1 — schema v1–v4)
+
+### sessions
+A shoot or imported body of work.
+
+| column | type | notes |
+|---|---|---|
+| id | INTEGER PK | |
+| name | TEXT | human name (e.g. folder name) |
+| root_path | TEXT | the scanned folder, if any |
+| start_time / end_time | TEXT | UTC RFC3339, from photo capture datetimes |
+| photo_count | INTEGER | denormalized counter, maintained on ingest |
+| created_at | TEXT | |
+
+### photos
+One row per indexed file. `path` is UNIQUE (duplicate-path protection:
+re-scan upserts instead of duplicating).
+
+| column | type | notes |
+|---|---|---|
+| id | INTEGER PK | |
+| path | TEXT UNIQUE | absolute path |
+| filename / extension | TEXT | |
+| size_bytes | INTEGER | from `stat` |
+| width / height | INTEGER | pixel dimensions (EXIF-orientation-corrected when available) |
+| orientation | TEXT | `landscape` \| `portrait` \| `square`, derived from w×h |
+| camera_make / camera_model / lens | TEXT | EXIF (Sprint 5 fills these) |
+| focal_length | REAL | mm |
+| iso | INTEGER | |
+| aperture | REAL | e.g. 2.8 |
+| shutter_speed | REAL | seconds |
+| capture_datetime | TEXT | UTC RFC3339, from EXIF |
+| gps_present | INTEGER | 0/1 — presence only. **Coordinates are never stored** (see PRIVACY.md) |
+| session_id | INTEGER → sessions | ON DELETE SET NULL |
+| indexed_at | TEXT | |
+| file_mtime | TEXT | file mtime; incremental analysis reuses rows when mtime+size unchanged |
+
+Indexes: `session_id`, `capture_datetime`, `camera_model`, `lens` (filter +
+dashboard hot paths).
+
+### analysis
+One row per analyzed photo (`photo_id` PK, FK cascade).
+
+sharpness, brightness, contrast, saturation (0–100), highlight_clipping,
+shadow_clipping (percent), is_monochrome/is_dark/is_bright (0/1),
+face_count, smile_count (nullable until local AI runs), perceptual_hash
+(hex), algorithm_version (INTEGER, see below), analyzed_at.
+
+**Versioning rule:** `algorithm_version` records which math produced the row
+(`ANALYSIS_ALGORITHM_VERSION` constant, currently 1). If the constant is
+bumped, the app can offer to re-analyze rows whose version is stale. Scores
+are normalized 0–100 so filters/UI stay stable across versions.
+
+### collections / collection_photos
+Manually curated sets (Sprint 8 UI). `collection_photos` is the join table
+with composite PK.
+
+### saved_views
+Dynamic filters: `filter_json` holds the full structured filter
+(see FILTER_ENGINE.md), so a view stays correct as the library changes.
+Composite uniqueness on `name`.
+
+### similarity_groups / similarity_group_photos
+Groups of visually similar photos (perceptual-hash clusters) and
+burst-like time clusters (`group_type` distinguishes).
+
+### file_operations
+Audit log for every rename/move/copy/trash: op_type, source, destination,
+status, detail, timestamp. This underpins "what happened to my files?" and
+the selection-ratio statistics.
+
+### app_settings
+Key/value for application state (e.g. `active_folder`).
+
+### schema_version
+`version`, `applied_at`.
+
+## Conventions
+
+- All timestamps UTC RFC3339 (see `time.rs`).
+- Counts that drive UI (session photo_count) are denormalized and updated
+  transactionally on ingest — statistics engine still computes from the base
+  tables for anything non-trivial.
+- Never store GPS coordinates, never store raw pixel data.
