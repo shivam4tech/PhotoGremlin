@@ -124,6 +124,9 @@ const FACES_PRESENT: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.face_coun
 const FACE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.face_count", negate_bool: false };
 const SMILING: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.smile_count IS NOT NULL AND a.smile_count > 0)", negate_bool: false };
 const SMILE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.smile_count", negate_bool: false };
+const RATING: FieldDef = FieldDef { kind: Kind::Int, expr: "p.rating", negate_bool: false };
+const FLAGGED: FieldDef = FieldDef { kind: Kind::Bool, expr: "p.flag = 1", negate_bool: false };
+const COLOR_LABEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.color_label", negate_bool: false };
 
 /// The field registry (FILTER_ENGINE.md): maps each filter field to
 /// (expression, kind) so conditions validate before any SQL runs. Unknown
@@ -154,6 +157,9 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "face_count" => &FACE_COUNT,
         "smiling" => &SMILING,
         "smile_count" => &SMILE_COUNT,
+        "rating" => &RATING,
+        "flagged" => &FLAGGED,
+        "color_label" => &COLOR_LABEL,
         _ => return None,
     })
 }
@@ -575,6 +581,24 @@ mod tests {
             sql,
             "WHERE (a.face_count IS NOT NULL AND a.face_count > 0) = ?"
         );
+    }
+
+    #[test]
+    fn marking_fields_build_mark_sql() {
+        // Rating (unrated = NULL) filters through the null operators.
+        let (sql, _) = build_conds(vec![cond("rating", "not-null", json!(null))]);
+        assert_eq!(sql, "WHERE p.rating IS NOT NULL");
+        let (sql, params) = build_conds(vec![cond("rating", ">=", json!(3))]);
+        assert_eq!(sql, "WHERE p.rating >= ?");
+        assert_eq!(params.len(), 1);
+        // Flagged maps to a derived bool expression.
+        let (sql, _) = build_conds(vec![cond("flagged", "=", json!(true))]);
+        assert_eq!(sql, "WHERE p.flag = 1 = ?");
+        // Color label is plain text; `not-null` = has any color.
+        let (sql, _) = build_conds(vec![cond("color_label", "not-null", json!(null))]);
+        assert_eq!(sql, "WHERE p.color_label IS NOT NULL");
+        let (sql, _) = build_conds(vec![cond("color_label", "=", json!("red"))]);
+        assert_eq!(sql, "WHERE p.color_label = ?");
     }
 
     #[test]

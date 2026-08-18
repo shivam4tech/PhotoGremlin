@@ -216,6 +216,11 @@ export interface PhotoSummary {
   capture_datetime: string | null;
   session_id: number | null;
   has_analysis: boolean;
+  /** 1–5 stars (null = unrated). */
+  rating: number | null;
+  flag: boolean;
+  /** "red" | "yellow" | "green" | "blue" | "purple" | "gray" | null. */
+  color_label: string | null;
 }
 
 export interface PhotoPage {
@@ -249,6 +254,11 @@ export interface PhotoFull {
   capture_datetime_source: string | null;
   gps_present: boolean;
   session_id: number | null;
+  /** 1–5 stars (null = unrated). */
+  rating: number | null;
+  flag: boolean;
+  /** "red" | "yellow" | "green" | "blue" | "purple" | "gray" | null. */
+  color_label: string | null;
   indexed_at: string;
   file_mtime: string | null;
   sharpness: number | null;

@@ -187,6 +187,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `file_operations` audit row. Execution re-checks each destination right
   before acting so preview→confirm races are per-item failures, not
   overwrites.
+- Curatorial marks (Sprint 13) — `photos.rating / flag / color_label` set by
+  `db::set_marks` (batch, per-field `Option`, closed-enum validation) via
+  `commands/fileops.rs::update_marks`; grid rows carry the marks, the viewer
+  and the selection panel edit them, filters expose `rating`, `flagged`,
+  `color_label` through the standard registry.
 - `database.rs` — single `Mutex<Connection>`; short critical sections only
   (never held across await). Versioned schema in `schema_version`
   (see DATABASE.md). WAL mode, foreign keys on.

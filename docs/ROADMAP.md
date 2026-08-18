@@ -22,10 +22,12 @@ file ops → saved views → similarity → local AI → contact sheets → poli
 ## v0.2
 
 Stronger RAW support (decode provider), better similarity, contact sheets,
-ratings/flags/color labels, GPS removal (careful, destructive metadata
-edit), metadata editing, **smile detection (deferred from v0.1 — Sprint 9
-shipped face detection; the smile model is the v0.2 follow-up, see
-LOCAL_AI.md)**.
+**ratings/flags/color labels (Sprint 13 — done 2026-08-18: photos columns
+`rating`/`flag`/`color_label`, Marking filter area, viewer + tile + bulk
+selection controls, `update_marks` IPC)**, GPS removal (careful,
+destructive metadata edit), metadata editing, **smile detection (deferred
+from v0.1 — Sprint 9 shipped face detection; the smile model is the v0.2
+follow-up, see LOCAL_AI.md)**.
 
 ## v0.3
 

@@ -51,6 +51,20 @@ export const FILTER_FIELDS: FieldDef[] = [
     area: "Faces & smiles (local models)",
   },
   { field: "smiling", label: "Smiling", kind: "bool", area: "Faces & smiles (local models)" },
+  {
+    field: "rating",
+    label: "Rating",
+    kind: "int",
+    area: "Marking",
+  },
+  { field: "flagged", label: "Flagged", kind: "bool", area: "Marking" },
+  {
+    field: "color_label",
+    label: "Color label",
+    kind: "text",
+    area: "Marking",
+    values: ["red", "yellow", "green", "blue", "purple", "gray"],
+  },
 ];
 
 export const FIELD_BY_NAME: Record<string, FieldDef> = Object.fromEntries(
@@ -114,6 +128,7 @@ const BOOL_PHRASES: Record<string, string> = {
   bright: "bright",
   faces_present: "contains faces",
   smiling: "smiling",
+  flagged: "flagged",
 };
 
 const OP_SYMBOL: Record<string, string> = {

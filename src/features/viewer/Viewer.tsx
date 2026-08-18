@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
+import { MARK_COLORS } from "@/features/library/marks";
 import type { PhotoFull, PhotoSummary } from "@/types/api";
 
 type ImageState =
@@ -82,6 +83,14 @@ export function Viewer({
   const [full, setFull] = useState<PhotoFull | null>(null);
   const [image, setImage] = useState<ImageState>({ kind: "loading" });
   const [metaError, setMetaError] = useState<string | null>(null);
+
+  // Apply a mark change (Sprint 13): only the given fields change; then
+  // refresh the panel so the UI reflects the new row.
+  const applyMark = (rating: number | null, flag: boolean | null, color: string | null) => {
+    void api.updateMarks([photoId], rating, flag, color).then(() => {
+      api.getPhotoFull(photoId).then(setFull).catch(() => {});
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -182,6 +191,63 @@ export function Viewer({
                       : "File modified (estimated)"
                 }
               />
+            )}
+          </Section>
+
+          <Section title="Marks">
+            {!full ? (
+              <div className="meta-empty">Loading…</div>
+            ) : (
+              <>
+                <div className="marks-row">
+                  <span className="meta-label">Rating</span>
+                  <span className="marks-stars" aria-label="Rating">
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <button
+                        key={s}
+                        className={`marks-star${(full.rating ?? 0) >= s ? " is-on" : ""}`}
+                        title={`${s} ${s === 1 ? "star" : "stars"}`}
+                        aria-pressed={(full.rating ?? 0) === s}
+                        onClick={() =>
+                          applyMark(
+                            (full.rating ?? 0) === s ? 0 : s,
+                            null,
+                            null,
+                          )
+                        }
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </span>
+                </div>
+                <div className="marks-row">
+                  <span className="meta-label">Flag</span>
+                  <button
+                    className={`btn btn-sm${full.flag ? " btn-on" : " btn-ghost"}`}
+                    onClick={() => applyMark(null, !full.flag, null)}
+                  >
+                    {full.flag ? "⚑ Flagged" : "Flag"}
+                  </button>
+                </div>
+                <div className="marks-row">
+                  <span className="meta-label">Label</span>
+                  <span className="marks-colors">
+                    {MARK_COLORS.map((c) => (
+                      <button
+                        key={c.name}
+                        className={`marks-color${full.color_label === c.name ? " is-on" : ""}`}
+                        title={c.name}
+                        aria-label={c.name}
+                        style={{ background: c.hex }}
+                        onClick={() =>
+                          applyMark(null, null, full.color_label === c.name ? "" : c.name)
+                        }
+                      />
+                    ))}
+                  </span>
+                </div>
+              </>
             )}
           </Section>
 

@@ -235,6 +235,22 @@ pub fn list_selections(state: State<AppState>) -> AppResult<Vec<SelectionRow>> {
     state.db.list_selections(20_000)
 }
 
+/// Apply curatorial marks (rating / flag / color label) to a batch of
+/// photos (Sprint 13). Only `Some` fields change; `None` leaves that mark
+/// untouched on every photo. Rating 0 / empty color clear the mark.
+#[tauri::command]
+pub fn update_marks(
+    photo_ids: Vec<i64>,
+    state: State<AppState>,
+    rating: Option<i64>,
+    flag: Option<bool>,
+    color: Option<String>,
+) -> AppResult<usize> {
+    state
+        .db
+        .set_marks(&photo_ids, rating, flag, color.as_deref())
+}
+
 #[tauri::command]
 pub fn recent_file_ops(state: State<AppState>, limit: i64) -> AppResult<Vec<FileOpRow>> {
     state.db.recent_file_ops(limit)

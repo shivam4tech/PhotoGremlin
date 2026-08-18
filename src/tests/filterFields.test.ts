@@ -36,6 +36,9 @@ describe("filter registry", () => {
     expectField("capture_datetime", "datetime", "Time");
     expectField("faces_present", "bool", "Faces & smiles (local models)");
     expectField("smiling", "bool", "Faces & smiles (local models)");
+    expectField("rating", "int", "Marking");
+    expectField("flagged", "bool", "Marking");
+    expectField("color_label", "text", "Marking");
   });
 
   it("exposes the right operators per kind", () => {
@@ -52,6 +55,17 @@ describe("filter registry", () => {
 
   it("orientation is a fixed value set", () => {
     expect(FIELD_BY_NAME.orientation.values).toEqual(["landscape", "portrait", "square"]);
+  });
+
+  it("marking fields: color_label enum and chips", () => {
+    expect(FIELD_BY_NAME.color_label.values).toEqual([
+      "red", "yellow", "green", "blue", "purple", "gray",
+    ]);
+    const c = buildCondition("color_label", "=", "green", "");
+    expect(c).toEqual({ field: "color_label", operator: "=", value: "green" });
+    expect(buildCondition("color_label", "=", "mauve", "")).toBeNull();
+    expect(chipLabel(buildCondition("rating", "is-null", "", "")!)).toBe("rating: not recorded");
+    expect(chipLabel(buildCondition("flagged", "=", "true", "")!)).toBe("flagged");
   });
 });
 

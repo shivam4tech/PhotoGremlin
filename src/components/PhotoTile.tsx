@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
+import { LABEL_HEX } from "@/features/library/marks";
 import type { PhotoSummary } from "@/types/api";
 import type { SelectionState } from "@/stores/appStore";
 
@@ -101,6 +102,23 @@ export function PhotoTile({
           </span>
           <span className="tile-dim mono">{dims}</span>
         </span>
+        {(photo.rating ?? 0) > 0 && (
+          <span className="tile-badge tile-badge-stars" title={`Rating: ${photo.rating}/5`}>
+            {"★".repeat(photo.rating ?? 0)}
+          </span>
+        )}
+        {photo.flag && (
+          <span className="tile-badge tile-badge-flag" title="Flagged">
+            ⚑
+          </span>
+        )}
+        {photo.color_label && (
+          <span
+            className="tile-badge tile-badge-label"
+            title={`Color label: ${photo.color_label}`}
+            style={{ background: LABEL_HEX[photo.color_label] ?? "#8a8f98" }}
+          />
+        )}
       </button>
       {selectionMode && (
         <span className="tile-select">
