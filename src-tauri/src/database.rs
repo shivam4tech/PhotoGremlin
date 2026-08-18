@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 11;
+pub const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -262,6 +262,26 @@ impl Db {
                     [],
                 )
                 .map_err(db_err("add photos.metadata_source"))?;
+            }
+
+            // v12 (Sprint 12): date estimation. `capture_datetime_source`
+            // records the provenance of the capture datetime itself
+            // ('exif' | 'filename' | 'mtime'), so the UI can label an
+            // estimate instead of pretending precision. Backfill: before
+            // estimation existed, every stored capture datetime came from
+            // EXIF, so that label is safe for existing rows.
+            if !table_has_column(&conn, "photos", "capture_datetime_source") {
+                conn.execute(
+                    "ALTER TABLE photos ADD COLUMN capture_datetime_source TEXT",
+                    [],
+                )
+                .map_err(db_err("add photos.capture_datetime_source"))?;
+                conn.execute(
+                    "UPDATE photos SET capture_datetime_source = 'exif'
+                     WHERE capture_datetime IS NOT NULL AND capture_datetime_source IS NULL",
+                    [],
+                )
+                .map_err(db_err("backfill capture_datetime_source"))?;
             }
 
             let current_version: i64 = conn
@@ -555,7 +575,7 @@ impl Db {
             .query_row(
                 "SELECT p.id, p.path, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.camera_make, p.camera_model, p.lens,
-                        p.lens_make, p.software, p.metadata_source,
+                        p.lens_make, p.software, p.metadata_source, p.capture_datetime_source,
                         p.focal_length,
                         p.iso, p.aperture, p.shutter_speed, p.capture_datetime, p.gps_present,
                         p.session_id, p.indexed_at, p.file_mtime,
@@ -583,29 +603,30 @@ impl Db {
                         lens_make: r.get(11)?,
                         software: r.get(12)?,
                         metadata_source: r.get(13)?,
-                        focal_length: r.get(14)?,
-                        iso: r.get(15)?,
-                        aperture: r.get(16)?,
-                        shutter_speed: r.get(17)?,
-                        capture_datetime: r.get(18)?,
-                        gps_present: r.get::<_, i64>(19)? != 0,
-                        session_id: r.get(20)?,
-                        indexed_at: r.get(21)?,
-                        file_mtime: r.get(22)?,
-                        sharpness: r.get(23)?,
-                        brightness: r.get(24)?,
-                        contrast: r.get(25)?,
-                        saturation: r.get(26)?,
-                        highlight_clipping: r.get(27)?,
-                        shadow_clipping: r.get(28)?,
-                        is_monochrome: r.get::<_, Option<i64>>(29)?.unwrap_or(0) != 0,
-                        is_dark: r.get::<_, Option<i64>>(30)?.unwrap_or(0) != 0,
-                        is_bright: r.get::<_, Option<i64>>(31)?.unwrap_or(0) != 0,
-                        face_count: r.get(32)?,
-                        smile_count: r.get(33)?,
-                        perceptual_hash: r.get(34)?,
-                        algorithm_version: r.get(35)?,
-                        analyzed_at: r.get(36)?,
+                        capture_datetime_source: r.get(14)?,
+                        focal_length: r.get(15)?,
+                        iso: r.get(16)?,
+                        aperture: r.get(17)?,
+                        shutter_speed: r.get(18)?,
+                        capture_datetime: r.get(19)?,
+                        gps_present: r.get::<_, i64>(20)? != 0,
+                        session_id: r.get(21)?,
+                        indexed_at: r.get(22)?,
+                        file_mtime: r.get(23)?,
+                        sharpness: r.get(24)?,
+                        brightness: r.get(25)?,
+                        contrast: r.get(26)?,
+                        saturation: r.get(27)?,
+                        highlight_clipping: r.get(28)?,
+                        shadow_clipping: r.get(29)?,
+                        is_monochrome: r.get::<_, Option<i64>>(30)?.unwrap_or(0) != 0,
+                        is_dark: r.get::<_, Option<i64>>(31)?.unwrap_or(0) != 0,
+                        is_bright: r.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
+                        face_count: r.get(33)?,
+                        smile_count: r.get(34)?,
+                        perceptual_hash: r.get(35)?,
+                        algorithm_version: r.get(36)?,
+                        analyzed_at: r.get(37)?,
                     })
                 },
             )
@@ -755,7 +776,7 @@ impl Db {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, path, extension, filename, width, height, orientation
+                "SELECT id, path, extension, filename, width, height, orientation, file_mtime
                  FROM photos
                  WHERE exif_at IS NULL
                     OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
@@ -772,6 +793,7 @@ impl Db {
                     width: r.get(4)?,
                     height: r.get(5)?,
                     orientation: r.get(6)?,
+                    file_mtime: r.get(7)?,
                 })
             })
             .map_err(db_err("query exif_queue"))?;
@@ -782,22 +804,34 @@ impl Db {
         Ok(out)
     }
 
-    /// Persist one photo's EXIF/metadata extraction. Merge semantics:
-    /// - scanner-resolved dimensions/orientation always win (COALESCE keeps
-    ///   the existing value — the scanner has authoritative pixels);
-    /// - EXIF-owned fields are refreshed by the newest read: a non-None
-    ///   value replaces the old one (so a re-read of a changed file actually
-    ///   updates the row), while a None in a fresh read preserves what an
-    ///   earlier read found (an empty read never erases data);
-    /// - GPS presence only ever escalates 0→1 (documented privacy choice);
-    /// - `metadata_source` escalates to 'exif' once real EXIF values have
-    ///   landed (a later estimation pass may write 'filename'/'mtime' below
-    ///   it — dominance order exif > filename > mtime);
-    /// - `exif_at` is stamped so unchanged files drop out of the queue.
-    pub fn upsert_exif(&self, photo_id: i64, e: &crate::metadata::ExifRecord) -> AppResult<()> {
-        let conn = self.lock()?;
-        conn.execute(
-            "UPDATE photos SET
+/// Persist one photo's EXIF/metadata extraction (+ capture-date estimation,
+/// Sprint 12). Merge semantics:
+/// - scanner-resolved dimensions/orientation always win (COALESCE keeps the
+///   existing value — the scanner has authoritative pixels);
+/// - EXIF-owned fields are refreshed by the newest read: a non-None
+///   value replaces the old one (so a re-read of a changed file actually
+///   updates the row), while a None in a fresh read preserves what an
+///   earlier read found (an empty read never erases data);
+/// - capture datetime: real EXIF beats the estimate beats the stored value;
+///   its provenance is recorded (`capture_datetime_source`: 'exif' |
+///   'filename' | 'mtime') so estimates stay labelled;
+/// - GPS presence only ever escalates 0→1 (documented privacy choice);
+/// - `metadata_source` escalates to 'exif' once real EXIF values land, then
+///   to the estimate's source (dominance order: exif > filename > mtime);
+/// - `exif_at` is stamped so unchanged files drop out of the queue.
+#[allow(clippy::too_many_arguments)]
+pub fn upsert_exif(
+    &self,
+    photo_id: i64,
+    e: &crate::metadata::ExifRecord,
+    estimate: Option<&crate::metadata::DateEstimate>,
+) -> AppResult<()> {
+    let conn = self.lock()?;
+    let estimate_has_metadata = e.has_metadata();
+    let est_datetime = estimate.map(|est| est.datetime.as_str());
+    let est_source = estimate.map(|est| est.source);
+    conn.execute(
+        "UPDATE photos SET
                  width = COALESCE(width, ?1),
                  height = COALESCE(height, ?2),
                  orientation = COALESCE(orientation, ?3),
@@ -810,11 +844,21 @@ impl Db {
                  iso = COALESCE(?10, iso),
                  aperture = COALESCE(?11, aperture),
                  shutter_speed = COALESCE(?12, shutter_speed),
-                 capture_datetime = COALESCE(?13, capture_datetime),
-                 gps_present = CASE WHEN gps_present = 1 THEN 1 ELSE ?14 END,
-                 metadata_source = CASE WHEN ?15 = 1 THEN 'exif' ELSE metadata_source END,
-                 exif_at = ?16
-             WHERE id = ?17",
+                 capture_datetime = COALESCE(?13, ?14, capture_datetime),
+                 capture_datetime_source = CASE
+                     WHEN ?13 IS NOT NULL THEN 'exif'
+                     WHEN ?14 IS NOT NULL THEN ?15
+                     ELSE COALESCE(capture_datetime_source,
+                                   CASE WHEN capture_datetime IS NOT NULL THEN 'exif' ELSE NULL END)
+                 END,
+                 gps_present = CASE WHEN gps_present = 1 THEN 1 ELSE ?16 END,
+                 metadata_source = CASE
+                     WHEN ?17 = 1 THEN 'exif'
+                     WHEN ?18 IS NOT NULL THEN ?19
+                     ELSE metadata_source
+                 END,
+                 exif_at = ?20
+             WHERE id = ?21",
             params![
                 e.width.map(|v| v as i64),
                 e.height.map(|v| v as i64),
@@ -829,15 +873,19 @@ impl Db {
                 e.aperture,
                 e.shutter_speed,
                 e.capture_datetime,
+                est_datetime,
+                est_source,
                 i64::from(e.gps_present),
-                i64::from(e.has_metadata()),
+                i64::from(estimate_has_metadata),
+                est_source,
+                est_source,
                 crate::time::now_utc(),
                 photo_id,
             ],
         )
         .map_err(db_err("upsert_exif"))?;
-        Ok(())
-    }
+    Ok(())
+}
 
     /// Count + one page of photos matching a pre-built `WHERE` clause.
     /// `where_sql` must use only positionless `?` placeholders in order, and
@@ -1767,6 +1815,8 @@ pub struct ExifWork {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub orientation: Option<String>,
+    /// Stored file mtime (the date-estimation fallback source).
+    pub file_mtime: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1893,8 +1943,11 @@ pub struct PhotoFull {
     pub lens_make: Option<String>,
     pub software: Option<String>,
     /// Where the camera/exposure/date values came from: 'none' | 'exif'
-    /// ('filename' / 'mtime' are added by the date-estimation sprint).
+    /// | 'filename' | 'mtime' (dominance order, see DATABASE.md).
     pub metadata_source: String,
+    /// Provenance of `capture_datetime` itself: 'exif' | 'filename' |
+    /// 'mtime' (NULL when no capture date exists at all).
+    pub capture_datetime_source: Option<String>,
     pub focal_length: Option<f64>,
     pub iso: Option<i64>,
     pub aperture: Option<f64>,
@@ -2053,7 +2106,7 @@ mod tests {
             software: Some("Editor 2.0".to_string()),
             ..Default::default()
         };
-        db.upsert_exif(photo_id, &rec).unwrap();
+        db.upsert_exif(photo_id, &rec, None).unwrap();
 
         let full = db.get_photo_full(photo_id).unwrap();
         assert_eq!(full.camera_make.as_deref(), Some("CamCo"));
@@ -2061,9 +2114,34 @@ mod tests {
         assert_eq!(full.software.as_deref(), Some("Editor 2.0"));
         assert_eq!(full.metadata_source, "exif");
 
+        // A photo change re-read: capture date estimated (filename) when EXIF
+        // carries none; the estimate is labelled, EXIF still dominates
+        // `metadata_source`.
+        let est = crate::metadata::DateEstimate {
+            datetime: "2026-03-04T11:22:33Z".to_string(),
+            source: "filename",
+        };
+        db.upsert_exif(photo_id, &rec, Some(&est)).unwrap();
+        let full = db.get_photo_full(photo_id).unwrap();
+        assert_eq!(full.capture_datetime.as_deref(), Some("2026-03-04T11:22:33Z"));
+        assert_eq!(full.capture_datetime_source.as_deref(), Some("filename"));
+        assert_eq!(full.metadata_source, "exif");
+
+        // Real EXIF date beats the estimate on the next read, and source
+        // labels switch to 'exif'.
+        let rec3 = crate::metadata::ExifRecord {
+            camera_make: Some("CamCo".to_string()),
+            capture_datetime: Some("2026-03-05T08:00:00Z".to_string()),
+            ..Default::default()
+        };
+        db.upsert_exif(photo_id, &rec3, Some(&est)).unwrap();
+        let full = db.get_photo_full(photo_id).unwrap();
+        assert_eq!(full.capture_datetime.as_deref(), Some("2026-03-05T08:00:00Z"));
+        assert_eq!(full.capture_datetime_source.as_deref(), Some("exif"));
+
         // An empty read (readable image, no EXIF) never marks source as
         // EXIF, and — once stamped — a re-read does not erase values.
-        db.upsert_exif(photo_id, &crate::metadata::ExifRecord::default())
+        db.upsert_exif(photo_id, &crate::metadata::ExifRecord::default(), None)
             .unwrap();
         let full = db.get_photo_full(photo_id).unwrap();
         assert_eq!(full.camera_make.as_deref(), Some("CamCo"));
@@ -2097,7 +2175,7 @@ mod tests {
             iso: Some(400),
             ..Default::default()
         };
-        db.upsert_exif(photo_id, &rec2).unwrap();
+        db.upsert_exif(photo_id, &rec2, None).unwrap();
         let full = db.get_photo_full(photo_id).unwrap();
         assert_eq!(full.camera_make.as_deref(), Some("NewCam"));
         assert_eq!(full.iso, Some(400));

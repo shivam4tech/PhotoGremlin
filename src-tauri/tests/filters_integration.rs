@@ -100,6 +100,7 @@ fn seed(db: &Db) {
             Some(0.004),
             Some("2026-06-15T10:00:00Z"),
         ),
+        None,
     )
     .unwrap();
     db.upsert_exif(
@@ -115,9 +116,10 @@ fn seed(db: &Db) {
             Some(1.0 / 125.0),
             Some("2026-07-01T12:00:00Z"),
         ),
+        None,
     )
     .unwrap();
-    db.upsert_exif(p3, &exif("square", None, None, None, None, None, None, None, None))
+    db.upsert_exif(p3, &exif("square", None, None, None, None, None, None, None, None), None)
         .unwrap();
     db.upsert_exif(
         p4,
@@ -132,9 +134,10 @@ fn seed(db: &Db) {
             Some(1.0 / 250.0),
             Some("2026-08-15T14:30:22Z"),
         ),
+        None,
     )
     .unwrap();
-    db.upsert_exif(p5, &exif("portrait", None, None, None, None, None, None, None, None))
+    db.upsert_exif(p5, &exif("portrait", None, None, None, None, None, None, None, None), None)
         .unwrap();
     db.upsert_exif(
         p6,
@@ -149,6 +152,7 @@ fn seed(db: &Db) {
             Some(1.0 / 60.0),
             Some("2026-01-05T08:00:00Z"),
         ),
+        None,
     )
     .unwrap();
 

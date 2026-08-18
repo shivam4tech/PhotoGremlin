@@ -20,8 +20,10 @@
 //! channels, balanced count and average cost. Cancel is cooperative: each
 //! worker re-checks the flag before every item.
 
+pub mod estimate;
 pub mod exif;
 
+pub use estimate::{estimate_datetime, DateEstimate};
 pub use exif::ExifRecord;
 
 use std::path::Path;
@@ -165,8 +167,8 @@ pub fn run_metadata(
     })
 }
 
-/// Read one file's EXIF and store it. Errors are friendly (shown to the
-/// user); details stay in the log.
+/// Read one file's EXIF (plus capture-date estimation, Sprint 12) and store
+/// it. Errors are friendly (shown to the user); details stay in the log.
 fn process_one(db: &Db, work: &ExifWork) -> Result<(), String> {
     let path = Path::new(&work.path);
     if !path.exists() {
@@ -178,7 +180,8 @@ fn process_one(db: &Db, work: &ExifWork) -> Result<(), String> {
     if size > MAX_METADATA_FILE_BYTES {
         tracing::info!(path = %work.path, size, "file above metadata guard; skipping parse");
         // Still stamp it so the queue does not re-attempt forever.
-        db.upsert_exif(work.photo_id, &exif::ExifRecord::default())
+        let estimate = estimate::estimate_datetime(&work.filename, work.file_mtime.as_deref());
+        db.upsert_exif(work.photo_id, &exif::ExifRecord::default(), estimate.as_ref())
             .map_err(|e| {
                 tracing::error!(path = %work.path, error = %e, "exif stamp failed");
                 format!("{} — could not store the result", work.filename)
@@ -204,7 +207,16 @@ fn process_one(db: &Db, work: &ExifWork) -> Result<(), String> {
         }),
         _ => None,
     };
-    db.upsert_exif(work.photo_id, &record).map_err(|e| {
+    // Capture date: prefer EXIF; otherwise derive it (filename patterns
+    // first, then the stored file mtime) so date filters and session
+    // periods work on metadata-less files too. The estimate is labelled
+    // per photo via `capture_datetime_source` (DATABASE.md).
+    let estimate = if record.capture_datetime.is_none() {
+        estimate::estimate_datetime(&work.filename, work.file_mtime.as_deref())
+    } else {
+        None
+    };
+    db.upsert_exif(work.photo_id, &record, estimate.as_ref()).map_err(|e| {
         tracing::error!(path = %work.path, error = %e, "exif upsert failed");
         format!("{} — could not store the result", work.filename)
     })

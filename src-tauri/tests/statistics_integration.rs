@@ -89,18 +89,21 @@ fn seed(db: &Db) -> (i64, i64) {
         a1,
         &exif(Some("Sony"), Some("A7"), Some("50mm F1.4"), Some(50.0), Some(100), Some(2.8),
               Some(0.004), Some("2026-06-15T10:00:00Z")),
+        None,
     )
     .unwrap();
     db.upsert_exif(
         a2,
         &exif(Some("Sony"), Some("A7"), Some("50mm F1.4"), Some(50.0), Some(400), Some(2.8),
               Some(0.004), Some("2026-06-20T15:00:00Z")),
+        None,
     )
     .unwrap();
     db.upsert_exif(
         b1,
         &exif(Some("Canon"), Some("R5"), None, None, Some(1600), Some(4.0), Some(0.5),
               Some("2026-07-01T12:00:00Z")),
+        None,
     )
     .unwrap();
     // b2 deliberately gets NO EXIF record (exif_at stays NULL).
