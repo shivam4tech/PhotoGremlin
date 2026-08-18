@@ -1,5 +1,11 @@
 import { create } from "zustand";
 import { api, toErrorMessage } from "@/lib/ipc";
+import {
+  applyTheme,
+  persistTheme,
+  readStoredTheme,
+  type Theme,
+} from "@/lib/theme";
 import type {
   AiStatus,
   AnalysisSummary,
@@ -28,6 +34,8 @@ interface AppState {
   paths: PathsInfo | null;
   dbStatus: DbStatus | null;
   activeFolder: string | null;
+  /** Appearance preference ("dark" | "light"); persisted per machine. */
+  theme: Theme;
   scanning: boolean;
   analyzing: boolean;
   readingMetadata: boolean;
@@ -82,6 +90,8 @@ interface AppState {
   setPaths: (p: PathsInfo) => void;
   setDbStatus: (s: DbStatus) => void;
   setActiveFolder: (p: string | null) => void;
+  /** Switch appearance, applied to the document and remembered. */
+  setTheme: (t: Theme) => void;
   setScanning: (b: boolean) => void;
   setAnalyzing: (b: boolean) => void;
   setReadingMetadata: (b: boolean) => void;
@@ -137,6 +147,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   paths: null,
   dbStatus: null,
   activeFolder: null,
+  theme: readStoredTheme(),
   scanning: false,
   analyzing: false,
   readingMetadata: false,
@@ -171,6 +182,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPaths: (paths) => set({ paths }),
   setDbStatus: (dbStatus) => set({ dbStatus }),
   setActiveFolder: (activeFolder) => set({ activeFolder }),
+  setTheme: (theme) => {
+    set({ theme });
+    persistTheme(theme);
+    applyTheme(theme);
+  },
   setScanning: (scanning) => set({ scanning }),
   setAnalyzing: (analyzing) => set({ analyzing }),
   setReadingMetadata: (readingMetadata) => set({ readingMetadata }),
@@ -195,12 +211,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         api.dbStatus(),
         api.getActiveFolder(),
       ]);
-      if (!get().dbStatus || !get().activeFolder) {
-        set({ dbStatus, activeFolder });
-      } else {
-        // Always refresh counts; preserve folder if backend cleared it.
-        set({ dbStatus, activeFolder: activeFolder ?? get().activeFolder });
-      }
+      // Always refresh counts; a folder the user just picked (or that the
+      // backend hasn't confirmed yet) wins over an empty backend answer, so
+      // opening a folder can never be clobbered by its own status refresh.
+      set({ dbStatus, activeFolder: activeFolder ?? get().activeFolder });
     } catch {
       // Status is non-critical for the shell; errors surface when actions run.
     } finally {
@@ -212,6 +226,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     const picked = await api.pickFolder();
     if (!picked) return null;
     set({ activeFolder: picked, scanSummary: null, analysisSummary: null });
+    // Persist so the next start restores this folder (get_active_folder
+    // backs it); a persistence failure shows the banner but the folder
+    // still stays active for this session.
+    try {
+      await api.setActiveFolder(picked);
+    } catch (e) {
+      set({ error: toErrorMessage(e) });
+    }
     await get().refreshStatus();
     return picked;
   },

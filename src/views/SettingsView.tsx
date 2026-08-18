@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
-import { ShieldIcon } from "@/components/Icons";
+import { MoonIcon, ShieldIcon, SunIcon } from "@/components/Icons";
 import {
   formatFaceSummaryLine,
   formatFacesProgressLine,
@@ -199,9 +199,39 @@ function LocalIntelligenceCard() {
 export function SettingsView() {
   const appInfo = useAppStore((s) => s.appInfo);
   const paths = useAppStore((s) => s.paths);
+  const theme = useAppStore((s) => s.theme);
+  const setTheme = useAppStore((s) => s.setTheme);
 
   return (
     <div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Appearance</h3>
+        <p className="faint" style={{ marginTop: 0, marginBottom: 12 }}>
+          Choose how PhotoGremlin looks. The choice is remembered on this
+          machine and applied the next time the app starts.
+        </p>
+        <div className="segmented" role="radiogroup" aria-label="Theme">
+          <button
+            role="radio"
+            aria-checked={theme === "dark"}
+            className={theme === "dark" ? "is-on" : ""}
+            onClick={() => setTheme("dark")}
+          >
+            <MoonIcon />
+            Dark
+          </button>
+          <button
+            role="radio"
+            aria-checked={theme === "light"}
+            className={theme === "light" ? "is-on" : ""}
+            onClick={() => setTheme("light")}
+          >
+            <SunIcon />
+            Light
+          </button>
+        </div>
+      </div>
+
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Application</h3>
         <div className="stat-grid">
