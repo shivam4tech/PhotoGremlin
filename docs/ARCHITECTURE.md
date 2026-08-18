@@ -233,6 +233,10 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   The analysis pass runs `ANALYSIS_WORKERS = 3` std threads decoding at a
   bounded working resolution (at most a handful of images in memory at
   once); file ops (Sprint 7) follow the same shape.
+- Contact-sheet exports (Sprint 14) add a second job slot (`export`): one
+  export at a time, destination validated before any rendering, thumbnail
+  fetch first (async), then a pure `spawn_blocking` renderer with a cancel
+  flag + progress events (`contact-sheet-progress`/`-complete`).
 - The UI always stays responsive: nothing blocks on the webview thread, and
   progress events keep the spinner honest.
 - SQLite: one writer at a time (the Mutex). Writes are incremental per photo,

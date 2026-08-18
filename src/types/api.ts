@@ -129,6 +129,13 @@ export interface OperationCompletePayload {
   error: string | null;
 }
 
+/** Emitted when a contact-sheet export finishes (Sprint 14). */
+export interface ContactSheetCompletePayload {
+  files: string[];
+  error: string | null;
+  cancelled: boolean;
+}
+
 /** One row of the file-operations audit log. */
 export interface FileOpRow {
   id: number;

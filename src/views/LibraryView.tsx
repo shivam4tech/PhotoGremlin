@@ -9,6 +9,7 @@ import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
 import { FileOpsPanel } from "@/features/fileops/FileOpsPanel";
+import { ExportSheetButton } from "@/features/library/ExportSheetButton";
 import { MarksPanel } from "@/features/library/MarksPanel";
 import { CoverThumb } from "@/features/similarity/CoverThumb";
 import { cleanName, groupLabel } from "@/features/organize/labels";
@@ -605,6 +606,12 @@ export function LibraryView() {
 
       {selectionMode && selectedIds.length > 0 && (
         <MarksPanel photoIds={selectedIds} onApplied={() => photos.reload()} />
+      )}
+
+      {selectionMode && selectedIds.length > 0 && (
+        <div className="cullbar">
+          <ExportSheetButton photoIds={selectedIds} />
+        </div>
       )}
 
       {selectionMode && selectedIds.length > 0 && (

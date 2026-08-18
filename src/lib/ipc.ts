@@ -111,6 +111,14 @@ export const api = {
   recentFileOps: (limit: number): Promise<FileOpRow[]> =>
     invoke("recent_file_ops", { limit }),
 
+  // Contact sheets (Sprint 14) — PNG pages written into an existing folder.
+  exportContactSheet: (
+    destDir: string,
+    title: string,
+    photoIds: number[],
+  ): Promise<void> => invoke("export_contact_sheet", { destDir, title, photoIds }),
+  stopExport: (): Promise<boolean> => invoke("stop_export"),
+
   // Curatorial marks (Sprint 13). `null` leaves a mark untouched; rating 0
   // / empty color clear.
   updateMarks: (

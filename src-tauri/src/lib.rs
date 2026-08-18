@@ -6,6 +6,7 @@
 
 pub mod analysis;
 pub mod commands;
+pub mod contact_sheet;
 pub mod database;
 pub mod error;
 pub mod events;
@@ -59,6 +60,7 @@ pub fn run() {
                 operation: Arc::new(Mutex::new(None)),
                 similarity: Arc::new(Mutex::new(None)),
                 faces: Arc::new(Mutex::new(None)),
+                export: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
                 )),
@@ -91,6 +93,8 @@ pub fn run() {
             commands::clear_selections,
             commands::list_selections,
             commands::update_marks,
+            commands::export_contact_sheet,
+            commands::stop_export,
             commands::recent_file_ops,
             commands::list_filtered_photos,
             commands::period_stats,
