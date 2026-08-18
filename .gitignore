@@ -10,3 +10,4 @@ ml-corpus/
 testdata/
 tools/train/data/
 tools/train/runs/
+tools/train/.venv/
