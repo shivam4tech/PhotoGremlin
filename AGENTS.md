@@ -54,6 +54,12 @@ SQLite.
 15. **Git discipline:** meaningful conventional commits after each sprint
     (`feat: add photo scanner`). Never `git reset --hard` to "fix" problems;
     never discard working code.
+16. **Data policy:** training corpora (e.g. Places365), tar files, downloaded
+    image collections, real-file fixture samples, and training checkpoints
+    are NEVER committed or pushed (see `.gitignore`: `ml-corpus/`,
+    `testdata/`, `tools/train/...`). Training scripts (dev-time Python) may
+    be committed; only the final small model artifacts under
+    `src-tauri/models/` ever enter the repo.
 
 ## Environment notes (this machine)
 

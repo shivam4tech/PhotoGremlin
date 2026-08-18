@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 10). Tests assert both expected-table presence and idempotency.
+(currently 11). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -33,9 +33,22 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   the same `PRAGMA table_info` probe as v6/v7
 - v10: `analysis.faces_at TEXT` (NULL until the local-AI face pass stamps
   it) — the file mtime the `face_count` was computed from, driving the face
+  pass's incremental rule (re-detect when the file gets newer)
+- v10: `analysis.faces_at TEXT` (NULL until the local-AI face pass stamps
+  it) — the file mtime the `face_count` was computed from, driving the face
   pass's incremental rule exactly like `phash_source_mtime` does (see
   LOCAL_AI.md). Added via `ALTER TABLE`, guarded by the same
   `PRAGMA table_info` probe
+- v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
+  `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
+  fields, and the provenance column recording where a photo's
+  camera/exposure/date values came from (`'none'` → `'exif'` once real EXIF
+  lands; the date-estimation sprint adds `'filename'`/`'mtime'` below
+  `'exif'` in the dominance order). Also makes the metadata queue
+  **incremental**: `exif_at` is stamped per read and a file whose mtime is
+  newer than its last read (`file_mtime > exif_at`) is re-read, mirroring
+  the v6 analysis rule. Added via `ALTER TABLE`, guarded by the same
+  `PRAGMA table_info` probe as v6/v7
 
 ## Tables (schema v1–v10)
 
@@ -64,6 +77,8 @@ re-scan upserts instead of duplicating).
 | width / height | INTEGER | pixel dimensions (EXIF-orientation-corrected when available) |
 | orientation | TEXT | `landscape` \| `portrait` \| `square`, derived from w×h |
 | camera_make / camera_model / lens | TEXT | EXIF, filled by the metadata pass (Sprint 5) |
+| lens_make | TEXT | (v11) EXIF lens manufacturer — often absent; the model string is the useful one |
+| software | TEXT | (v11) EXIF software that created/edited the file (e.g. "Adobe Lightroom") |
 | focal_length | REAL | mm (1/100 mm EXIF tag converted to mm) |
 | iso | INTEGER | |
 | aperture | REAL | f-number, e.g. 2.8 |
@@ -73,7 +88,8 @@ re-scan upserts instead of duplicating).
 | session_id | INTEGER → sessions | ON DELETE SET NULL |
 | indexed_at | TEXT | |
 | file_mtime | TEXT | file mtime; incremental analysis reuses rows when mtime+size unchanged |
-| exif_at | TEXT | (v7) RFC3339 time the metadata pass read this file; NULL = not yet read. One read per file in v0.1 |
+| exif_at | TEXT | (v7) RFC3339 time the metadata pass last read this file; NULL = not yet read. Since v11 the queue is incremental: `file_mtime > exif_at` re-reads changed files |
+| metadata_source | TEXT | (v11) `'none'` default; `'exif'` once real EXIF values land (`'filename'` / `'mtime'` arrive with date estimation). Dominance order: exif > filename > mtime |
 | phash | INTEGER | (v9) 64-bit dHash of the decoded image, from the similarity pass (Sprint 8); NULL = not yet hashed |
 | phash_source_mtime | TEXT | (v9) RFC3339 file mtime the hash was computed from; drives the re-hash rule |
 
@@ -89,15 +105,20 @@ refreshes its name; `refresh_session_counts` re-derives `photo_count` after
 each scan pass. Rows for files that vanished from disk are **not** deleted
 silently — they stay until a future reconcile step flags them to the user.
 
-**Metadata (EXIF) merge (Sprint 5):** the metadata pass (`exif_queue` →
-`upsert_exif`) reads each file once and stamps `exif_at`, so re-runs are
-no-ops and `status().metadata_pending` (count of `exif_at IS NULL`) drives
-the UI. `upsert_exif` merges with `COALESCE`: dimensions/orientation already
-resolved by the scanner win, GPS presence only escalates 0→1, and the other
-EXIF columns are filled from the extraction. A readable image with no EXIF
-segment is a *success* (empty record, still stamped), not a failure; a file
-that cannot be parsed at all is a friendly per-file error. Orientation is
-derived from the best-known (scanner ∪ EXIF) width×h by the pass.
+**Metadata (EXIF) merge (Sprint 5, incremental since v11/Sprint 11):** the
+metadata pass (`exif_queue` → `upsert_exif`) reads each file, stamps
+`exif_at`, and re-reads any file whose mtime is newer than its last read
+(same incremental rule as analysis — a re-exported/edited file's metadata
+stays truthful). `status().metadata_pending` counts the same queue (never
+read ∪ changed since read) and drives the UI. `upsert_exif` merges with
+`COALESCE`: scanner-resolved dimensions/orientation win (the scanner has
+authoritative pixels); EXIF-owned columns are *refreshed by the newest read*
+(a non-None value replaces the old one, while an empty read never erases
+earlier findings); GPS presence only escalates 0→1; `metadata_source`
+escalates to `'exif'` once real values have landed. A readable image with no
+EXIF segment is a *success* (empty record, still stamped), not a failure; a
+file that cannot be parsed at all is a friendly per-file error. Orientation
+is derived from the best-known (scanner ∪ EXIF) width×height by the pass.
 
 ### analysis
 One row per analyzed photo (`photo_id` PK, FK cascade).

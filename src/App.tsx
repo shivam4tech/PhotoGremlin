@@ -82,6 +82,34 @@ export default function App() {
     };
   }, []);
 
+  // Metadata reliability (Sprint 11): a moment after the shell mounts,
+  // drain any EXIF backlog (files never read, or changed on disk since
+  // their last read — the queue itself is incremental). A no-op when the
+  // queue is empty; deliberately delayed so the progress/completion event
+  // listeners above are registered before the pass emits.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      const s = useAppStore.getState();
+      if (cancelled || s.readingMetadata || s.scanning) return;
+      const pending = s.dbStatus?.metadata_pending ?? 0;
+      if (pending <= 0) return;
+      s.setReadingMetadata(true);
+      s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+      try {
+        await api.startMetadata();
+      } catch {
+        const st = useAppStore.getState();
+        st.setReadingMetadata(false);
+        st.setProgress(null);
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, []);
+
   // Scan + analysis progress/completion stream in from the backend at all
   // times. The UI keeps the two exclusive (buttons disable each other), so
   // one shared progress field is honest.

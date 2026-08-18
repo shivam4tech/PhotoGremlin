@@ -236,6 +236,10 @@ export interface PhotoFull {
   camera_make: string | null;
   camera_model: string | null;
   lens: string | null;
+  lens_make: string | null;
+  software: string | null;
+  /** Where camera/exposure/date values came from: "none" | "exif". */
+  metadata_source: string;
   focal_length: number | null;
   iso: number | null;
   aperture: number | null;

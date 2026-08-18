@@ -173,10 +173,12 @@ export function Viewer({
             <Metric label="Taken" value={fmtDate(full?.capture_datetime ?? null)} />
           </Section>
 
-          <Section title="Camera" empty={!full || (!full.camera_make && !full.camera_model && !full.lens && full.focal_length === null && full.aperture === null)}>
+          <Section title="Camera" empty={!full || (!full.camera_make && !full.camera_model && !full.lens && !full.lens_make && !full.software && full.focal_length === null && full.aperture === null)}>
             {full?.camera_make && <Metric label="Make" value={full.camera_make} />}
             {full?.camera_model && <Metric label="Model" value={full.camera_model} />}
             {full?.lens && <Metric label="Lens" value={full.lens} />}
+            {full?.lens_make && <Metric label="Lens make" value={full.lens_make} />}
+            {full?.software && <Metric label="Software" value={full.software} />}
             {full && full.focal_length != null && <Metric label="Focal length" value={fmtFocal(full.focal_length)} />}
             {full && full.aperture != null && <Metric label="Aperture" value={fmtAperture(full.aperture)} />}
             {full && full.iso != null && <Metric label="ISO" value={full.iso} />}

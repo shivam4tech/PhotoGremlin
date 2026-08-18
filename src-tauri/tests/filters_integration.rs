@@ -65,6 +65,8 @@ fn exif(
         camera_make: camera_make.map(String::from),
         camera_model: camera_model.map(String::from),
         lens: lens.map(String::from),
+        lens_make: None,
+        software: None,
         focal_length,
         iso,
         aperture,

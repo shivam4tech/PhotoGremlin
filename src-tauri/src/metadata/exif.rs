@@ -28,6 +28,10 @@ pub struct ExifRecord {
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub lens: Option<String>,
+    /// Lens manufacturer (often absent — the model string is the useful one).
+    pub lens_make: Option<String>,
+    /// Software that created/edited the file (e.g. "Adobe Lightroom").
+    pub software: Option<String>,
     /// Millimetres.
     pub focal_length: Option<f64>,
     pub iso: Option<i64>,
@@ -38,6 +42,26 @@ pub struct ExifRecord {
     /// UTC RFC3339 (EXIF clock time, no timezone by definition).
     pub capture_datetime: Option<String>,
     pub gps_present: bool,
+}
+
+impl ExifRecord {
+    /// Whether this read contributed any camera/exposure/date value (the
+    /// column-level truth behind `metadata_source` escalation in
+    /// `upsert_exif`). Dimensions/orientation are technical geometry from
+    /// the scanner and do not count.
+    pub fn has_metadata(&self) -> bool {
+        self.camera_make.is_some()
+            || self.camera_model.is_some()
+            || self.lens.is_some()
+            || self.lens_make.is_some()
+            || self.software.is_some()
+            || self.focal_length.is_some()
+            || self.iso.is_some()
+            || self.aperture.is_some()
+            || self.shutter_speed.is_some()
+            || self.capture_datetime.is_some()
+            || self.gps_present
+    }
 }
 
 /// Read one file's EXIF. A file that is a readable image but carries no
@@ -66,6 +90,8 @@ pub(crate) fn from_fields(exif: &exif::Exif) -> ExifRecord {
     rec.camera_make = string_field(exif, Tag::Make);
     rec.camera_model = string_field(exif, Tag::Model);
     rec.lens = string_field(exif, Tag::LensModel);
+    rec.lens_make = string_field(exif, Tag::LensMake);
+    rec.software = string_field(exif, Tag::Software);
     // FocalLength is in 1/100 mm; FocalLengthIn35mmFilm is plain mm.
     rec.focal_length = rational_mm_100(exif, Tag::FocalLength)
         .map(|mm| mm)
@@ -235,6 +261,7 @@ mod tests {
         let p = write_tmp("noexif", &v);
         let rec = extract_exif(&p).unwrap();
         assert_eq!(rec, ExifRecord::default());
+        assert!(!rec.has_metadata());
         let _ = std::fs::remove_file(&p);
     }
 
@@ -255,6 +282,16 @@ mod tests {
                 tag: Tag::LensModel,
                 ifd_num: In::PRIMARY,
                 value: Value::Ascii(vec![b"Gremlin 50mm f/1.4".to_vec()]),
+            },
+            Field {
+                tag: Tag::LensMake,
+                ifd_num: In::PRIMARY,
+                value: Value::Ascii(vec![b"GremOptics".to_vec()]),
+            },
+            Field {
+                tag: Tag::Software,
+                ifd_num: In::PRIMARY,
+                value: Value::Ascii(vec![b"PhotoGremlin Lab 1.0".to_vec()]),
             },
             Field { tag: Tag::FNumber, ifd_num: In::PRIMARY, value: f64r(14, 5) },
             Field { tag: Tag::ExposureTime, ifd_num: In::PRIMARY, value: f64r(1, 250) },
@@ -289,6 +326,9 @@ mod tests {
         assert_eq!(rec.camera_make.as_deref(), Some("GremCam"));
         assert_eq!(rec.camera_model.as_deref(), Some("Gr-33"));
         assert_eq!(rec.lens.as_deref(), Some("Gremlin 50mm f/1.4"));
+        assert_eq!(rec.lens_make.as_deref(), Some("GremOptics"));
+        assert_eq!(rec.software.as_deref(), Some("PhotoGremlin Lab 1.0"));
+        assert!(rec.has_metadata());
         assert!((rec.aperture.unwrap() - 2.8).abs() < 1e-9);
         assert!((rec.shutter_speed.unwrap() - 1.0 / 250.0).abs() < 1e-9);
         assert_eq!(rec.iso, Some(400));

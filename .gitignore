@@ -4,3 +4,9 @@ src-tauri/target/
 src-tauri/gen/
 *.log
 .DS_Store
+
+# Corpora / training data / real-file fixtures (NEVER pushed to GitHub)
+ml-corpus/
+testdata/
+tools/train/data/
+tools/train/runs/
