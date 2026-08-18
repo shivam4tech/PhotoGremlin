@@ -115,6 +115,34 @@ clusters → `similarity_groups`. Burst grouping adds the timestamp dimension
 (“sharpest in group”) are computed but always presented as suggestions —
 nothing is auto-deleted.
 
+## Date estimation (Sprint 12)
+
+Photos without an EXIF date get a **labelled estimate** of their capture
+time, so browsing, filters and statistics can treat a whole library as dated
+even when the camera wrote no date. One resolution per photo, dominance
+order **exif > filename > mtime**; estimates never override a real EXIF
+date, and every estimate carries its provenance
+(`photos.capture_datetime_source`: `'exif' | 'filename' | 'mtime'`).
+
+1. **EXIF** — `DateTimeOriginal` (primary IFD, offset 0x9003). If present,
+   the file is done; nothing below runs.
+2. **Filename** — `src-tauri/src/metadata/estimate.rs`. Exact camera-roll
+   patterns first (`IMG_yyyymmdd_hhmmss`, `PXL_…`, `VID_…`, `Screenshot_…`,
+   `Screenshot_yyyy-mm-dd at hh.mm.ss`, `screen_…` variants, macOS
+   `yyyy-mm-dd at hh.mm.ss` + Camera Upload `yyyy-mm-dd`), then a loose
+   scan for a well-formed date: if the day parses as
+   `yyyy-mm-dd`/`yyyymmdd` (with or without time and timezone suffix), it
+   wins with the *day*; only a full `hh:mm(:ss)` time following the date
+   yields hour precision. A bare time alone or an unparseable name yields
+   nothing.
+3. **mtime** — the file's modification time (UTC), always present as a
+   last resort; the user can see the provenance in the viewer
+   ("Filename (estimated)" / "File modified (estimated)").
+
+Integration coverage (`tests/date_estimation_integration.rs`) runs the real
+pipeline — scanner → metadata pass → sessions — against real files,
+including the Unsplash-style unparseable-name case.
+
 ## RAW formats
 
 Initial MVP decodes: **JPG, JPEG, PNG, WebP, TIFF/TIF** via the `image` crate.

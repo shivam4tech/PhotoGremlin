@@ -542,7 +542,7 @@ mod tests {
         let m16 = (INPUT_SIZE / 16) as usize;
         let m32 = (INPUT_SIZE / 32) as usize;
         let zero8 = vec![0.0f32; m8 * m8];
-        let zero16 = vec![0.0f32; m16 * m16];
+        let _zero16 = vec![0.0f32; m16 * m16];
         let zero32 = vec![0.0f32; m32 * m32];
         let mut obj16 = vec![0.0f32; m16 * m16];
         let mut cls16 = vec![0.0f32; m16 * m16];

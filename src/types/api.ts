@@ -245,6 +245,8 @@ export interface PhotoFull {
   aperture: number | null;
   shutter_speed: number | null;
   capture_datetime: string | null;
+  /** "exif" | "filename" | "mtime" — where the estimated date came from. */
+  capture_datetime_source: string | null;
   gps_present: boolean;
   session_id: number | null;
   indexed_at: string;

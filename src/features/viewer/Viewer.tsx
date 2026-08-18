@@ -171,6 +171,18 @@ export function Viewer({
 
           <Section title="Capture">
             <Metric label="Taken" value={fmtDate(full?.capture_datetime ?? null)} />
+            {full?.capture_datetime && full.capture_datetime_source && (
+              <Metric
+                label="Date source"
+                value={
+                  full.capture_datetime_source === "exif"
+                    ? "EXIF"
+                    : full.capture_datetime_source === "filename"
+                      ? "Filename (estimated)"
+                      : "File modified (estimated)"
+                }
+              />
+            )}
           </Section>
 
           <Section title="Camera" empty={!full || (!full.camera_make && !full.camera_model && !full.lens && !full.lens_make && !full.software && full.focal_length === null && full.aperture === null)}>

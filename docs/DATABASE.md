@@ -83,7 +83,8 @@ re-scan upserts instead of duplicating).
 | iso | INTEGER | |
 | aperture | REAL | f-number, e.g. 2.8 |
 | shutter_speed | REAL | seconds (e.g. 1/250 = 0.004) |
-| capture_datetime | TEXT | UTC RFC3339, from EXIF. EXIF stores a zone-less local clock time; PhotoGremlin stores that wall-clock time **verbatim as UTC** (a documented decision — the catalog stays lexicographically sortable for filters without silently assuming the user's timezone) |
+| capture_datetime | TEXT | UTC RFC3339 — **best-known capture time**: real EXIF wins, otherwise the estimate (filename → mtime fallback, Sprint 12). EXIF stores a zone-less local clock time; PhotoGremlin stores that wall-clock time **verbatim as UTC** (a documented decision — the catalog stays lexicographically sortable for filters without silently assuming the user's timezone) |
+| capture_datetime_source | TEXT | (v12) provenance of the stored date: `'exif'` \| `'filename'` \| `'mtime'`. Estimates are always labelled, never silently merged into "real" dates |
 | gps_present | INTEGER | 0/1 — presence only. **Coordinates are never stored** (see PRIVACY.md) |
 | session_id | INTEGER → sessions | ON DELETE SET NULL |
 | indexed_at | TEXT | |
@@ -119,6 +120,14 @@ escalates to `'exif'` once real values have landed. A readable image with no
 EXIF segment is a *success* (empty record, still stamped), not a failure; a
 file that cannot be parsed at all is a friendly per-file error. Orientation
 is derived from the best-known (scanner ∪ EXIF) width×height by the pass.
+
+**Date estimation (Sprint 12):** photos without an EXIF date get a
+`capture_datetime` estimate with `capture_datetime_source` set to the
+provenance — `'filename'` when the name parses as a date, `'mtime'`
+otherwise. See IMAGE_ANALYSIS.md ("Date estimation") for the full rules;
+exactly one resolution applies per photo, in dominance order
+(exif > filename > mtime), and an estimate is only written when the photo
+had no date at all (`COALESCE` — it never overrides a real EXIF date).
 
 ### analysis
 One row per analyzed photo (`photo_id` PK, FK cascade).
