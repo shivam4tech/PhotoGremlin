@@ -338,6 +338,13 @@ impl Db {
         Ok(v)
     }
 
+    pub fn clear_setting(&self, key: &str) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])
+            .map_err(db_err("clear setting"))?;
+        Ok(())
+    }
+
     /// Upsert a session by its import root. Returns the session id.
     /// One session per folder (enforced by the v5 partial unique index);
     /// a re-scan of the same folder keeps the same session (name refreshes).

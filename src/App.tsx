@@ -316,7 +316,7 @@ export default function App() {
               padding: "8px 34px 8px 20px",
               background: "var(--accent-soft)",
               color: "var(--text)",
-              borderTop: "1px solid rgba(74,222,128,0.3)",
+              borderTop: "1px solid var(--accent-border)",
               fontSize: 12.5,
               position: "relative",
             }}
@@ -347,10 +347,10 @@ export default function App() {
           <div
             role="alert"
             style={{
-              padding: "8px 20px",
-              background: "var(--danger-soft)",
-              color: "var(--danger)",
-              borderTop: "1px solid rgba(248,113,113,0.3)",
+            padding: "8px 20px",
+            background: "var(--danger-soft)",
+            color: "var(--danger)",
+            borderTop: "1px solid var(--danger-border)",
               fontSize: 12.5,
             }}
           >

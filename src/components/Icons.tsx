@@ -117,3 +117,18 @@ export const ShieldIcon = ({ size = 14 }: IconProps) =>
     size,
     <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z" />,
   );
+
+export const SunIcon = ({ size = 15 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </>,
+  );
+
+export const MoonIcon = ({ size = 15 }: IconProps) =>
+  svg(
+    size,
+    <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z" />,
+  );

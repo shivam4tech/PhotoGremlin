@@ -75,9 +75,23 @@ pub fn set_active_folder(state: State<AppState>, path: String) -> AppResult<()> 
         .set_setting(SETTING_ACTIVE_FOLDER, &p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string())
 }
 
+/// Resolve the persisted active folder, dropping it (and the setting) when
+/// the folder no longer exists on disk, so a restart never resurrects a
+/// deleted or moved path.
+pub fn resolve_active_folder(db: &crate::database::Db) -> AppResult<Option<String>> {
+    match db.get_setting(SETTING_ACTIVE_FOLDER)? {
+        Some(p) if std::path::Path::new(&p).is_dir() => Ok(Some(p)),
+        Some(_) => {
+            db.clear_setting(SETTING_ACTIVE_FOLDER)?;
+            Ok(None)
+        }
+        None => Ok(None),
+    }
+}
+
 #[tauri::command]
 pub fn get_active_folder(state: State<AppState>) -> AppResult<Option<String>> {
-    state.db.get_setting(SETTING_ACTIVE_FOLDER)
+    resolve_active_folder(&state.db)
 }
 
 /// Open a native folder picker. Runs the dialog via the dialog plugin so GTK

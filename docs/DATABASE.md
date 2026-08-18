@@ -182,9 +182,11 @@ ratio section is hidden entirely, not zeroed.
 
 ### app_settings
 Key/value for application state. Keys in use: `active_folder` (the scanned
-folder), `ai_enabled` (Sprint 9: local-intelligence preference, `"true"` /
-`"false"`, **off by default** — turning it on gates the post-scan face pass
-auto-run, it never forces inference).
+folder — persisted on open, restored on next start, and auto-cleared by
+`get_active_folder` when the path no longer exists on disk, so a deleted or
+renamed folder is never resurrected), `ai_enabled` (Sprint 9: local-intelligence
+preference, `"true"` / `"false"`, **off by default** — turning it on gates the
+post-scan face pass auto-run, it never forces inference).
 
 ### schema_version
 `version`, `applied_at`.

@@ -293,6 +293,33 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
     (only when the stored preference is on). The dashboard's face statistics
     (`faces_present_share`) were already wired in Sprint 6 against the
     `face_count` column and now get their data from this pass.
+  - Appearance (dark/light themes): the whole UI draws from one design-token
+    set in `styles/theme.css` (`:root` = dark — the default "darkroom" look —
+    and `:root[data-theme="light"]` = the light override). Every color in the
+    app (backgrounds, borders, text, status colors, shadows, scrollbars) is a
+    token, so both themes always have correct contrast; no hard-coded colors
+    outside the two token blocks. The `data-theme` attribute is set on
+    `<html>` by `src/lib/theme.ts` (`applyTheme`), which is also where the
+    `color-scheme` (dark/light) is declared per theme — that is what makes
+    native form controls (the filter bar's selects, date/number inputs)
+    render with a matching native background. The preference itself
+    (`theme: "dark" | "light"` in `appStore.ts`, toggled from the Settings
+    "Appearance" card) is **frontend-owned**: stored in the webview's
+    `localStorage` (`photogremlin.theme`), read in `main.tsx` *before first
+    paint* so the window never flashes the wrong theme, and applied on every
+    toggle. Unit-tested in `src/tests/theme.test.ts` and the store tests.
+  - Active-folder persistence across restarts: opening a folder
+    (`appStore.openFolder`, shared by the Library button and ⌘/Ctrl+O)
+    persists the path via `set_active_folder` into `app_settings`; on start
+    `refreshStatus` (run from `App.tsx`) reads it back via
+    `get_active_folder`, so the last folder is already active on the
+    Dashboard/Library without re-picking. `get_active_folder` resolves the
+    path against disk: if the folder was deleted or renamed outside the app,
+    it is dropped (and the stale setting cleared) instead of resurrected —
+    `resolve_active_folder` in `commands/app.rs` (unit-tested in
+    `tests/app_integration.rs`). A folder the user just picked always wins
+    over an empty backend answer in `refreshStatus`, so opening a folder can
+    never be clobbered by its own status refresh.
 - Statistics (Sprint 6): `views/DashboardView.tsx` renders
   `PeriodStats` for the selected period (+ custom range) — totals,
   analyzed-only averages, shares, the four distributions (pure CSS bars),
