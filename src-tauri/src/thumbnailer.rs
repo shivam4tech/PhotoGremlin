@@ -33,11 +33,15 @@ const MAX_PIXELS: u64 = 500_000_000;
 
 const GRID_MAX_WIDTH: u32 = 256;
 const VIEWER_MAX_WIDTH: u32 = 1600;
+const SHEET_MAX_WIDTH: u32 = 800;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThumbKind {
     Grid,
     Viewer,
+    /// Contact-sheet tiles (~800 px — sharp enough for a 575 px print box,
+    /// much cheaper than the full image).
+    Sheet,
 }
 
 impl ThumbKind {
@@ -45,6 +49,7 @@ impl ThumbKind {
         match self {
             ThumbKind::Grid => GRID_MAX_WIDTH,
             ThumbKind::Viewer => VIEWER_MAX_WIDTH,
+            ThumbKind::Sheet => SHEET_MAX_WIDTH,
         }
     }
 }
