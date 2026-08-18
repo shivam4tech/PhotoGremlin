@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 12;
+pub const CURRENT_SCHEMA_VERSION: i64 = 13;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -282,6 +282,26 @@ impl Db {
                     [],
                 )
                 .map_err(db_err("backfill capture_datetime_source"))?;
+            }
+
+            // v13 (Sprint 13): curatorial marks — ratings, flags and color
+            // labels. All default to "unmarked": rating NULL = unrated
+            // (0..5 when set), flag 0/1, color_label NULL or one of the
+            // fixed enum values below. No backfill needed.
+            if !table_has_column(&conn, "photos", "rating") {
+                conn.execute("ALTER TABLE photos ADD COLUMN rating INTEGER", [])
+                    .map_err(db_err("add photos.rating"))?;
+            }
+            if !table_has_column(&conn, "photos", "flag") {
+                conn.execute(
+                    "ALTER TABLE photos ADD COLUMN flag INTEGER NOT NULL DEFAULT 0",
+                    [],
+                )
+                .map_err(db_err("add photos.flag"))?;
+            }
+            if !table_has_column(&conn, "photos", "color_label") {
+                conn.execute("ALTER TABLE photos ADD COLUMN color_label TEXT", [])
+                    .map_err(db_err("add photos.color_label"))?;
             }
 
             let current_version: i64 = conn
@@ -578,7 +598,8 @@ impl Db {
                         p.lens_make, p.software, p.metadata_source, p.capture_datetime_source,
                         p.focal_length,
                         p.iso, p.aperture, p.shutter_speed, p.capture_datetime, p.gps_present,
-                        p.session_id, p.indexed_at, p.file_mtime,
+                        p.session_id, p.rating, p.flag, p.color_label,
+                        p.indexed_at, p.file_mtime,
                         a.sharpness, a.brightness, a.contrast, a.saturation,
                         a.highlight_clipping, a.shadow_clipping, a.is_monochrome, a.is_dark,
                         a.is_bright, a.face_count, a.smile_count, a.perceptual_hash,
@@ -611,22 +632,25 @@ impl Db {
                         capture_datetime: r.get(19)?,
                         gps_present: r.get::<_, i64>(20)? != 0,
                         session_id: r.get(21)?,
-                        indexed_at: r.get(22)?,
-                        file_mtime: r.get(23)?,
-                        sharpness: r.get(24)?,
-                        brightness: r.get(25)?,
-                        contrast: r.get(26)?,
-                        saturation: r.get(27)?,
-                        highlight_clipping: r.get(28)?,
-                        shadow_clipping: r.get(29)?,
-                        is_monochrome: r.get::<_, Option<i64>>(30)?.unwrap_or(0) != 0,
-                        is_dark: r.get::<_, Option<i64>>(31)?.unwrap_or(0) != 0,
-                        is_bright: r.get::<_, Option<i64>>(32)?.unwrap_or(0) != 0,
-                        face_count: r.get(33)?,
-                        smile_count: r.get(34)?,
-                        perceptual_hash: r.get(35)?,
-                        algorithm_version: r.get(36)?,
-                        analyzed_at: r.get(37)?,
+                        rating: r.get(22)?,
+                        flag: r.get::<_, i64>(23)? != 0,
+                        color_label: r.get(24)?,
+                        indexed_at: r.get(25)?,
+                        file_mtime: r.get(26)?,
+                        sharpness: r.get(27)?,
+                        brightness: r.get(28)?,
+                        contrast: r.get(29)?,
+                        saturation: r.get(30)?,
+                        highlight_clipping: r.get(31)?,
+                        shadow_clipping: r.get(32)?,
+                        is_monochrome: r.get::<_, Option<i64>>(33)?.unwrap_or(0) != 0,
+                        is_dark: r.get::<_, Option<i64>>(34)?.unwrap_or(0) != 0,
+                        is_bright: r.get::<_, Option<i64>>(35)?.unwrap_or(0) != 0,
+                        face_count: r.get(36)?,
+                        smile_count: r.get(37)?,
+                        perceptual_hash: r.get(38)?,
+                        algorithm_version: r.get(39)?,
+                        analyzed_at: r.get(40)?,
                     })
                 },
             )
@@ -923,7 +947,8 @@ pub fn upsert_exif(
         let page_sql = format!(
             "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                     p.orientation, p.capture_datetime, p.session_id,
-                    (a.photo_id IS NOT NULL) AS has_analysis
+                    (a.photo_id IS NOT NULL) AS has_analysis,
+                    p.rating, p.flag, p.color_label
              {base} {where_sql}
              ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
              LIMIT ? OFFSET ?"
@@ -942,6 +967,9 @@ pub fn upsert_exif(
                     capture_datetime: r.get(7)?,
                     session_id: r.get(8)?,
                     has_analysis: r.get::<_, i64>(9)? != 0,
+                    rating: r.get(10)?,
+                    flag: r.get::<_, i64>(11)? != 0,
+                    color_label: r.get(12)?,
                 })
             })
             .map_err(db_err("query filtered photos"))?;
@@ -1098,6 +1126,93 @@ pub fn clear_selection(&self, photo_id: i64) -> AppResult<()> {
     )
     .map_err(db_err("clear selection"))?;
     Ok(())
+}
+
+/// The fixed set of color labels the UI offers (Sprint 13).
+pub const COLOR_LABELS: [&str; 6] = ["red", "yellow", "green", "blue", "purple", "gray"];
+
+/// Apply curatorial marks (Sprint 13) to a batch of photos. Only the fields
+/// supplied as `Some` change; `None` leaves that mark untouched. Clearing:
+/// `rating: Some(0)` un-rates (back to NULL), `color: Some("")` removes the
+/// label; `flag: Some(false)` un-flags. Values are validated against the
+/// closed ranges/enum before any SQL runs.
+pub fn set_marks(
+    &self,
+    photo_ids: &[i64],
+    rating: Option<i64>,
+    flag: Option<bool>,
+    color: Option<&str>,
+) -> AppResult<usize> {
+    if photo_ids.is_empty() {
+        return Ok(0);
+    }
+    if let Some(r) = rating {
+        if !(0..=5).contains(&r) {
+            return Err(AppError::validation(format!(
+                "Rating must be between 0 and 5 stars (0 clears the rating), got {r}"
+            )));
+        }
+    }
+    let color_ok = color
+        .map(|c| c.is_empty() || Self::COLOR_LABELS.contains(&c))
+        .unwrap_or(true);
+    if !color_ok {
+        return Err(AppError::validation(format!(
+            "Unknown color label: {:?}. Use one of {:?} (or an empty string to clear)",
+            color,
+            Self::COLOR_LABELS.as_slice()
+        )));
+    }
+
+    let conn = self.lock()?;
+    let placeholders = photo_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let mut sets: Vec<&str> = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    match rating {
+        None => {}
+        Some(0) => {
+            sets.push("rating = NULL");
+        }
+        Some(r) => {
+            sets.push("rating = ?");
+            params.push(Box::new(r));
+        }
+    }
+    match flag {
+        None => {}
+        Some(f) => {
+            sets.push("flag = ?");
+            params.push(Box::new(i64::from(f)));
+        }
+    }
+    match color {
+        None => {}
+        Some("") => {
+            sets.push("color_label = NULL");
+        }
+        Some(c) => {
+            sets.push("color_label = ?");
+            params.push(Box::new(c.to_string()));
+        }
+    }
+    if sets.is_empty() {
+        return Ok(0);
+    }
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let sql = format!(
+        "UPDATE photos SET {} WHERE id IN ({})",
+        sets.join(", "),
+        placeholders
+    );
+    let all_params: Vec<&dyn rusqlite::ToSql> = refs
+        .iter()
+        .copied()
+        .chain(photo_ids.iter().map(|id| id as &dyn rusqlite::ToSql))
+        .collect();
+    let n = conn
+        .execute(sql.as_str(), all_params.as_slice())
+        .map_err(db_err("set marks"))?;
+    Ok(n)
 }
 pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
     if photo_ids.is_empty() {
@@ -1398,7 +1513,8 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
             .prepare(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
-                        (a.photo_id IS NOT NULL) AS has_analysis
+                        (a.photo_id IS NOT NULL) AS has_analysis,
+                        p.rating, p.flag, p.color_label
                  FROM collection_photos cp
                  JOIN photos p ON p.id = cp.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
@@ -1468,6 +1584,9 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
             capture_datetime: r.get(7)?,
             session_id: r.get(8)?,
             has_analysis: r.get::<_, i64>(9)? != 0,
+            rating: r.get(10)?,
+            flag: r.get::<_, i64>(11)? != 0,
+            color_label: r.get(12)?,
         })
     }
 
@@ -1541,7 +1660,8 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
             .prepare(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
-                        (a.photo_id IS NOT NULL) AS has_analysis
+                        (a.photo_id IS NOT NULL) AS has_analysis,
+                        p.rating, p.flag, p.color_label
                  FROM similarity_group_photos g
                  JOIN photos p ON p.id = g.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
@@ -1917,6 +2037,11 @@ pub struct PhotoSummary {
     pub capture_datetime: Option<String>,
     pub session_id: Option<i64>,
     pub has_analysis: bool,
+    /// Curatorial marks (Sprint 13). rating NULL = unrated (0..5 when
+    /// set); flag 0/1; color_label NULL | fixed enum.
+    pub rating: Option<i64>,
+    pub flag: bool,
+    pub color_label: Option<String>,
 }
 
 /// `PhotoPage` is what `list_photos` returns over IPC.
@@ -1955,6 +2080,11 @@ pub struct PhotoFull {
     pub capture_datetime: Option<String>,
     pub gps_present: bool,
     pub session_id: Option<i64>,
+    /// Curatorial marks (Sprint 13). rating NULL = unrated (0..5 when
+    /// set); flag 0/1; color_label NULL | fixed enum.
+    pub rating: Option<i64>,
+    pub flag: bool,
+    pub color_label: Option<String>,
     pub indexed_at: String,
     pub file_mtime: Option<String>,
     // ---- analysis (NULL before the analysis pass has run) ----
@@ -2063,6 +2193,74 @@ mod tests {
         db.migrate().unwrap();
         let v2 = db.migrate().unwrap();
         assert_eq!(v2, CURRENT_SCHEMA_VERSION);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// v13: curatorial marks — columns exist, batch set/clear works, and
+    /// invalid values fail before touching the database.
+    #[test]
+    fn marks_columns_and_batch_semantics() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_marks_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+        {
+            let conn = db.lock().unwrap();
+            for col in ["rating", "flag", "color_label"] {
+                assert!(table_has_column(&conn, "photos", col), "missing {col}");
+            }
+        }
+
+        let mut ids = Vec::new();
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            ids.push(
+                db.upsert_photo(&PhotoUpsert {
+                    path: dir.join(name).display().to_string(),
+                    filename: name.to_string(),
+                    extension: "jpg".to_string(),
+                    size_bytes: Some(1),
+                    width: Some(10),
+                    height: Some(10),
+                    orientation: None,
+                    session_id: None,
+                    file_mtime: None,
+                })
+                .unwrap(),
+            );
+        }
+
+        // Batch set: stars + flag + color on two photos at once.
+        let n = db.set_marks(&ids[..2], Some(4), Some(true), Some("red")).unwrap();
+        assert_eq!(n, 2);
+        // Clear the flag only on the first photo; rating/color untouched.
+        db.set_marks(&ids[..1], None, Some(false), None).unwrap();
+        // Unrate + clear color on the first photo.
+        db.set_marks(&ids[..1], Some(0), None, Some("")).unwrap();
+
+        let p1 = db.get_photo_full(ids[0]).unwrap();
+        assert_eq!(p1.rating, None);
+        assert!(!p1.flag);
+        assert_eq!(p1.color_label, None);
+        let p2 = db.get_photo_full(ids[1]).unwrap();
+        assert_eq!(p2.rating, Some(4));
+        assert!(p2.flag);
+        assert_eq!(p2.color_label.as_deref(), Some("red"));
+        let p3 = db.get_photo_full(ids[2]).unwrap();
+        assert_eq!(p3.rating, None);
+        assert!(!p3.flag);
+        assert_eq!(p3.color_label, None);
+
+        // Validation: out-of-range rating and unknown color fail; empty id
+        // list and a no-op call are harmless.
+        assert!(db.set_marks(&ids, Some(7), None, None).is_err());
+        assert!(db.set_marks(&ids, None, None, Some("mauve")).is_err());
+        assert_eq!(db.set_marks(&[], Some(3), None, None).unwrap(), 0);
+        assert_eq!(db.set_marks(&ids, None, None, None).unwrap(), 0);
+
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);
     }

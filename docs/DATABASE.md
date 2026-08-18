@@ -91,6 +91,9 @@ re-scan upserts instead of duplicating).
 | file_mtime | TEXT | file mtime; incremental analysis reuses rows when mtime+size unchanged |
 | exif_at | TEXT | (v7) RFC3339 time the metadata pass last read this file; NULL = not yet read. Since v11 the queue is incremental: `file_mtime > exif_at` re-reads changed files |
 | metadata_source | TEXT | (v11) `'none'` default; `'exif'` once real EXIF values land (`'filename'` / `'mtime'` arrive with date estimation). Dominance order: exif > filename > mtime |
+| rating | INTEGER | (v13) curatorial stars 1–5; NULL = unrated (0 never stored — un-rating sets NULL) |
+| flag | INTEGER | (v13) 0/1 curatorial flag |
+| color_label | TEXT | (v13) `NULL` | one of `red, yellow, green, blue, purple, gray` (closed enum enforced by `set_marks`) |
 | phash | INTEGER | (v9) 64-bit dHash of the decoded image, from the similarity pass (Sprint 8); NULL = not yet hashed |
 | phash_source_mtime | TEXT | (v9) RFC3339 file mtime the hash was computed from; drives the re-hash rule |
 
@@ -128,6 +131,14 @@ otherwise. See IMAGE_ANALYSIS.md ("Date estimation") for the full rules;
 exactly one resolution applies per photo, in dominance order
 (exif > filename > mtime), and an estimate is only written when the photo
 had no date at all (`COALESCE` — it never overrides a real EXIF date).
+
+**Curatorial marks (Sprint 13, `set_marks`):** one parameterized UPSERT-style
+UPDATE touches only the fields supplied; values are validated against the
+closed ranges/enum before any SQL runs (rating 0..5, colors from
+`COLOR_LABELS`), and clearing uses NULL (`rating → NULL` via 0, `color_label
+→ NULL` via `""`). Marks live on `photos` (no separate table) so grid rows,
+the viewer, filters and saved views all see them without joins; if a photo
+is deleted, marks go with it.
 
 ### analysis
 One row per analyzed photo (`photo_id` PK, FK cascade).

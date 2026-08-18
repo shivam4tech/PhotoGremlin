@@ -38,6 +38,7 @@ field lives.
  | time | capture_datetime (point, range via `between`) | photos |
  | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
  | local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
+| marking (Sprint 13) | rating (int, null = unrated — `is-null`/`not-null` select unrated/rated), flagged (bool, `photos.flag = 1`), color_label (text, fixed enum) | photos (curatorial marks) |
 
 The registry maps each field to (table, column, type, comparator) so
 conditions validate before hitting SQL, and unknown fields fail with a

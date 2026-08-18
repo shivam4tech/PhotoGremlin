@@ -111,6 +111,15 @@ export const api = {
   recentFileOps: (limit: number): Promise<FileOpRow[]> =>
     invoke("recent_file_ops", { limit }),
 
+  // Curatorial marks (Sprint 13). `null` leaves a mark untouched; rating 0
+  // / empty color clear.
+  updateMarks: (
+    photoIds: number[],
+    rating: number | null,
+    flag: boolean | null,
+    color: string | null,
+  ): Promise<number> => invoke("update_marks", { photoIds, rating, flag, color }),
+
   // Saved views (Sprint 8) — named, dynamic filters.
   listSavedViews: (): Promise<SavedView[]> => invoke("list_saved_views"),
   // `filterJson` is validated by the grid's own engine before persisting.

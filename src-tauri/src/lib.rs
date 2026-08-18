@@ -90,6 +90,7 @@ pub fn run() {
             commands::clear_selection,
             commands::clear_selections,
             commands::list_selections,
+            commands::update_marks,
             commands::recent_file_ops,
             commands::list_filtered_photos,
             commands::period_stats,
