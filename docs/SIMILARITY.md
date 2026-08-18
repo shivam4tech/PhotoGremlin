@@ -11,19 +11,27 @@ core, not an AI feature.
 
 ## What it finds
 
-Two independent group types, both scoped to **one session** (a shoot):
+Two independent group types:
 
 - **Similar** — photographs whose *perceptual hashes* are close (a
   near-duplicate: re-encode, tiny crop, same shot). "Which of these 40 frames
   are the same moment?"
+  - **Within a session** (`SIMILAR_THRESHOLD = 8` bits): the same-moment
+    question inside one shoot.
+  - **Cross-session** (Sprint 16, `GLOBAL_SIMILAR_THRESHOLD = 4` bits): the
+    stricter "was this file imported again?" question. A pair unites only
+    when both photos are *in different sessions* (a photo with no session
+    never cross-links). Group cards carrying matches over ≥ 2 sessions show a
+    "N sessions" chip.
 - **Burst** — photographs *captured within seconds of each other*
-  (`BURST_WINDOW_SECS = 3`). "This run is one burst."
-
-Cross-session duplicate detection is a **v0.2 concern** (deferred, not
-dropped). Within a session is where the question actually happens.
+  (`BURST_WINDOW_SECS = 3`), always within one session. "This run is one
+  burst." Time-based, so bursts never span sessions — two shoots at the same
+  wall-clock second stay separate.
 
 Both group types need **≥ 2 photos** (`MIN_GROUP_SIZE = 2`); a lone photo
-never forms a group.
+never forms a group. A photo can legitimately appear in both a within-session
+and a cross-session group (it *is* both "the same moment" and "imported
+twice").
 
 ## The algorithm (dHash)
 
@@ -50,6 +58,34 @@ stay close.
 
 All constants are `pub` in `src-tauri/src/similarity/mod.rs` and asserted by
 unit tests, so changing one is a conscious, tested act.
+
+## Cross-session similar (Sprint 16)
+
+Same dHash, different (stricter) question:
+
+- **`GLOBAL_SIMILAR_THRESHOLD = 4`** — importing the same file twice (or a
+  re-encode of it) lands at distance 0–3; looser matches are same-moment
+  questions and stay within their session. Only pairs in **different
+  sessions** (both with a session) can unite; NULL (unsessioned) photos never
+  cross-link.
+- **Entropy guard** — featureless frames (flat sky, walls) hash to ~0 or
+  ~all-ones (`degenerate_hash`: popcount ≤ 2 or ≥ 62). Those are
+  *undifferentiated*, not "similar", so they are excluded from the
+  cross-session pass entirely; two flat photos must never weld into a
+  library-wide group. Within-session behavior is untouched.
+- **Cost control** — an all-pairs sweep is O(n²), painful for lifetime-size
+  libraries. `cross_session_groups` slices each hash into overlapping 16-bit
+  windows (stride 12; the union covers all 64 bits) and compares pairs only
+  inside equal-window buckets. Union-find makes repeated comparisons
+  harmless. Exactness: any pair that differs in ≤ 2 bits shares a window
+  (their other windows avoid the flips), so the bucketed result is identical
+  to the all-pairs sweep for distances ≤ 2; at d = 4 the miss rate is a
+  fraction of a percent. The equivalence is asserted by a randomized unit
+  test against an all-pairs reference.
+- **Provenance** — `list_similarity_groups` computes `session_count`
+  (`COUNT(DISTINCT session_id)` over group members); the UI renders a
+  "N sessions" chip on group cards when ≥ 2. No schema change: group tables
+  are rebuilt every pass.
 
 ## Where it lives
 
@@ -112,7 +148,8 @@ elapsed_ms, cancelled }`, carried in `similarity-complete`.
 
 - **No automatic deletion or "keep best".** We surface groups; the user
   decides (via culling + file ops).
-- **No cross-session duplicate detection** (v0.2).
+- **No cross-session *auto* anything** — the group appears; deciding stays
+  with the photographer.
 - **No face/subject-based similarity** (that is the AI pass, Sprint 9, and is
   always optional).
 - **No permanent delete** anywhere — trash only (Sprint 7).
@@ -122,12 +159,17 @@ elapsed_ms, cancelled }`, carried in `similarity-complete`.
 - **Rust unit tests** (`similarity::tests`): dHash determinism, distinct
   content exceeds the threshold, mild noise stays under it, solid image,
   union-find clustering, min-group-size-2, burst clumping + ignoring unknown
-  times, RGB→gray helper.
+  times, RGB→gray helper; Sprint 16: window bucketing ≡ all-pairs sweep
+  (randomized reference), degenerate-hash entropy guard, cross-session
+  rule (same-session pairs never cross-link, NULL sessions never cross).
 - **Rust integration** (`tests/similarity_integration.rs`): real temp JPEGs →
   the full pass on a real DB: the re-encoded pair forms one similar group,
   a distinct scene does not join, a ≤3s trio bursts and a 30s-later photo
   does not, the incremental rule re-queues exactly the modified file, groups
-  persist with covers, an immediate cancel leaves a consistent (empty) set.
+  persist with covers, an immediate cancel leaves a consistent (empty) set;
+  Sprint 16: a cross-session re-encode joins a stricter 4-bit group while
+  flat frames are excluded, bursts stay session-scoped, and group cards carry
+  `session_count`.
 - **Frontend** (`src/tests/organizeLabels.test.ts`): the group/similar/collection
   wording is deterministic and stays factual.
 

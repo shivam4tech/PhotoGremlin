@@ -1599,9 +1599,13 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         let limit = limit.clamp(1, 500);
         let mut stmt = conn
             .prepare(
-                "SELECT id, hash, group_type, photo_count, created_at
-                 FROM similarity_groups
-                 ORDER BY (group_type = 'burst') DESC, photo_count DESC, id
+                "SELECT g.id, g.hash, g.group_type, g.photo_count, g.created_at,
+                        (SELECT COUNT(DISTINCT p.session_id)
+                         FROM similarity_group_photos gp
+                         JOIN photos p ON p.id = gp.photo_id
+                         WHERE gp.group_id = g.id) AS session_count
+                 FROM similarity_groups g
+                 ORDER BY (g.group_type = 'burst') DESC, g.photo_count DESC, g.id
                  LIMIT ?1",
             )
             .map_err(db_err("prepare similarity groups"))?;
@@ -1613,6 +1617,7 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
                     group_type: r.get(2)?,
                     photo_count: r.get(3)?,
                     created_at: r.get(4)?,
+                    session_count: r.get(5)?,
                     cover_photos: Vec::new(),
                 })
             })
@@ -1900,6 +1905,9 @@ pub struct SimilarityGroup {
     pub group_type: String,
     pub photo_count: i64,
     pub created_at: String,
+    /// Distinct sessions spanned (1 = within one shoot; ≥ 2 = cross-session,
+    /// Sprint 16 — photos were imported into different sessions).
+    pub session_count: i64,
     /// Up to 4 photo ids (by id order) for a UI cover strip.
     pub cover_photos: Vec<i64>,
 }

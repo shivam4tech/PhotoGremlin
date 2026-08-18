@@ -557,7 +557,14 @@ export function LibraryView() {
                     : "Photographs with near-identical structure (likely the same moment)."
                 }
               >
-                <span className="group-label">{groupLabel(g.group_type, g.photo_count)}</span>
+                <span className="group-label">
+                  {groupLabel(g.group_type, g.photo_count)}
+                  {g.session_count >= 2 && (
+                    <span className="chip" title={`Matches across ${g.session_count} imported sessions/shoots`}>
+                      {g.session_count} sessions
+                    </span>
+                  )}
+                </span>
                 <span className="cover-strip">
                   {g.cover_photos.slice(0, 3).map((id) => (
                     <CoverThumb key={id} photoId={id} alt={`${g.group_type} group cover`} />

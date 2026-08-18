@@ -342,8 +342,8 @@ fn similarity_hashing_groups_similar_and_bursts() {
         .iter()
         .find(|g| {
             g.group_type == "similar"
-                && g.cover_photos.iter().any(|p| *p == a)
-                && g.cover_photos.iter().any(|p| *p == a2)
+                && g.cover_photos.contains(&a)
+                && g.cover_photos.contains(&a2)
         })
         .expect("a + a2 must share a similar group");
     assert_eq!(similar.photo_count, 2, "only the pair is similar: {groups:?}");
@@ -354,13 +354,111 @@ fn similarity_hashing_groups_similar_and_bursts() {
         .iter()
         .find(|g| {
             g.group_type == "burst"
-                && g.cover_photos.iter().any(|p| *p == a)
-                && g.cover_photos.iter().any(|p| *p == a2)
-                && g.cover_photos.iter().any(|p| *p == b)
+                && g.cover_photos.contains(&a)
+                && g.cover_photos.contains(&a2)
+                && g.cover_photos.contains(&b)
         })
         .expect("a, a2, b (≤3s apart) must burst");
     assert!(!group_contains(&env.db, burst.id, d), "d is 30s later");
     assert_eq!(burst.photo_count, 3);
+}
+
+#[test]
+fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
+    // Sprint 16: session 1 has stripes b + c (one burst) and a flat d;
+    // session 2 has a re-encoded stripe scene (b2, "imported twice") and
+    // its own flat d2. The cross-session pass must link b/b2/c into one
+    // group spanning both sessions, must NOT burst b2 (time-based, scoped
+    // to a session), and must NOT weld the two flat frames together.
+    let env = Env::new(&[
+        ("b.jpg", "stripes"),
+        ("c.jpg", "stripes"),
+        ("d.jpg", "flat"),
+    ]);
+    let shoot2 = env.root.join("shoot2");
+    std::fs::create_dir_all(&shoot2).unwrap();
+    std::fs::write(shoot2.join("b2.jpg"), jpeg_bytes(64, 48, "stripes", 70)).unwrap();
+    std::fs::write(shoot2.join("d2.jpg"), jpeg_bytes(64, 48, "flat", 70)).unwrap();
+    let s2 = env
+        .db
+        .upsert_session("Shoot 2", Some(shoot2.to_str().unwrap()))
+        .unwrap();
+    for name in ["b2.jpg", "d2.jpg"] {
+        let p = shoot2.join(name);
+        env.db
+            .upsert_photo(&PhotoUpsert {
+                path: p.to_string_lossy().into_owned(),
+                filename: name.to_string(),
+                extension: "jpg".into(),
+                size_bytes: Some(123),
+                width: Some(64),
+                height: Some(48),
+                orientation: Some("landscape".into()),
+                session_id: Some(s2),
+                file_mtime: Some("2026-01-01T00:00:00Z".into()),
+            })
+            .unwrap();
+    }
+    // Same absolute seconds in both sessions: bursts must stay per-session.
+    env.raw(
+        "UPDATE photos SET capture_datetime = '2026-08-16T10:00:00Z' \
+         WHERE filename IN ('b.jpg','c.jpg')",
+    );
+    env.raw(
+        "UPDATE photos SET capture_datetime = '2026-08-16T10:00:02Z' \
+         WHERE filename = 'b2.jpg'",
+    );
+    env.raw(
+        "UPDATE photos SET capture_datetime = '2026-08-16T10:00:30Z' \
+         WHERE filename IN ('d.jpg','d2.jpg')",
+    );
+
+    let s = env.run_similarity();
+    assert_eq!(s.hashed, 5, "{s:?}");
+
+    let groups = env.db.list_similarity_groups(50).unwrap();
+    let b = env.ids_for(&["b.jpg"])[0];
+    let c = env.ids_for(&["c.jpg"])[0];
+    let d = env.ids_for(&["d.jpg"])[0];
+    let b2 = env.ids_for(&["b2.jpg"])[0];
+    let d2 = env.ids_for(&["d2.jpg"])[0];
+
+    // Cross-session group: b2 (session 2) + b + c (session 1).
+    let cross = groups
+        .iter()
+        .find(|g| {
+            g.group_type == "similar"
+                && g.cover_photos.contains(&b2)
+        })
+        .expect("b2 must join a similar group");
+    assert_eq!(cross.photo_count, 3, "b + c + b2, got: {groups:?}");
+    assert_eq!(cross.session_count, 2, "group spans both shoots");
+    assert!(group_contains(&env.db, cross.id, b));
+    assert!(group_contains(&env.db, cross.id, c));
+
+    // Within-session group {b, c} still exists with session_count 1.
+    let within = groups
+        .iter()
+        .find(|g| g.group_type == "similar" && g.photo_count == 2 && g.session_count == 1)
+        .expect("b + c must keep their within-session group");
+    assert!(group_contains(&env.db, within.id, b));
+    assert!(group_contains(&env.db, within.id, c));
+
+    // Bursts: only session 1's b + c (b2 shares the same wall-clock seconds
+    // but is a different shoot; d/d2 are 30s later).
+    assert_eq!(s.burst_groups, 1, "bursts never span sessions: {s:?}");
+    for g in groups.iter().filter(|g| g.group_type == "burst") {
+        assert!(!group_contains(&env.db, g.id, b2), "burst must not include b2");
+    }
+
+    // Flat frames hash to ~0: d and d2 must never be "similar" to each
+    // other (nor to anything else).
+    for g in groups.iter().filter(|g| g.group_type == "similar") {
+        assert!(
+            !(group_contains(&env.db, g.id, d) && group_contains(&env.db, g.id, d2)),
+            "flat frames must not weld: {groups:?}"
+        );
+    }
 }
 
 #[test]

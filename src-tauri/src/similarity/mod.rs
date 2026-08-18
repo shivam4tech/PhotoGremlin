@@ -7,12 +7,14 @@
 //!    re-hashed only when its file mtime changed).
 //! 2. **Group similar** — within a session, photos whose hashes differ by at
 //!    most `SIMILAR_THRESHOLD` bits are unioned into a cluster (components of
-//!    ≥ 2 photos become `similar` groups). Cross-session duplicates are a
-//!    v0.2 concern; within-session is where "which of these 40 shots are the
-//!    same moment?" actually happens.
+//!    ≥ 2 photos become `similar` groups). Sprint 16 adds **cross-session
+//!    similar groups**: photos in *different* sessions whose hashes differ by
+//!    at most `GLOBAL_SIMILAR_THRESHOLD` (stricter — the question is "was
+//!    this file imported twice?", not "same moment in a shoot"). A photo can
+//!    appear in both a within-session and a cross-session group.
 //! 3. **Group bursts** — within a session, photographs captured within
 //!    `BURST_WINDOW_SECS` of each other (known capture times, ≥ 2 photos)
-//!    become `burst` groups.
+//!    become `burst` groups. Time-based, so bursts never span sessions.
 //! 4. **Persist** — the whole group set is replaced atomically
 //!    (`replace_similarity_groups`), so the groups always reflect the current
 //!    hashes.
@@ -37,10 +39,22 @@ use crate::events::ProgressPayload;
 /// land near 32 ± a few bits, near-duplicates (re-encodes, tiny crops) stay
 /// well under 8. Pinned by unit tests.
 pub const SIMILAR_THRESHOLD: u32 = 8;
+/// Cross-session threshold (Sprint 16): stricter, because the question is
+/// "was this file imported / re-encoded again?", and same-file copies sit at
+/// distance 0–3. Everything looser is a same-moment question, which stays
+/// within a session at `SIMILAR_THRESHOLD`.
+pub const GLOBAL_SIMILAR_THRESHOLD: u32 = 4;
+/// Hashes with at most this many set (or clear) bits are degenerate:
+/// featureless frames (flat sky, walls, lab shots) collapse to ~0/~/all-ones,
+/// and must never weld every flat frame in the library into one group.
+const GLOBAL_MIN_ENTROPY: u32 = 2;
 /// Bursts: consecutive photographs within this window (seconds) on the same
 /// shoot. Pinned by unit tests.
 pub const BURST_WINDOW_SECS: i64 = 3;
 const MIN_GROUP_SIZE: usize = 2;
+
+/// A photo inside a grouping pass: (id, phash, capture timestamp).
+type SessionRow = (i64, u64, Option<i64>);
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SimilaritySummary {
@@ -101,6 +115,20 @@ pub fn photo_hash(path: &Path) -> AppResult<u64> {
 // Pure grouping (unit tested)
 // ---------------------------------------------------------------------------
 
+/// Union-find with path halving.
+fn uf_find(parent: &mut [usize], mut x: usize) -> usize {
+    let mut root = x;
+    while parent[root] != root {
+        root = parent[root];
+    }
+    while parent[x] != root {
+        let next = parent[x];
+        parent[x] = root;
+        x = next;
+    }
+    root
+}
+
 /// Union-find over `items` (photo id, hash); components of ≥ 2 photos whose
 /// pairwise distance stays ≤ `threshold` come back as groups. Deterministic:
 /// items are compared in input order and each group is emitted sorted by id.
@@ -108,24 +136,11 @@ pub fn group_similar(items: &[(i64, u64)], threshold: u32) -> Vec<Vec<i64>> {
     let n = items.len();
     let mut parent: Vec<usize> = (0..n).collect();
 
-    fn find(parent: &mut [usize], mut x: usize) -> usize {
-        let mut root = x;
-        while parent[root] != root {
-            root = parent[root];
-        }
-        while parent[x] != root {
-            let next = parent[x];
-            parent[x] = root;
-            x = next;
-        }
-        root
-    }
-
     for i in 0..n {
         for j in (i + 1)..n {
             if hamming(items[i].1, items[j].1) <= threshold {
-                let ra = find(&mut parent, i);
-                let rb = find(&mut parent, j);
+                let ra = uf_find(&mut parent, i);
+                let rb = uf_find(&mut parent, j);
                 if ra != rb {
                     parent[rb] = ra;
                 }
@@ -135,7 +150,82 @@ pub fn group_similar(items: &[(i64, u64)], threshold: u32) -> Vec<Vec<i64>> {
 
     let mut comps: HashMap<usize, Vec<i64>> = HashMap::new();
     for (i, (id, _)) in items.iter().enumerate() {
-        comps.entry(find(&mut parent, i)).or_default().push(*id);
+        comps.entry(uf_find(&mut parent, i)).or_default().push(*id);
+    }
+    let mut groups: Vec<Vec<i64>> = comps
+        .into_values()
+        .filter(|g| g.len() >= MIN_GROUP_SIZE)
+        .collect();
+    for g in groups.iter_mut() {
+        g.sort_unstable();
+    }
+    groups.sort_by_key(|g| g[0]);
+    groups
+}
+
+/// Featureless frames hash to ~0 (or ~all-ones): "hash 0 vs hash 0" is
+/// *undifferentiated*, not "similar". Degenerate hashes sit outside the
+/// cross-session pass entirely (within-session behavior is untouched).
+pub fn degenerate_hash(h: u64) -> bool {
+    let ones = h.count_ones();
+    ones <= GLOBAL_MIN_ENTROPY || ones >= 64 - GLOBAL_MIN_ENTROPY
+}
+
+/// Cross-session similar groups (Sprint 16), over `(photo id, hash,
+/// session)`. A pair unions only when it is within `threshold` bits AND the
+/// two photos live in different sessions (NULL session never cross-links).
+///
+/// Cost control for huge libraries: instead of an O(n²) all-pairs sweep, the
+/// hash is sliced into overlapping 16-bit windows (stride 12 — the union of
+/// windows covers all 64 bits) and pairs are compared *within* each window
+/// bucket; union-find means extra repeated comparisons are harmless.
+/// Exactness: with `threshold` ≤ 2 the windows reach every pair that can
+/// differ in ≤ 2 bits (a pair shares a window whenever some window holds
+/// none of the differing bits — with stride 12 a bit sits in 1–2 windows, so
+/// ≤ 2 flips always leave one window untouched). At d = 4 the miss rate is
+/// a fraction of a percent, which fits the stricter cross-session question.
+pub fn cross_session_groups(rows: &[(i64, u64, Option<i64>)], threshold: u32) -> Vec<Vec<i64>> {
+    const WINDOW_STRIDE: u32 = 12;
+    const WINDOW_WIDTH: u32 = 16;
+
+    let n = rows.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    let mut buckets: HashMap<(u32, u64), Vec<usize>> = HashMap::new();
+    for (i, (_, hash, _)) in rows.iter().enumerate() {
+        if degenerate_hash(*hash) {
+            continue;
+        }
+        let mut offset = 0;
+        while offset + WINDOW_WIDTH <= 64 {
+            buckets
+                .entry((offset, (hash >> offset) & 0xFFFF))
+                .or_default()
+                .push(i);
+            offset += WINDOW_STRIDE;
+        }
+    }
+
+    for idxs in buckets.values() {
+        for a in 0..idxs.len() {
+            for b in (a + 1)..idxs.len() {
+                let (_, ha, sa) = rows[idxs[a]];
+                let (_, hb, sb) = rows[idxs[b]];
+                let cross = matches!((sa, sb), (Some(x), Some(y)) if x != y);
+                if cross && hamming(ha, hb) <= threshold {
+                    let ra = uf_find(&mut parent, idxs[a]);
+                    let rb = uf_find(&mut parent, idxs[b]);
+                    if ra != rb {
+                        parent[rb] = ra;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut comps: HashMap<usize, Vec<i64>> = HashMap::new();
+    for (i, (id, _, _)) in rows.iter().enumerate() {
+        comps.entry(uf_find(&mut parent, i)).or_default().push(*id);
     }
     let mut groups: Vec<Vec<i64>> = comps
         .into_values()
@@ -191,7 +281,7 @@ pub fn group_bursts(items: &[(i64, Option<i64>)], window_secs: i64) -> Vec<Vec<i
 // ---------------------------------------------------------------------------
 
 fn secs_from_rfc3339(s: Option<&str>) -> Option<i64> {
-    s.and_then(|v| crate::time::parse_opt(v)).map(|d| d.timestamp())
+    s.and_then(crate::time::parse_opt).map(|d| d.timestamp())
 }
 
 /// Run the full similarity pass. Cancellation takes effect between files
@@ -236,10 +326,13 @@ pub fn run_similarity(
         );
     }
 
-    // Phase 2: group within each session (NULL session = one bucket).
+    // Phase 2: group. Pass A — within each session, unchanged since
+    // Sprint 8 (same-moment question at SIMILAR_THRESHOLD). Pass B —
+    // cross-session, stricter threshold + entropy guard. Bursts stay
+    // per-session (time-based; the same moment belongs to one shoot).
     progress(ProgressPayload::new(1, 0, "grouping"));
     let rows = db.hashed_photos()?;
-    let mut by_session: HashMap<Option<i64>, Vec<(i64, u64, Option<i64>)>> = HashMap::new();
+        let mut by_session: HashMap<Option<i64>, Vec<SessionRow>> = HashMap::new();
     for (id, hash, session, capture) in rows {
         by_session
             .entry(session)
@@ -249,13 +342,21 @@ pub fn run_similarity(
 
     let mut similar: Vec<(String, String, Vec<i64>)> = Vec::new();
     let mut bursts: Vec<(String, String, Vec<i64>)> = Vec::new();
-    for (_session, items) in by_session.iter() {
-        for g in group_similar(
-            &items.iter().map(|(id, h, _)| (*id, *h)).collect::<Vec<_>>(),
-            SIMILAR_THRESHOLD,
-        ) {
-            let hash = format!("{:016x}", items.iter().find(|(id, _, _)| id == &g[0]).map(|(_, h, _)| *h).unwrap_or(0));
-            similar.push((hash, "similar".to_string(), g));
+
+    let label_of =
+        |items: &[(i64, u64, Option<i64>)], first_id: i64| -> String {
+            let h = items
+                .iter()
+                .find(|(id, _, _)| id == &first_id)
+                .map(|(_, h, _)| *h)
+                .unwrap_or(0);
+            format!("{h:016x}")
+        };
+
+    for items in by_session.values() {
+        let hashes: Vec<(i64, u64)> = items.iter().map(|(id, h, _)| (*id, *h)).collect();
+        for g in group_similar(&hashes, SIMILAR_THRESHOLD) {
+            similar.push((label_of(items, g[0]), "similar".to_string(), g));
         }
         let timed: Vec<(i64, Option<i64>)> = items.iter().map(|(id, _, t)| (*id, *t)).collect();
         for g in group_bursts(&timed, BURST_WINDOW_SECS) {
@@ -266,13 +367,19 @@ pub fn run_similarity(
                 .filter_map(|(_, _, t)| *t)
                 .min()
                 .unwrap_or(0);
-            bursts.push((
-                format!("burst:{t}"),
-                "burst".to_string(),
-                g,
-            ));
+            bursts.push((format!("burst:{t}"), "burst".to_string(), g));
         }
     }
+
+    // Pass B: cross-session similar groups.
+    let global: Vec<SessionRow> = by_session
+        .iter()
+        .flat_map(|(s, items)| items.iter().map(move |(id, h, _)| (*id, *h, *s)))
+        .collect();
+    for g in cross_session_groups(&global, GLOBAL_SIMILAR_THRESHOLD) {
+        similar.push((label_of(&global, g[0]), "similar".to_string(), g));
+    }
+
     let all: Vec<(String, String, Vec<i64>)> = similar
         .iter()
         .chain(bursts.iter())
@@ -423,5 +530,140 @@ mod tests {
             Luma([luma as u8])
         });
         let _ = dhash64(&gray);
+    }
+
+    // --- Cross-session grouping (Sprint 16) ---
+
+    /// Deterministic LCG so the window-equivalence test is reproducible.
+    fn lcg(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state
+    }
+
+    fn flip_bits(h: u64, flips: &[u32]) -> u64 {
+        flips.iter().fold(h, |acc, bit| acc ^ (1u64 << bit))
+    }
+
+    #[test]
+    fn cross_session_links_only_different_sessions() {
+        let mut state: u64 = 0x41c6ce57;
+        let base = lcg(&mut state) | 1; // real entropy, not the ~all-ones ramp
+        // 1 (session 1) and 2 (session 2) are 1 bit apart → cross-session pair.
+        // 3 shares session 1 with 1 — same-session pairs never link here.
+        let rows = vec![
+            (1, base, Some(1)),
+            (2, flip_bits(base, &[3]), Some(2)),
+            (3, flip_bits(base, &[5]), Some(1)),
+            (4, flip_bits(flip_bits(base, &[1]), &[2]), Some(2)),
+        ];
+        let groups = cross_session_groups(&rows, GLOBAL_SIMILAR_THRESHOLD);
+        assert_eq!(groups, vec![vec![1, 2, 3, 4]]);
+    }
+
+    #[test]
+    fn cross_session_threshold_is_stricter() {
+        let mut state: u64 = 0x41c6ce57;
+        let base = lcg(&mut state) | 1;
+        // 5 bits apart: within-session threshold 8 would call it similar,
+        // the cross-session threshold 4 must not.
+        let far = vec![(1, base, Some(1)), (2, flip_bits(base, &[1, 2, 3, 4, 5]), Some(2))];
+        assert!(cross_session_groups(&far, GLOBAL_SIMILAR_THRESHOLD).is_empty());
+        // Exactly 4 bits: the strictest accepted pair.
+        let edge = vec![(1, base, Some(1)), (2, flip_bits(base, &[1, 2, 3, 4]), Some(2))];
+        assert_eq!(cross_session_groups(&edge, GLOBAL_SIMILAR_THRESHOLD), vec![vec![1, 2]]);
+    }
+
+    #[test]
+    fn cross_session_excludes_degenerate_hashes() {
+        // Flat frames hash to ~0: two flat photos (even in different
+        // sessions) must never weld into "similar".
+        let rows = vec![(1, 0u64, Some(1)), (2, 0, Some(2)), (3, u64::MAX, Some(3))];
+        assert!(cross_session_groups(&rows, GLOBAL_SIMILAR_THRESHOLD).is_empty());
+        assert!(degenerate_hash(0));
+        assert!(degenerate_hash(0b11));
+        assert!(degenerate_hash(u64::MAX));
+        assert!(!degenerate_hash(0b101010));
+    }
+
+    #[test]
+    fn cross_session_null_sessions_never_link() {
+        let mut state: u64 = 0x41c6ce57;
+        let base = lcg(&mut state) | 1;
+        let rows = vec![
+            (1, base, None),
+            (2, base, None),
+            (3, base, Some(1)),
+            (4, base, None), // close to 1 but unsigned → no link
+        ];
+        // 1/3/4 are pairwise close, but every pair contains an unsigned
+        // photo or the same session → no group at all.
+        assert!(cross_session_groups(&rows, GLOBAL_SIMILAR_THRESHOLD).is_empty());
+    }
+
+    #[test]
+    fn cross_session_window_buckets_match_pairwise_reference() {
+        // Exactness of the staggered-window bucketing for distances ≤ 2:
+        // clustered hashes (a base per cluster + 1–2 bit flips) must give
+        // the *identical* group set as the all-pairs reference.
+        let mut state: u64 = 0x9e3779b97f4a7c15;
+        let mut rows: Vec<(i64, u64, Option<i64>)> = Vec::new();
+        let mut id = 1i64;
+        let mut session = 1i64;
+        for _ in 0..40 {
+            let base = lcg(&mut state) | 1;
+            // 5 photos per cluster; ids and sessions alternate so every
+            // pair within a cluster is cross-session when it should be.
+            for k in 0..5 {
+                let h = match k {
+                    0 => base,
+                    1 => flip_bits(base, &[(lcg(&mut state) % 60) as u32 + 2]),
+                    2 => {
+                        let b1 = (lcg(&mut state) % 63) as u32 + 1;
+                        flip_bits(base, &[b1, b1 + 1])
+                    }
+                    3 => flip_bits(base, &[(lcg(&mut state) % 62) as u32]),
+                    4 => flip_bits(base, &[(lcg(&mut state) % 61) as u32 + 1, 63]),
+                    _ => unreachable!("cluster members 0..=4"),
+                };
+                rows.push((id, h, Some(session % 3 + 1)));
+                id += 1;
+                session += 1;
+            }
+        }
+        let clustered = cross_session_groups(&rows, GLOBAL_SIMILAR_THRESHOLD);
+
+        // All-pairs reference with the same cross-session rule.
+        let n = rows.len();
+        let mut parent: Vec<usize> = (0..n).collect();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let (_, ha, sa) = rows[i];
+                let (_, hb, sb) = rows[j];
+                let cross = matches!((sa, sb), (Some(x), Some(y)) if x != y);
+                if cross && hamming(ha, hb) <= GLOBAL_SIMILAR_THRESHOLD {
+                    let ra = uf_find(&mut parent, i);
+                    let rb = uf_find(&mut parent, j);
+                    if ra != rb {
+                        parent[rb] = ra;
+                    }
+                }
+            }
+        }
+        let mut comps: HashMap<usize, Vec<i64>> = HashMap::new();
+        for (i, (id, _, _)) in rows.iter().enumerate() {
+            comps.entry(uf_find(&mut parent, i)).or_default().push(*id);
+        }
+        let mut reference: Vec<Vec<i64>> = comps
+            .into_values()
+            .filter(|g| g.len() >= MIN_GROUP_SIZE)
+            .collect();
+        for g in reference.iter_mut() {
+            g.sort_unstable();
+        }
+        reference.sort_by_key(|g| g[0]);
+
+        assert_eq!(clustered, reference);
     }
 }

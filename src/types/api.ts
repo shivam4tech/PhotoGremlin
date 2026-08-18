@@ -381,6 +381,8 @@ export interface SimilarityGroup {
   group_type: "similar" | "burst";
   photo_count: number;
   created_at: string;
+  /** Distinct sessions spanned (≥ 2 = cross-session duplicates, Sprint 16). */
+  session_count: number;
   /** Up to 4 photo ids (by id order) for a cover strip. */
   cover_photos: number[];
 }
