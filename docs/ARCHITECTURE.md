@@ -68,24 +68,32 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `spawn_blocking`s the pass, returns immediately) / `stop_analysis`;
   `analysis-progress` + `analysis-complete` events carry progress and the
   `AnalysisSummary { analyzed, failed, cancelled, elapsed_ms, errors }`.
-- `metadata/` (Sprint 5) — local EXIF extraction + the metadata pass.
-  `exif.rs` is pure (path → `ExifRecord`): opens the file once, reads EXIF
-  with the `kamadak-exif` reader, and maps tags to camera make/model/lens,
-  focal length (1/100 mm → mm), ISO, f-number, exposure seconds, capture
-  datetime (zone-less EXIF clock stored verbatim as UTC RFC3339), and a
-  **presence-only** GPS bit — coordinates never reach the record struct. A
-  readable image with no EXIF is an empty record (not an error); an
-  unparseable file is a friendly error. `mod.rs` runs the pass, mirroring the
-  analysis pipeline: `exif_queue` → round-robin slices to
-  `METADATA_WORKERS = 3` std threads → `upsert_exif` (COALESCE merge, stamps
-  `exif_at`) → per-item progress; cooperative cancel; a 256 MB per-file guard.
-  Re-runs are no-ops (queue drains to `exif_at IS NULL` only).
+- `metadata/` (Sprint 5, reliability pass Sprint 11) — local EXIF
+  extraction + the metadata pass. `exif.rs` is pure (path → `ExifRecord`):
+  opens the file once, reads EXIF with the `kamadak-exif` reader, and maps
+  tags to camera make/model/lens/lens make/software, focal length (1/100 mm
+  → mm), ISO, f-number, exposure seconds, capture datetime (zone-less EXIF
+  clock stored verbatim as UTC RFC3339), and a **presence-only** GPS bit —
+  coordinates never reach the record struct. `ExifRecord::has_metadata()`
+  is the column-level truth behind the `metadata_source` provenance
+  (`'none'` → `'exif'`; date estimation extends the order later). A readable
+  image with no EXIF is an empty record (not an error); an unparseable file
+  is a friendly error. `mod.rs` runs the pass, mirroring the analysis
+  pipeline: `exif_queue` → round-robin slices to `METADATA_WORKERS = 3` std
+  threads → `upsert_exif` (scanner dims win; EXIF-owned fields refreshed by
+  the newest read, empty reads never erase; stamps `exif_at`) → per-item
+  progress; cooperative cancel; a 256 MB per-file guard. The queue is
+  **incremental** since v11: never-read ∪ `file_mtime > exif_at` — a file
+  edited or re-exported on disk is re-read, an unchanged file never is.
 - `commands/metadata.rs` — `start_metadata` (claims the metadata slot,
   `spawn_blocking`s the pass, returns immediately) / `stop_metadata`;
   `metadata-progress` + `metadata-complete` events carry the
   `MetadataSummary { processed, failed, cancelled, elapsed_ms, errors }`.
   The auto-run: the UI fires `start_metadata` as soon as `scan-complete` has
-  indexed new photos (the pass is a cheap no-op when nothing is new).
+  indexed new photos (the pass is a cheap no-op when nothing is new), and
+  again ~1 s after app start, draining whatever backlog exists (re-reads of
+  changed files, a few unread files) so the library is current without user
+  action.
 - `filters/` (Sprint 5) — the structured filter engine, pure and
   Tauri/DB-independent (see FILTER_ENGINE.md). Parses + validates the filter
   JSON (a fixed **field registry** of compile-time SQL expressions maps each

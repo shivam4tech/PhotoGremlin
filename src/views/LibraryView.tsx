@@ -308,7 +308,7 @@ export function LibraryView() {
             className="btn btn-sm"
             onClick={startMetadata}
             disabled={scanning || analyzing || findingSimilar || busy || !libraryHasPhotos}
-            title={`Read camera metadata (EXIF) from ${metadataPending.toLocaleString()} photograph${metadataPending === 1 ? "" : "s"} that still needs it.`}
+            title={`Read camera metadata (EXIF) for ${metadataPending.toLocaleString()} photograph${metadataPending === 1 ? "" : "s"} — never-read files plus any changed on disk since their last read.`}
           >
             Read metadata ({metadataPending.toLocaleString()})
           </button>

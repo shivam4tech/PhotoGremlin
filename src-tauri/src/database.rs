@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 10;
+pub const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -239,6 +239,31 @@ impl Db {
                     .map_err(db_err("add analysis.faces_at"))?;
             }
 
+            // v11 (Sprint 11): metadata reliability. `lens_make` / `software`
+            // extend what the EXIF pass can contribute; `metadata_source`
+            // records where a photo's camera/exposure/date values came from
+            // ('none' until the pass finds something: 'exif' when real EXIF
+            // contributes; the date-estimation sprint adds 'filename' /
+            // 'mtime' below 'exif' in the dominance order). The EXIF queue
+            // also becomes incremental: a file whose mtime is newer than its
+            // last read (`file_mtime > exif_at`) is re-read, mirroring the
+            // analysis/similarity/#faces rules.
+            if !table_has_column(&conn, "photos", "lens_make") {
+                conn.execute("ALTER TABLE photos ADD COLUMN lens_make TEXT", [])
+                    .map_err(db_err("add photos.lens_make"))?;
+            }
+            if !table_has_column(&conn, "photos", "software") {
+                conn.execute("ALTER TABLE photos ADD COLUMN software TEXT", [])
+                    .map_err(db_err("add photos.software"))?;
+            }
+            if !table_has_column(&conn, "photos", "metadata_source") {
+                conn.execute(
+                    "ALTER TABLE photos ADD COLUMN metadata_source TEXT NOT NULL DEFAULT 'none'",
+                    [],
+                )
+                .map_err(db_err("add photos.metadata_source"))?;
+            }
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -275,11 +300,16 @@ impl Db {
         let analyzed_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM analysis", [], |r| r.get(0))
             .map_err(db_err("count analysis"))?;
-        // Photos still awaiting the EXIF/metadata pass (never read yet).
+        // Photos still awaiting the EXIF/metadata pass (never read yet, or
+        // changed on disk since the last read).
         let metadata_pending: i64 = conn
-            .query_row("SELECT COUNT(*) FROM photos WHERE exif_at IS NULL", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM photos
+                 WHERE exif_at IS NULL
+                    OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)",
+                [],
+                |r| r.get(0),
+            )
             .map_err(db_err("count metadata pending"))?;
         let (selected_count, rejected_count): (i64, i64) = conn
             .query_row(
@@ -524,7 +554,9 @@ impl Db {
         let row: Option<PhotoFull> = conn
             .query_row(
                 "SELECT p.id, p.path, p.filename, p.extension, p.size_bytes, p.width, p.height,
-                        p.orientation, p.camera_make, p.camera_model, p.lens, p.focal_length,
+                        p.orientation, p.camera_make, p.camera_model, p.lens,
+                        p.lens_make, p.software, p.metadata_source,
+                        p.focal_length,
                         p.iso, p.aperture, p.shutter_speed, p.capture_datetime, p.gps_present,
                         p.session_id, p.indexed_at, p.file_mtime,
                         a.sharpness, a.brightness, a.contrast, a.saturation,
@@ -548,29 +580,32 @@ impl Db {
                         camera_make: r.get(8)?,
                         camera_model: r.get(9)?,
                         lens: r.get(10)?,
-                        focal_length: r.get(11)?,
-                        iso: r.get(12)?,
-                        aperture: r.get(13)?,
-                        shutter_speed: r.get(14)?,
-                        capture_datetime: r.get(15)?,
-                        gps_present: r.get::<_, i64>(16)? != 0,
-                        session_id: r.get(17)?,
-                        indexed_at: r.get(18)?,
-                        file_mtime: r.get(19)?,
-                        sharpness: r.get(20)?,
-                        brightness: r.get(21)?,
-                        contrast: r.get(22)?,
-                        saturation: r.get(23)?,
-                        highlight_clipping: r.get(24)?,
-                        shadow_clipping: r.get(25)?,
-                        is_monochrome: r.get::<_, Option<i64>>(26)?.unwrap_or(0) != 0,
-                        is_dark: r.get::<_, Option<i64>>(27)?.unwrap_or(0) != 0,
-                        is_bright: r.get::<_, Option<i64>>(28)?.unwrap_or(0) != 0,
-                        face_count: r.get(29)?,
-                        smile_count: r.get(30)?,
-                        perceptual_hash: r.get(31)?,
-                        algorithm_version: r.get(32)?,
-                        analyzed_at: r.get(33)?,
+                        lens_make: r.get(11)?,
+                        software: r.get(12)?,
+                        metadata_source: r.get(13)?,
+                        focal_length: r.get(14)?,
+                        iso: r.get(15)?,
+                        aperture: r.get(16)?,
+                        shutter_speed: r.get(17)?,
+                        capture_datetime: r.get(18)?,
+                        gps_present: r.get::<_, i64>(19)? != 0,
+                        session_id: r.get(20)?,
+                        indexed_at: r.get(21)?,
+                        file_mtime: r.get(22)?,
+                        sharpness: r.get(23)?,
+                        brightness: r.get(24)?,
+                        contrast: r.get(25)?,
+                        saturation: r.get(26)?,
+                        highlight_clipping: r.get(27)?,
+                        shadow_clipping: r.get(28)?,
+                        is_monochrome: r.get::<_, Option<i64>>(29)?.unwrap_or(0) != 0,
+                        is_dark: r.get::<_, Option<i64>>(30)?.unwrap_or(0) != 0,
+                        is_bright: r.get::<_, Option<i64>>(31)?.unwrap_or(0) != 0,
+                        face_count: r.get(32)?,
+                        smile_count: r.get(33)?,
+                        perceptual_hash: r.get(34)?,
+                        algorithm_version: r.get(35)?,
+                        analyzed_at: r.get(36)?,
                     })
                 },
             )
@@ -712,13 +747,18 @@ impl Db {
         Ok((decodable, analyzed))
     }
 
-    /// Photos still awaiting the EXIF/metadata pass, in stable order.
+    /// Photos still awaiting the EXIF/metadata pass, in stable order: never
+    /// read yet, or changed on disk since the last read (incremental rule:
+    /// `file_mtime > exif_at` — same idea as the analysis/similarity/faces
+    /// queues). An unchanged file never re-enters.
     pub fn exif_queue(&self) -> AppResult<Vec<ExifWork>> {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, path, extension, filename, width, height, orientation
-                 FROM photos WHERE exif_at IS NULL
+                 FROM photos
+                 WHERE exif_at IS NULL
+                    OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
                  ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC",
             )
             .map_err(db_err("prepare exif_queue"))?;
@@ -743,9 +783,17 @@ impl Db {
     }
 
     /// Persist one photo's EXIF/metadata extraction. Merge semantics:
-    /// scanner-resolved dimensions/orientation always win (COALESCE keeps the
-    /// existing value); GPS presence only ever escalates 0→1; `exif_at` is
-    /// stamped so a re-run's queue skips the file.
+    /// - scanner-resolved dimensions/orientation always win (COALESCE keeps
+    ///   the existing value — the scanner has authoritative pixels);
+    /// - EXIF-owned fields are refreshed by the newest read: a non-None
+    ///   value replaces the old one (so a re-read of a changed file actually
+    ///   updates the row), while a None in a fresh read preserves what an
+    ///   earlier read found (an empty read never erases data);
+    /// - GPS presence only ever escalates 0→1 (documented privacy choice);
+    /// - `metadata_source` escalates to 'exif' once real EXIF values have
+    ///   landed (a later estimation pass may write 'filename'/'mtime' below
+    ///   it — dominance order exif > filename > mtime);
+    /// - `exif_at` is stamped so unchanged files drop out of the queue.
     pub fn upsert_exif(&self, photo_id: i64, e: &crate::metadata::ExifRecord) -> AppResult<()> {
         let conn = self.lock()?;
         conn.execute(
@@ -753,17 +801,20 @@ impl Db {
                  width = COALESCE(width, ?1),
                  height = COALESCE(height, ?2),
                  orientation = COALESCE(orientation, ?3),
-                 camera_make = COALESCE(camera_make, ?4),
-                 camera_model = COALESCE(camera_model, ?5),
-                 lens = COALESCE(lens, ?6),
-                 focal_length = COALESCE(focal_length, ?7),
-                 iso = COALESCE(iso, ?8),
-                 aperture = COALESCE(aperture, ?9),
-                 shutter_speed = COALESCE(shutter_speed, ?10),
-                 capture_datetime = COALESCE(capture_datetime, ?11),
-                 gps_present = CASE WHEN gps_present = 1 THEN 1 ELSE ?12 END,
-                 exif_at = ?13
-             WHERE id = ?14",
+                 camera_make = COALESCE(?4, camera_make),
+                 camera_model = COALESCE(?5, camera_model),
+                 lens = COALESCE(?6, lens),
+                 lens_make = COALESCE(?7, lens_make),
+                 software = COALESCE(?8, software),
+                 focal_length = COALESCE(?9, focal_length),
+                 iso = COALESCE(?10, iso),
+                 aperture = COALESCE(?11, aperture),
+                 shutter_speed = COALESCE(?12, shutter_speed),
+                 capture_datetime = COALESCE(?13, capture_datetime),
+                 gps_present = CASE WHEN gps_present = 1 THEN 1 ELSE ?14 END,
+                 metadata_source = CASE WHEN ?15 = 1 THEN 'exif' ELSE metadata_source END,
+                 exif_at = ?16
+             WHERE id = ?17",
             params![
                 e.width.map(|v| v as i64),
                 e.height.map(|v| v as i64),
@@ -771,12 +822,15 @@ impl Db {
                 e.camera_make,
                 e.camera_model,
                 e.lens,
+                e.lens_make,
+                e.software,
                 e.focal_length,
                 e.iso,
                 e.aperture,
                 e.shutter_speed,
                 e.capture_datetime,
                 i64::from(e.gps_present),
+                i64::from(e.has_metadata()),
                 crate::time::now_utc(),
                 photo_id,
             ],
@@ -1836,6 +1890,11 @@ pub struct PhotoFull {
     pub camera_make: Option<String>,
     pub camera_model: Option<String>,
     pub lens: Option<String>,
+    pub lens_make: Option<String>,
+    pub software: Option<String>,
+    /// Where the camera/exposure/date values came from: 'none' | 'exif'
+    /// ('filename' / 'mtime' are added by the date-estimation sprint).
+    pub metadata_source: String,
     pub focal_length: Option<f64>,
     pub iso: Option<i64>,
     pub aperture: Option<f64>,
@@ -1951,6 +2010,117 @@ mod tests {
         db.migrate().unwrap();
         let v2 = db.migrate().unwrap();
         assert_eq!(v2, CURRENT_SCHEMA_VERSION);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    /// v11 column set + the incremental EXIF queue: a photo is queued exactly
+    /// twice — once before any read, once when its file gets newer than the
+    /// last read — and never again while the file is unchanged.
+    #[test]
+    fn exif_queue_is_incremental_and_v11_columns_exist() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_exifq_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+
+        let photo_id = db
+            .upsert_photo(&PhotoUpsert {
+                path: dir.join("old.jpg").display().to_string(),
+                filename: "old.jpg".to_string(),
+                extension: "jpg".to_string(),
+                size_bytes: Some(1000),
+                width: Some(4000),
+                height: Some(3000),
+                orientation: Some("landscape".to_string()),
+                session_id: None,
+                file_mtime: Some("2026-01-01T00:00:00Z".to_string()),
+            })
+            .unwrap();
+
+        // Never read: queued, and reported pending.
+        assert_eq!(db.exif_queue().unwrap().len(), 1);
+        assert_eq!(db.status().unwrap().metadata_pending, 1);
+
+        // First read lands metadata; source escalates from 'none' to 'exif'.
+        let rec = crate::metadata::ExifRecord {
+            camera_make: Some("CamCo".to_string()),
+            iso: Some(200),
+            lens_make: Some("OptCo".to_string()),
+            software: Some("Editor 2.0".to_string()),
+            ..Default::default()
+        };
+        db.upsert_exif(photo_id, &rec).unwrap();
+
+        let full = db.get_photo_full(photo_id).unwrap();
+        assert_eq!(full.camera_make.as_deref(), Some("CamCo"));
+        assert_eq!(full.lens_make.as_deref(), Some("OptCo"));
+        assert_eq!(full.software.as_deref(), Some("Editor 2.0"));
+        assert_eq!(full.metadata_source, "exif");
+
+        // An empty read (readable image, no EXIF) never marks source as
+        // EXIF, and — once stamped — a re-read does not erase values.
+        db.upsert_exif(photo_id, &crate::metadata::ExifRecord::default())
+            .unwrap();
+        let full = db.get_photo_full(photo_id).unwrap();
+        assert_eq!(full.camera_make.as_deref(), Some("CamCo"));
+        assert_eq!(full.metadata_source, "exif");
+
+        // Unchanged file: queue empty, pending zero.
+        assert_eq!(db.exif_queue().unwrap().len(), 0);
+        assert_eq!(db.status().unwrap().metadata_pending, 0);
+
+        // The file changes on disk (newer mtime than the read stamp):
+        // queued again and pending again. (Stamp is a real "now", so the
+        // changed file's mtime must be in the future of this test run.)
+        db.upsert_photo(&PhotoUpsert {
+            path: dir.join("old.jpg").display().to_string(),
+            filename: "old.jpg".to_string(),
+            extension: "jpg".to_string(),
+            size_bytes: Some(1001),
+            width: Some(4000),
+            height: Some(3000),
+            orientation: Some("landscape".to_string()),
+            session_id: None,
+            file_mtime: Some("2099-01-02T00:00:00Z".to_string()),
+        })
+        .unwrap();
+        assert_eq!(db.exif_queue().unwrap().len(), 1);
+        assert_eq!(db.status().unwrap().metadata_pending, 1);
+
+        // Re-read refreshes values (new read wins over the old one)…
+        let rec2 = crate::metadata::ExifRecord {
+            camera_make: Some("NewCam".to_string()),
+            iso: Some(400),
+            ..Default::default()
+        };
+        db.upsert_exif(photo_id, &rec2).unwrap();
+        let full = db.get_photo_full(photo_id).unwrap();
+        assert_eq!(full.camera_make.as_deref(), Some("NewCam"));
+        assert_eq!(full.iso, Some(400));
+        // …while untouched fields survive the re-read (None never erases).
+        assert_eq!(full.lens_make.as_deref(), Some("OptCo"));
+        assert_eq!(full.software.as_deref(), Some("Editor 2.0"));
+
+        // With the file now older than the re-read stamp (in real life the
+        // stamp is the read time, ≥ the file's write time), it drops out.
+        db.upsert_photo(&PhotoUpsert {
+            path: dir.join("old.jpg").display().to_string(),
+            filename: "old.jpg".to_string(),
+            extension: "jpg".to_string(),
+            size_bytes: Some(1001),
+            width: Some(4000),
+            height: Some(3000),
+            orientation: Some("landscape".to_string()),
+            session_id: None,
+            file_mtime: Some("2000-01-01T00:00:00Z".to_string()),
+        })
+        .unwrap();
+        assert_eq!(db.exif_queue().unwrap().len(), 0);
+
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);
     }
