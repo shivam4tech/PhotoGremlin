@@ -24,7 +24,11 @@ file ops → saved views → similarity → local AI → contact sheets → poli
 **Stronger RAW support (Sprint 15 — done 2026-08-18: rawler-based decode
 provider, previews for CR2/CR3/NEF/ARW/RAF/DNG/ORF/RW2 via tiles, viewer
 and contact sheets, graceful placeholder fallback, see RAW_PREVIEWS.md)**,
-better similarity, **contact sheets
+**cross-session similarity
+(Sprint 16 — done 2026-08-18: stricter 4-bit cross-session pairs with an
+entropy guard against flat frames, windowed bucketing to keep the sweep
+cheap, "N sessions" chips on group cards, see SIMILARITY.md)**,
+**contact sheets
 (Sprint 14 — done 2026-08-18: 12-tile A4-landscape PNG sheets from the
 selection, see CONTACT_SHEETS.md)**,
 **ratings/flags/color labels (Sprint 13 — done 2026-08-18: photos columns
