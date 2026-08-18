@@ -29,6 +29,10 @@ chrono = { version = "0.4", features = ["serde"] }
 walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff"] }
 kamadak-exif = "0.6"
+# Camera RAW decode provider (Sprint 15): pure-Rust, content-sniffed, covers
+# every extension in scanner::RAW_EXT (CR2/CR3/NEF/ARW/RAF/DNG/ORF/RW2) plus
+# PEF/3FR/IIQ etc. LGPL-2.1 — see docs/RAW_PREVIEWS.md for the compliance note.
+rawler = "0.7"
 # Pinned exactly: ort 1.x + 2.0.0-alpha are yanked on crates.io, and the
 # `load-dynamic` feature (runtime dlopen of libonnxruntime) was removed
 # after rc.9. ort-sys is pinned too — rc.9→rc.10 changed OrtApiBase bindings

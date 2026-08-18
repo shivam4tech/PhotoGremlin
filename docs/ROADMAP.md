@@ -21,7 +21,10 @@ file ops → saved views → similarity → local AI → contact sheets → poli
 
 ## v0.2
 
-Stronger RAW support (decode provider), better similarity, **contact sheets
+**Stronger RAW support (Sprint 15 — done 2026-08-18: rawler-based decode
+provider, previews for CR2/CR3/NEF/ARW/RAF/DNG/ORF/RW2 via tiles, viewer
+and contact sheets, graceful placeholder fallback, see RAW_PREVIEWS.md)**,
+better similarity, **contact sheets
 (Sprint 14 — done 2026-08-18: 12-tile A4-landscape PNG sheets from the
 selection, see CONTACT_SHEETS.md)**,
 **ratings/flags/color labels (Sprint 13 — done 2026-08-18: photos columns

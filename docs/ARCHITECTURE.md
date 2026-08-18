@@ -52,6 +52,9 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `path|size|mtime|width|THUMB_VERSION` (std's `DefaultHasher` is randomly
   seeded and must not be used for cache keys); version bump invalidates all.
   Base64 is a ~40-line local impl (round-trip tested), not a dependency.
+  RAW files (Sprint 15) take a different branch inside generation: the
+  decode provider (`decode.rs`) develops them through rawler and falls back
+  to the placeholder error for undecodable files — see RAW_PREVIEWS.md.
 - `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
   (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
   the `State` guard before awaiting — Tauri command futures must be `Send`).
