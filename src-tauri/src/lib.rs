@@ -8,6 +8,7 @@ pub mod analysis;
 pub mod commands;
 pub mod contact_sheet;
 pub mod database;
+pub mod decode;
 pub mod error;
 pub mod events;
 pub mod filesystem;

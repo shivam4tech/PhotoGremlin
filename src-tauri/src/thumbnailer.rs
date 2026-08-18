@@ -145,9 +145,11 @@ impl ThumbService {
             row.ok_or_else(|| AppError::operation("This photograph is no longer in the library"))?
         };
 
-        // Formats without a local pixel provider (RAW / HEIC in v0.1):
-        // the UI shows a labelled placeholder tile — never a crash.
-        if matches!(classify_extension(&extension), FileClass::Raw | FileClass::Heic) {
+        // Formats without a local pixel provider in v0.1 (HEIC): the UI
+        // shows a labelled placeholder tile — never a crash. RAW files get
+        // the decode provider (Sprint 15): decodable files preview
+        // normally, undecodable ones fall back to the same placeholder.
+        if matches!(classify_extension(&extension), FileClass::Heic) {
             return Err(AppError::UnsupportedFormat { path });
         }
 
@@ -223,7 +225,9 @@ impl ThumbService {
             .lock()
             .expect("in-flight map poisoned")
             .insert(key.clone(), ());
-        let outcome = self.generate(&p, &cache_file, kind.max_width()).await;
+        let outcome = self
+            .generate(&p, &cache_file, kind.max_width(), classify_extension(&extension))
+            .await;
         self.in_flight
             .lock()
             .expect("in-flight map poisoned")
@@ -233,7 +237,13 @@ impl ThumbService {
 
     /// Decode + downscale + encode + write cache. CPU work runs on a
     /// blocking thread under the generation semaphore.
-    async fn generate(&self, path: &Path, cache_file: &Path, max_width: u32) -> Outcome {
+    async fn generate(
+        &self,
+        path: &Path,
+        cache_file: &Path,
+        max_width: u32,
+        class: FileClass,
+    ) -> Outcome {
         let Ok(_permit) = self.sem.acquire().await else {
             return Outcome::Fail(AppError::operation("Thumbnail generator shut down"));
         };
@@ -241,46 +251,63 @@ impl ThumbService {
         let path_owned = path.to_path_buf();
         let cache_owned = cache_file.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
-            // Header-only check: reject absurdly huge images before paying
-            // for a full decode.
-            let (w, h) = image::image_dimensions(&path_owned).map_err(|e| AppError::ImageRead {
-                path: path_owned.display().to_string(),
-                reason: e.to_string(),
-            })?;
-            if (w as u64) * (h as u64) > MAX_PIXELS {
-                return Ok(Outcome::Fail(AppError::operation(
-                    "Image is too large to preview safely",
-                )));
-            }
-            let scale = f64::from(max_width) / f64::from(w.max(1));
-            let tw = if scale < 1.0 {
-                u32::max(1, (f64::from(w) * scale) as u32)
+            // RAW files go through the content-sniffing decode provider
+            // (Sprint 15) — rawler discovers the format from the bytes, so
+            // neither the header guard nor ImageReader applies.
+            let (tw, th, rgb): (u32, u32, RgbImage) = if class == FileClass::Raw {
+                match crate::decode::decode_to_preview(&path_owned, max_width) {
+                    Ok(Some(img)) => (img.width(), img.height(), img),
+                    Ok(None) => {
+                        return Ok(Outcome::Fail(AppError::UnsupportedFormat {
+                            path: path_owned.display().to_string(),
+                        }))
+                    }
+                    Err(e) => return Ok(Outcome::Fail(e)),
+                }
             } else {
-                w
-            };
-            let th = if scale < 1.0 {
-                u32::max(1, (f64::from(h) * scale) as u32)
-            } else {
-                h
-            };
-
-            let img = ImageReader::open(&path_owned)
-                .map_err(|e| AppError::ImageRead {
-                    path: path_owned.display().to_string(),
-                    reason: e.to_string(),
-                })?
-                .with_guessed_format()
-                .map_err(|e| AppError::ImageRead {
-                    path: path_owned.display().to_string(),
-                    reason: e.to_string(),
-                })?
-                .decode()
-                .map_err(|e| AppError::ImageRead {
-                    path: path_owned.display().to_string(),
-                    reason: format!("Could not read image: {e}"),
+                // Header-only check: reject absurdly huge images before
+                // paying for a full decode.
+                let (w, h) = image::image_dimensions(&path_owned).map_err(|e| {
+                    AppError::ImageRead {
+                        path: path_owned.display().to_string(),
+                        reason: e.to_string(),
+                    }
                 })?;
-            let resized = img.resize_exact(tw, th, image::imageops::FilterType::Triangle);
-            let rgb: RgbImage = resized.to_rgb8();
+                if (w as u64) * (h as u64) > MAX_PIXELS {
+                    return Ok(Outcome::Fail(AppError::operation(
+                        "Image is too large to preview safely",
+                    )));
+                }
+                let scale = f64::from(max_width) / f64::from(w.max(1));
+                let tw = if scale < 1.0 {
+                    u32::max(1, (f64::from(w) * scale) as u32)
+                } else {
+                    w
+                };
+                let th = if scale < 1.0 {
+                    u32::max(1, (f64::from(h) * scale) as u32)
+                } else {
+                    h
+                };
+
+                let img = ImageReader::open(&path_owned)
+                    .map_err(|e| AppError::ImageRead {
+                        path: path_owned.display().to_string(),
+                        reason: e.to_string(),
+                    })?
+                    .with_guessed_format()
+                    .map_err(|e| AppError::ImageRead {
+                        path: path_owned.display().to_string(),
+                        reason: e.to_string(),
+                    })?
+                    .decode()
+                    .map_err(|e| AppError::ImageRead {
+                        path: path_owned.display().to_string(),
+                        reason: format!("Could not read image: {e}"),
+                    })?;
+                let resized = img.resize_exact(tw, th, image::imageops::FilterType::Triangle);
+                (tw, th, resized.to_rgb8())
+            };
 
             let mut bytes: Vec<u8> = Vec::new();
             {
@@ -449,7 +476,7 @@ mod tests {
         let name = thumb_cache_name(src.to_str().unwrap(), meta.len() as i64, None, 256);
         let cache_file = svc.cache_dir().join(&name);
 
-        let outcome = svc.generate(&src, &cache_file, GRID_MAX_WIDTH).await;
+        let outcome = svc.generate(&src, &cache_file, GRID_MAX_WIDTH, crate::scanner::FileClass::Decodable).await;
         match outcome {
             Outcome::Ready(bytes, w, h) => {
                 assert_eq!((w, h), (256, 192)); // 640x480 -> 256x192
@@ -471,7 +498,7 @@ mod tests {
         let src = small_jpg(&dir, "tall.jpg", 480, 640);
         let svc = ThumbService::new(dir.join("cache"));
         let outcome = svc
-            .generate(&src, &dir.join("cache/tall.jpg"), GRID_MAX_WIDTH)
+            .generate(&src, &dir.join("cache/tall.jpg"), GRID_MAX_WIDTH, crate::scanner::FileClass::Decodable)
             .await;
         match outcome {
             // 480 -> 256 (x0.5333), 640 -> 341.33 -> 341 (truncated)
@@ -487,7 +514,7 @@ mod tests {
         let svc = ThumbService::new(dir.join("cache"));
         let ghost = dir.join("ghost.jpg");
         let outcome = svc
-            .generate(&ghost, &dir.join("cache/ghost.jpg"), GRID_MAX_WIDTH)
+            .generate(&ghost, &dir.join("cache/ghost.jpg"), GRID_MAX_WIDTH, crate::scanner::FileClass::Decodable)
             .await;
         match outcome {
             Outcome::Fail(e) => {

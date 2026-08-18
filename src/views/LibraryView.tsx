@@ -628,7 +628,7 @@ export function LibraryView() {
                 "Scanning in progress — watch the progress bar above."
               ) : scanSummary ? (
                 scanSummary.indexed === 0
-                  ? "The scan finished, but found no supported photos in this folder. JPG, PNG, WebP and TIFF are decoded; RAW and HEIC are indexed without a local preview. You can point at another folder with “Open folder”."
+                  ? "The scan finished, but found no supported photos in this folder. JPG, PNG, WebP and TIFF are decoded; RAW previews are rendered locally where the camera format is supported; HEIC files are indexed without a local preview. You can point at another folder with “Open folder”."
                   : "This folder no longer has indexed photographs — they may have been trashed or moved. Re-scan to pick up anything new."
               ) : (
                 "Press “Scan folder” to index every supported photo in this folder (JPG, PNG, WebP, TIFF, RAW, HEIC). Re-scans are safe: nothing is ever duplicated."
