@@ -41,7 +41,10 @@ follow-up, see LOCAL_AI.md)**.
 ## v0.3
 
 Face grouping (identity via local embeddings), eyes-open detection, people
-count, subject classification, semantic local search.
+count, **subject/scene classification (Sprint 17–18, planned — see
+SCENE_CLASSIFICATION.md: MobileNetV3-Large trained on a CC-BY Open Images
+corpus, two-tier coarse ≥95% / fine top-1, shipped as a small local ONNX
+model)**, semantic local search.
 
 ## v0.4
 
