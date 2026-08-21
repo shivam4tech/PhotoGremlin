@@ -75,7 +75,7 @@ class TokenManager:
             "client_id": self.client_id, "client_secret": self.client_secret,
             "grant_type": "client_credentials",
         }).encode()
-        req = urllib.request.Request(AUTH_TOKEN_URL, data=data, headers={"User-Agent": UA["User-Agent"]})
+        req = urllib.request.Request(AUTH_TOKEN_URL, data=data, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=30) as r:
             payload = json.loads(r.read())
         self._access = payload["access_token"]
