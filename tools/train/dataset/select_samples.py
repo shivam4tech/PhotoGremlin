@@ -36,18 +36,29 @@ def select(labels_csv: pathlib.Path, mapping: dict, cap: int) -> tuple[dict[str,
         chosen[mid] = rows
     return chosen, counts
 
-def write(out: pathlib.Path, chosen: dict, mapping: dict) -> None:
-    # ImageID -> (mid, conf): single-label, highest confidence wins
-    best: dict[str, tuple[str, float]] = {}
-    for mid, rows in chosen.items():
-        for image_id, conf in rows:
-            cur = best.get(image_id)
-            if cur is None or conf > cur[1]:
-                best[image_id] = (mid, conf)
+def write(out: pathlib.Path, chosen: dict, mapping: dict, keep_all: bool = False) -> None:
+    # Single-label mode (default): ImageID -> (mid, conf), highest confidence
+    # wins. keep_all mode: one row PER verified label — used for multi-label
+    # training where an image legitimately carries several of our classes.
     label_of = {v["mid"]: (label, v["coarse"]) for label, v in mapping.items()}
     with open(out, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["image_id", "mid", "fine", "coarse", "confidence"])
+        if keep_all:
+            rows = []
+            for mid, lst in chosen.items():
+                fine, coarse = label_of[mid]
+                for image_id, conf in lst:
+                    rows.append((image_id, mid, fine, coarse, f"{conf:.3f}"))
+            for row in sorted(rows):
+                w.writerow(row)
+            return
+        best: dict[str, tuple[str, float]] = {}
+        for mid, lst in chosen.items():
+            for image_id, conf in lst:
+                cur = best.get(image_id)
+                if cur is None or conf > cur[1]:
+                    best[image_id] = (mid, conf)
         for image_id, (mid, conf) in sorted(best.items()):
             fine, coarse = label_of[mid]
             w.writerow([image_id, mid, fine, coarse, f"{conf:.3f}"])
@@ -59,15 +70,18 @@ def main() -> None:
     ap.add_argument("--map", default="tools/train/class-map.json")
     ap.add_argument("--train-cap", type=int, default=8000)
     ap.add_argument("--val-cap", type=int, default=300)
+    ap.add_argument("--keep-all-labels", action="store_true",
+                    help="write one row per verified label (multi-label training)")
     args = ap.parse_args()
     meta, samples = pathlib.Path(args.meta), pathlib.Path(args.samples)
     samples.mkdir(parents=True, exist_ok=True)
     mapping = json.loads(pathlib.Path(args.map).read_text())
 
+    suffix = "_multi" if args.keep_all_labels else ""
     train, tc = select(meta / "oidv7-train-annotations-human-imagelabels.csv", mapping, args.train_cap)
     val, vc = select(meta / "oidv7-val-annotations-human-imagelabels.csv", mapping, args.val_cap)
-    write(samples / "train.csv", train, mapping)
-    write(samples / "val.csv", val, mapping)
+    write(samples / f"train{suffix}.csv", train, mapping, args.keep_all_labels)
+    write(samples / f"val{suffix}.csv", val, mapping, args.keep_all_labels)
 
     with open(samples / "stats.txt", "w") as f:
         f.write(f"mapped fine labels: {len(mapping)}  distinct mids: {len(set(v['mid'] for v in mapping.values()))}\n")

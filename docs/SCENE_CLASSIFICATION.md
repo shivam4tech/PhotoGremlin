@@ -132,3 +132,16 @@ per-label not per-MID, long-tail (median 108 imgs/class).
 Round 2: canonicalize one fine label per MID (130 classes), coarse per
 MID, label smoothing 0.1, 10 epochs. If coarse top-1 still < 0.80 ->
 noisy-student round (machine-labeled conf >= 0.9 pre-training).
+
+## Round 2-3 results (2026-08-21)
+
+Round 2 (label fix + smoothing): fine 41.5 / coarse 69.0 — plateau proved
+the ceiling was the single-label assumption, not bugs. Round 3 switched to
+MULTI-LABEL training (BCE over all verified labels per image,
+samples/*_multi.csv) + sqrt-balanced sampling + tail pruning (<25 imgs):
+**fine top-1 57.1%, top-5 87.7%, coarse(21) 77.1%, coarse(10 merged)
+81.6%** (`runs/20260821-181447`). Metric = prediction is one of the
+image's true labels (product-correct for tagging/filtering). Remaining
+weaknesses: urban/nature boundary, semantically ambiguous tags (city,
+house, coast, lawn). Next lever if needed: noisy-student pre-training on
+machine-labeled OI images.

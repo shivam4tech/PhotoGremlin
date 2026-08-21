@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Deep-dive evaluation for a trained two-head checkpoint.
 
+Supports both single-label and multi-label (--multilabel) checkpoints.
 Reports, on the val split:
-  - fine top-1/top-5, coarse top-1 (as trained)
-  - coarse x coarse confusion: biggest cross-group leaks
-  - accuracy under a MERGED taxonomy (sibling groups collapsed)
-  - per-fine-class report (support + accuracy)
+  - fine top-1/top-5, coarse top-1 ("correct" = prediction is one of the
+    image's verified labels in multi-label mode)
+  - accuracy under the MERGED taxonomy (sibling groups collapsed)
+  - biggest cross-group leaks
+  - weakest fine classes by recall
 
 Usage:
   tools/train/.venv/bin/python tools/train/eval_ckpt.py --checkpoint tools/train/runs/<ts>/best.pt
@@ -13,18 +15,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import json
 import pathlib
-import sys
 from collections import defaultdict
 
 import torch
 
-from train import SceneDataset, TwoHeadNet
+from train import MultiLabelDataset, SceneDataset, TwoHeadNet
 
-# Sibling coarse groups collapsed: misclassifying inside a column is a
-# near-harmless "same kind of place" mistake for filter UX.
 MERGED_GROUPS = {
     "nature": "nature", "nature_water": "nature",
     "urban": "urban",
@@ -51,6 +48,7 @@ def main() -> None:
     ck = torch.load(args.checkpoint, map_location="cpu")
     fine_classes = ck["fine_classes"]
     coarse_classes = ck["coarse_classes"]
+    multilabel = bool(ck.get("multilabel", False))
     model = TwoHeadNet(len(fine_classes), len(coarse_classes))
     model.load_state_dict(ck["model"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -59,60 +57,63 @@ def main() -> None:
 
     samples = repo / "ml-corpus/openimages/samples"
     thumbs = repo / "ml-corpus/openimages/images/thumb"
-    ds = SceneDataset(samples / "val.csv", thumbs, fine_classes, coarse_classes, train=False)
+    name = "val_multi.csv" if multilabel else "val.csv"
+    ds = MultiLabelDataset(samples / name, thumbs,
+                           {c: i for i, c in enumerate(fine_classes)},
+                           {c: i for i, c in enumerate(coarse_classes)}, train=False)
     loader = torch.utils.data.DataLoader(ds, batch_size=256, num_workers=4)
 
-    fine_ix = {c: i for i, c in enumerate(fine_classes)}
-    n = f1 = f5 = c1 = m1 = 0
-    coarse_conf = torch.zeros(len(coarse_classes), len(coarse_classes), dtype=torch.long)
-    per_class_ok = defaultdict(int)
-    per_class_n = defaultdict(int)
+    n = f1 = f5 = c1 = m_ok = 0
+    leaks: dict[tuple[str, str], int] = defaultdict(int)
+    cls_recall_n = defaultdict(int)
+    cls_recall_hit = defaultdict(int)
 
-    for images, fine, coarse in loader:
+    for images, ft, ct in loader:
         images = images.to(device)
         lf, lc = model(images)
-        pf = lf.argmax(1).cpu()
-        pc = lc.argmax(1).cpu()
+        lf, lc = lf.float().cpu(), lc.float().cpu()
+        ftrue = ft > 0.5
+        ctrue = ct > 0.5
         k5 = min(5, lf.shape[1])
-        f1 += (pf == fine).sum().item()
-        f5 += (lf.topk(k5, dim=1).indices.cpu() == fine.unsqueeze(1)).any(1).sum().item()
-        c1 += (pc == coarse).sum().item()
-        for a, b in zip(pc.tolist(), coarse.tolist()):
-            coarse_conf[a, b] += 1
-        for pred, truth in zip(pf.tolist(), fine.tolist()):
-            per_class_n[truth] += 1
-            per_class_ok[truth] += int(pred == truth)
-        n += images.size(0)
+        top1_f = lf.argmax(1)
+        top5_f = lf.topk(k5, dim=1).indices
+        pred_c = lc.argmax(1)
 
-    # merged-coarse accuracy: predicted merged == truth merged
-    ci = {c: i for i, c in enumerate(coarse_classes)}
-    ok_m = 0
-    for a, row in enumerate(coarse_conf):
-        for b, cnt in enumerate(row):
-            ma = MERGED_GROUPS.get(coarse_classes[a], "other")
-            mb = MERGED_GROUPS.get(coarse_classes[b], "other")
-            if ma == mb:
-                ok_m += cnt.item()
-    print(f"val n={n}")
+        n += images.size(0)
+        f1 += ftrue.gather(1, top1_f.unsqueeze(1)).sum().item()
+        f5 += (ftrue.gather(1, top5_f).sum(dim=1) > 0).sum().item()
+        c1 += ctrue.gather(1, pred_c.unsqueeze(1)).sum().item()
+
+        for i in range(images.size(0)):
+            pm = MERGED_GROUPS.get(coarse_classes[pred_c[i].item()], "other")
+            tms = {MERGED_GROUPS.get(coarse_classes[j], "other")
+                   for j in range(len(coarse_classes)) if ctrue[i, j]}
+            if pm in tms:
+                m_ok += 1
+            pc_name = coarse_classes[pred_c[i].item()]
+            for j in range(len(coarse_classes)):
+                if ctrue[i, j]:
+                    tc_name = coarse_classes[j]
+                    if tc_name != pc_name:
+                        leaks[(pc_name, tc_name)] += 1
+            for j in range(ft.shape[1]):
+                if ftrue[i, j]:
+                    cls_recall_n[j] += 1
+                    cls_recall_hit[j] += int(top1_f[i].item() == j)
+
+    print(f"mode={'multi' if multilabel else 'single'}-label   val n={n}")
     print(f"fine top-1 : {f1/n:.4f}   fine top-5: {f5/n:.4f}")
     print(f"coarse top-1 (21 groups): {c1/n:.4f}")
-    print(f"coarse top-1 ({len(set(MERGED_GROUPS.values()))} merged groups): {ok_m/n:.4f}")
+    print(f"coarse top-1 ({len(set(MERGED_GROUPS.values()))} merged groups): {m_ok/n:.4f}")
 
-    print("\nbiggest coarse leaks (predicted -> truth):")
-    cc = coarse_conf.clone()
-    cc.fill_diagonal_(0)
-    flat = [(cc[a, b].item(), coarse_classes[a], coarse_classes[b])
-            for a in range(len(ci)) for b in range(len(ci))]
-    for cnt, pa, tb in sorted(flat, reverse=True)[:10]:
-        if cnt:
-            same = "SAME-MERGED" if MERGED_GROUPS.get(pa) == MERGED_GROUPS.get(tb) else ""
-            print(f"  {pa:18} -> {tb:18} {cnt:4}  {same}")
+    print("\nbiggest coarse leaks (predicted -> truth-label):")
+    for (pa, tb), cnt in sorted(leaks.items(), key=lambda kv: -kv[1])[:10]:
+        same = "SAME-MERGED" if MERGED_GROUPS.get(pa) == MERGED_GROUPS.get(tb) else ""
+        print(f"  {pa:18} -> {tb:18} {cnt:4}  {same}")
 
-    print("\nworst fine classes (>=5 val imgs):")
-    rows = []
-    for i, cname in enumerate(fine_classes):
-        if per_class_n[i] >= 5:
-            rows.append((per_class_ok[i] / per_class_n[i], per_class_n[i], cname))
+    print("\nweakest fine classes by recall (n>=10):")
+    rows = [(cls_recall_hit[i] / cls_recall_n[i], cls_recall_n[i], cname)
+            for i, cname in enumerate(fine_classes) if cls_recall_n[i] >= 10]
     for acc, sup, cname in sorted(rows)[:15]:
         print(f"  {cname:24} {acc:.2f}  (n={sup})")
 

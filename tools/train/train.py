@@ -70,6 +70,59 @@ class SceneDataset(Dataset):
         img = Image.open(path).convert("RGB")
         return self.tf(img), fine, coarse
 
+class MultiLabelDataset(Dataset):
+    """Rows may repeat an image_id (one row per verified label). Targets are
+    multi-hot vectors; images whose every label was pruned are dropped."""
+
+    def __init__(self, csv_path: pathlib.Path, thumbs: pathlib.Path,
+                 fine_ix: dict[str, int], coarse_ix: dict[str, int], train: bool):
+        self.thumbs = thumbs
+        per_image: dict[str, tuple[set[int], set[int]]] = {}
+        with open(csv_path, newline="") as f:
+            next(f)
+            for image_id, _mid, fine, coarse, _conf in csv.reader(f):
+                fi, ci = fine_ix.get(fine), coarse_ix.get(coarse)
+                if fi is None or ci is None:
+                    continue
+                tgt = per_image.setdefault(image_id, (set(), set()))
+                tgt[0].add(fi)
+                tgt[1].add(ci)
+        self.ids = []
+        self.fine_targets = torch.zeros(len(per_image), len(fine_ix))
+        self.coarse_targets = torch.zeros(len(per_image), len(coarse_ix))
+        kept = 0
+        for image_id, (fs, cs) in sorted(per_image.items()):
+            p = thumbs / f"{image_id}.jpg"
+            if not p.exists():
+                continue
+            i = kept
+            kept += 1
+            self.ids.append(p)
+            self.fine_targets[i, list(fs)] = 1.0
+            self.coarse_targets[i, list(cs)] = 1.0
+        self.fine_targets = self.fine_targets[:kept]
+        self.coarse_targets = self.coarse_targets[:kept]
+        norm = transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+        if train:
+            self.tf = transforms.Compose([
+                transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
+                transforms.RandomHorizontalFlip(),
+                transforms.ColorJitter(0.2, 0.2, 0.2),
+                transforms.ToTensor(), norm,
+            ])
+        else:
+            self.tf = transforms.Compose([
+                transforms.Resize(256), transforms.CenterCrop(224),
+                transforms.ToTensor(), norm,
+            ])
+
+    def __len__(self) -> int:
+        return len(self.ids)
+
+    def __getitem__(self, i: int):
+        img = Image.open(self.ids[i]).convert("RGB")
+        return self.tf(img), self.fine_targets[i], self.coarse_targets[i]
+
 class TwoHeadNet(nn.Module):
     def __init__(self, n_fine: int, n_coarse: int):
         super().__init__()
@@ -87,19 +140,32 @@ class TwoHeadNet(nn.Module):
         return self.head_fine(x), self.head_coarse(x)
 
 @torch.no_grad()
-def evaluate(model, loader, device) -> dict[str, float]:
+def evaluate(model, loader, device, multilabel: bool) -> dict[str, float]:
     model.eval()
     n = f1 = f5 = c1 = 0
-    for images, fine, coarse in loader:
+    for batch in loader:
+        images, fine, coarse = batch
         images = images.to(device, non_blocking=True)
-        fine = fine.to(device, non_blocking=True)
-        coarse = coarse.to(device, non_blocking=True)
         with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
             lf, lc = model(images)
+        lf, lc = lf.float().cpu(), lc.float().cpu()
         k5 = min(5, lf.shape[1])
-        f1 += (lf.topk(1, dim=1).indices.squeeze(1) == fine).sum().item()
-        f5 += (lf.topk(k5, dim=1).indices == fine.unsqueeze(1)).any(1).sum().item()
-        c1 += (lc.argmax(1) == coarse).sum().item()
+        if multilabel:
+            # "correct" = the predicted class is one of the image's labels
+            ftrue = fine > 0.5
+            ctrue = coarse > 0.5
+            top1 = lf.topk(1, dim=1).indices
+            top5 = lf.topk(k5, dim=1).indices
+            f1 += ftrue.gather(1, top1).sum().item()
+            f5 += (ftrue.gather(1, top5).sum(dim=1) > 0).sum().item()
+            c1 += ctrue.gather(1, lc.argmax(dim=1, keepdim=True)).sum().item()
+        else:
+            fine = fine.to(device, non_blocking=True)
+            coarse = coarse.to(device, non_blocking=True)
+            lf, lc = lf.to(device), lc.to(device)
+            f1 += (lf.topk(1, dim=1).indices.squeeze(1) == fine).sum().item()
+            f5 += (lf.topk(k5, dim=1).indices == fine.unsqueeze(1)).any(1).sum().item()
+            c1 += (lc.argmax(1) == coarse).sum().item()
         n += images.size(0)
     return {"fine_top1": f1 / n, "fine_top5": f5 / n, "coarse_top1": c1 / n}
 
@@ -117,6 +183,9 @@ def main() -> None:
     ap.add_argument("--sample-power", type=float, default=0.5,
                     help="sampling weight exponent: 1=per-class uniform (skews coarse priors), 0=natural")
     ap.add_argument("--resume", help="path to last.pt to continue")
+    ap.add_argument("--multilabel", action="store_true",
+                    help="train on ALL verified labels per image (BCE) using "
+                         "samples/*_multi.csv instead of single-label CE")
     ap.add_argument("--limit", type=int, default=0, help="smoke-test row cap")
     args = ap.parse_args()
     repo = pathlib.Path(args.repo).resolve()
@@ -126,14 +195,16 @@ def main() -> None:
     coarse_classes = sorted({v["coarse"] for v in mapping.values()})
 
     # Prune unlearnable micro-tails before sizing the heads: classes with a
-    # handful of train images only steal probability mass from neighbors.
-    freq: dict[str, int] = defaultdict(int)
-    with open(repo / "ml-corpus/openimages/samples/train.csv", newline="") as f:
-        next(f)
-        for row in csv.reader(f):
-            if len(row) >= 3:
-                freq[row[2]] += 1
-    dropped = [c for c in fine_classes if freq.get(c, 0) < args.min_class_train]
+    # handful of downloaded images only steal probability mass from neighbors.
+    # Count ON-DISK images (the CSV lists pre-license-filter samples).
+    ds_dir = repo / "ml-corpus/dataset/train"
+    disk_freq: dict[str, int] = defaultdict(int)
+    if ds_dir.exists():
+        for p in ds_dir.rglob("*.jpg"):
+            disk_freq[p.parent.name] += 1
+    def disk_count(label: str) -> int:
+        return disk_freq.get(label.replace(" ", "_"), 0)
+    dropped = [c for c in fine_classes if disk_count(c) < args.min_class_train]
     if dropped and not args.resume:
         fine_classes = [c for c in fine_classes if c not in dropped]
         print(f"pruned {len(dropped)} tail classes (<{args.min_class_train} imgs): {sorted(dropped)}")
@@ -144,8 +215,16 @@ def main() -> None:
 
     samples = repo / "ml-corpus/openimages/samples"
     thumbs = repo / "ml-corpus/openimages/images/thumb"
-    tr_ds = SceneDataset(samples / "train.csv", thumbs, fine_classes, coarse_classes, train=True)
-    va_ds = SceneDataset(samples / "val.csv", thumbs, fine_classes, coarse_classes, train=False)
+    if args.multilabel:
+        tr_ds = MultiLabelDataset(samples / "train_multi.csv", thumbs,
+                                  {c: i for i, c in enumerate(fine_classes)},
+                                  {c: i for i, c in enumerate(coarse_classes)}, train=True)
+        va_ds = MultiLabelDataset(samples / "val_multi.csv", thumbs,
+                                  {c: i for i, c in enumerate(fine_classes)},
+                                  {c: i for i, c in enumerate(coarse_classes)}, train=False)
+    else:
+        tr_ds = SceneDataset(samples / "train.csv", thumbs, fine_classes, coarse_classes, train=True)
+        va_ds = SceneDataset(samples / "val.csv", thumbs, fine_classes, coarse_classes, train=False)
     if args.limit:
         tr_ds.rows = tr_ds.rows[: args.limit]
         va_ds.rows = va_ds.rows[: max(200, args.limit // 10)]
@@ -155,10 +234,16 @@ def main() -> None:
     # Long-tail: sample by 1/count**power. Power 1.0 = per-class uniform
     # (oversamples groups with many tiny classes and skews coarse priors);
     # 0.5 softens the head-tail trade while keeping coarse priors sane.
-    counts: dict[int, int] = {}
-    for _, fine, _ in tr_ds.rows:
-        counts[fine] = counts.get(fine, 0) + 1
-    weights = [1.0 / (counts[fine] ** args.sample_power) for _, fine, _ in tr_ds.rows]
+    if args.multilabel:
+        counts = torch.bincount(tr_ds.fine_targets.argmax(1), minlength=len(fine_classes)).clamp(min=1)
+        weights = torch.tensor(
+            [1.0 / (counts[tr_ds.fine_targets[i].argmax()].item() ** args.sample_power)
+             for i in range(len(tr_ds))])
+    else:
+        counts: dict[int, int] = {}
+        for _, fine, _ in tr_ds.rows:
+            counts[fine] = counts.get(fine, 0) + 1
+        weights = [1.0 / (counts[fine] ** args.sample_power) for _, fine, _ in tr_ds.rows]
     sampler = torch.utils.data.WeightedRandomSampler(
         weights, num_samples=len(tr_ds), replacement=True)
     tr = DataLoader(tr_ds, batch_size=args.batch_size, sampler=sampler, **common)
@@ -191,6 +276,7 @@ def main() -> None:
         log.write("epoch,train_loss,fine_top1,fine_top5,coarse_top1,lr,secs\n")
 
     ce = nn.CrossEntropyLoss(label_smoothing=0.1)
+    bce = nn.BCEWithLogitsLoss()
     for epoch in range(start_epoch, args.epochs):
         model.train()
         t0, seen, loss_sum = time.time(), 0, 0.0
@@ -201,7 +287,10 @@ def main() -> None:
             opt.zero_grad(set_to_none=True)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 lf, lc = model(images)
-                loss = ce(lf, fine) + ce(lc, coarse)
+                if args.multilabel:
+                    loss = bce(lf, fine) + bce(lc, coarse)
+                else:
+                    loss = ce(lf, fine) + ce(lc, coarse)
             loss.backward()
             opt.step()
             loss_sum += loss.item() * images.size(0)
@@ -209,7 +298,7 @@ def main() -> None:
             if bi % 100 == 0:
                 print(f"  e{epoch} {bi}/{len(tr)} loss={loss.item():.3f}", flush=True)
         sched.step()
-        m = evaluate(model, va, device)
+        m = evaluate(model, va, device, args.multilabel)
         lr = sched.get_last_lr()[0]
         line = f"{epoch},{loss_sum/max(seen,1):.4f},{m['fine_top1']:.4f},{m['fine_top5']:.4f},{m['coarse_top1']:.4f},{lr:.2e},{time.time()-t0:.0f}"
         print(line, flush=True)
@@ -219,6 +308,7 @@ def main() -> None:
             "model": model.state_dict(), "opt": opt.state_dict(),
             "sched": sched.state_dict(), "epoch": epoch, "best": best,
             "fine_classes": fine_classes, "coarse_classes": coarse_classes,
+            "multilabel": args.multilabel,
         }
         torch.save(state, out / "last.pt")
         if m["fine_top1"] > best:
