@@ -1,0 +1,47 @@
+# Data sources for scene classification (Sprint 17-v2)
+
+Every source below is usable in a proprietary commercial product. Provenance
+(author, license, source URL) is recorded per image at download time and kept
+in the local corpus (never pushed); this page documents the aggregate.
+
+| Tier | Source | License filter | Labels | Volume target | Role |
+|---|---|---|---|---|---|
+| D | Open Images v7 human-verified | CC-BY 2.0 / PD URLs only | multi-label, conf >= 0.7 | ~62k | clean fine-tune + val |
+| A | Open Images v7 machine-generated (`oidv7-train-annotations-machine-imagelabels.csv`, 7.3 GB) | same image pool | machine, conf >= 0.9 | ~350-400k | noisy pre-train |
+| B | Openverse API (Flickr/Wikimedia/etc.) | `license=by,cc0,pdm` + `license_type=commercial` | query-tagged (class x region matrix) | 60-120k | demographic balance |
+| C | Optional manual adds: Unsplash Lite Dataset, Nappy.co | their free licenses | keywords/manual | optional | people-class balance |
+
+## Region matrix (Tier B)
+
+`openverse_crawl.py` queries every class name plus `{region} {class}` for a
+rotating sample of 8 of these 30 regions per class: indian, nigerian,
+ethiopian, kenyan, egyptian, moroccan, chinese, japanese, korean, vietnamese,
+thai, indonesian, filipino, turkish, iranian, arab, israeli, russian, polish,
+greek, spanish, portuguese, italian, mexican, brazilian, peruvian, colombian,
+argentinian, cuban, nepalese.
+
+Purpose: counter the Western skew of Flickr-sourced corpora — weddings,
+churches, markets and streets exist everywhere and the model must see that.
+10% of Tier B rows are held out (`corpus_v2/audit.csv`) as a region-bias
+audit set; `eval_ckpt.py --gates` fails the run if region accuracy deltas
+are too large.
+
+## Rules
+
+- No share-alike licenses (CC-BY-SA excluded everywhere).
+- No research-only datasets (Places365/CEW/RT-BENE/KonIQ etc. stay out).
+- Corpora/checkpoints/provenance never enter git; scripts and class-map do.
+- Attribution ships as docs notes per bundled model artifact.
+
+## Commands
+
+```
+bash tools/train/dataset/collect_v2.sh          # tiers A+B+merge, resumable
+# stage 1: noisy pre-train
+tools/train/.venv/bin/python tools/train/train.py --corpus ml-corpus/corpus_v2/train.csv --epochs 5 --mixup 0.2
+# stage 2: clean fine-tune
+tools/train/.venv/bin/python tools/train/train.py --corpus ml-corpus/corpus_v2/train_clean.csv --init-from tools/train/runs/<ts>/last.pt --epochs 10
+# calibrate + evaluate gates
+tools/train/.venv/bin/python tools/train/calibrate.py --checkpoint tools/train/runs/<ts2>/best.pt
+tools/train/.venv/bin/python tools/train/eval_ckpt.py --checkpoint tools/train/runs/<ts2>/best.pt --gates
+```

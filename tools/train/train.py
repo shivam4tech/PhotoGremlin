@@ -26,7 +26,7 @@ from collections import defaultdict
 
 import torch
 import torch.nn as nn
-from PIL import Image
+from PIL import Image, ImageFilter
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models, transforms
 
@@ -123,6 +123,93 @@ class MultiLabelDataset(Dataset):
         img = Image.open(self.ids[i]).convert("RGB")
         return self.tf(img), self.fine_targets[i], self.coarse_targets[i]
 
+class CorpusDataset(Dataset):
+    """corpus_v2/train.csv: path,fine,confidence,source (rows may repeat a
+    path with different labels -> grouped into multi-hot targets)."""
+
+    def __init__(self, csv_path: pathlib.Path, base: pathlib.Path,
+                 fine_ix: dict[str, int], coarse_ix: dict[str, int], train: bool):
+        per_image: dict[str, tuple[set[int], set[int]]] = {}
+        with open(csv_path, newline="") as f:
+            next(f)
+            for path, fine, _conf, _source in csv.reader(f):
+                fi, ci = fine_ix.get(fine), coarse_ix.get(coarse_of_fine(fine))
+                if fi is None or ci is None:
+                    continue
+                tgt = per_image.setdefault(path, (set(), set()))
+                tgt[0].add(fi)
+                tgt[1].add(ci)
+        self.paths = []
+        self.fine_targets = torch.zeros(len(per_image), len(fine_ix))
+        self.coarse_targets = torch.zeros(len(per_image), len(coarse_ix))
+        kept = 0
+        for rel, (fs, cs) in sorted(per_image.items()):
+            p = base / rel
+            if not p.exists():
+                continue
+            i = kept
+            kept += 1
+            self.paths.append(p)
+            self.fine_targets[i, list(fs)] = 1.0
+            self.coarse_targets[i, list(cs)] = 1.0
+        self.fine_targets = self.fine_targets[:kept]
+        self.coarse_targets = self.coarse_targets[:kept]
+        self.tf = build_transform(train)
+
+    def __len__(self) -> int:
+        return len(self.paths)
+
+    def __getitem__(self, i: int):
+        img = Image.open(self.paths[i]).convert("RGB")
+        return self.tf(img), self.fine_targets[i], self.coarse_targets[i]
+
+def coarse_of_fine(fine: str) -> str:
+    global _COARSE_OF_FINE
+    return _COARSE_OF_FINE.get(fine, "other")
+
+_COARSE_OF_FINE: dict[str, str] = {}
+
+def build_transform(train: bool):
+    norm = transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+    if not train:
+        return transforms.Compose([
+            transforms.Resize(256), transforms.CenterCrop(224),
+            transforms.ToTensor(), norm,
+        ])
+    layers: list = [
+        transforms.RandomResizedCrop(224, scale=(0.6, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandAugment(num_ops=2, magnitude=7),
+        RandomRobustness(p=0.25),
+        transforms.ToTensor(), norm,
+    ]
+    return transforms.Compose(layers)
+
+class RandomRobustness:
+    """Edge-case hardening: occasionally darken, blur or JPEG-crush the crop."""
+
+    def __init__(self, p: float = 0.25):
+        self.p = p
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        r = random.random()
+        if r > self.p:
+            return img
+        kind = random.choice(["dark", "blur", "jpeg", "lowres"])
+        if kind == "dark":
+            return transforms.functional.adjust_brightness(img, random.uniform(0.35, 0.75))
+        if kind == "blur":
+            return img.filter(ImageFilter.GaussianBlur(random.uniform(1.0, 3.0)))
+        if kind == "jpeg":
+            import io
+            buf = io.BytesIO()
+            img.save(buf, "JPEG", quality=random.randint(8, 30))
+            buf.seek(0)
+            return Image.open(buf).convert("RGB")
+        w, h = img.size
+        small = img.resize((max(24, w // 4), max(24, h // 4)), Image.BILINEAR)
+        return small.resize((w, h), Image.BILINEAR)
+
 class TwoHeadNet(nn.Module):
     def __init__(self, n_fine: int, n_coarse: int):
         super().__init__()
@@ -183,6 +270,16 @@ def main() -> None:
     ap.add_argument("--sample-power", type=float, default=0.5,
                     help="sampling weight exponent: 1=per-class uniform (skews coarse priors), 0=natural")
     ap.add_argument("--resume", help="path to last.pt to continue")
+    ap.add_argument("--init-from", help="checkpoint to initialize weights from "
+                    "(two-stage: pre-trained backbone, fresh optimizer)")
+    ap.add_argument("--corpus", help="corpus_v2 train.csv -> CorpusDataset "
+                    "(multi-label BCE, robustness augs)")
+    ap.add_argument("--val-csv", help="val csv for --corpus mode "
+                    "(default ml-corpus/corpus_v2/val.csv)")
+    ap.add_argument("--mixup", type=float, default=0.0,
+                    help="Beta(alpha,alpha) for mixup in multi-label mode (e.g. 0.2)")
+    ap.add_argument("--ema-decay", type=float, default=0.999,
+                    help="0 disables EMA; otherwise eval+best use EMA weights")
     ap.add_argument("--multilabel", action="store_true",
                     help="train on ALL verified labels per image (BCE) using "
                          "samples/*_multi.csv instead of single-label CE")
@@ -215,26 +312,42 @@ def main() -> None:
 
     samples = repo / "ml-corpus/openimages/samples"
     thumbs = repo / "ml-corpus/openimages/images/thumb"
-    if args.multilabel:
+    global _COARSE_OF_FINE
+    _COARSE_OF_FINE = {k: v["coarse"] for k, v in mapping.items()}
+    fine_ix = {c: i for i, c in enumerate(fine_classes)}
+    coarse_ix = {c: i for i, c in enumerate(coarse_classes)}
+    multilabel_mode = args.multilabel or bool(args.corpus)
+
+    if args.corpus:
+        base = repo / "ml-corpus"
+        val_csv = repo / (args.val_csv or "ml-corpus/corpus_v2/val.csv")
+        tr_ds = CorpusDataset(repo / args.corpus, base, fine_ix, coarse_ix, train=True)
+        va_ds = CorpusDataset(val_csv, base, fine_ix, coarse_ix, train=False)
+    elif multilabel_mode:
         tr_ds = MultiLabelDataset(samples / "train_multi.csv", thumbs,
-                                  {c: i for i, c in enumerate(fine_classes)},
-                                  {c: i for i, c in enumerate(coarse_classes)}, train=True)
+                                  fine_ix, coarse_ix, train=True)
         va_ds = MultiLabelDataset(samples / "val_multi.csv", thumbs,
-                                  {c: i for i, c in enumerate(fine_classes)},
-                                  {c: i for i, c in enumerate(coarse_classes)}, train=False)
+                                  fine_ix, coarse_ix, train=False)
     else:
         tr_ds = SceneDataset(samples / "train.csv", thumbs, fine_classes, coarse_classes, train=True)
         va_ds = SceneDataset(samples / "val.csv", thumbs, fine_classes, coarse_classes, train=False)
     if args.limit:
-        tr_ds.rows = tr_ds.rows[: args.limit]
-        va_ds.rows = va_ds.rows[: max(200, args.limit // 10)]
+        def _clip(ds, n):
+            if hasattr(ds, "rows"):
+                ds.rows = ds.rows[:n]
+            else:
+                ds.paths = ds.paths[:n]
+                ds.fine_targets = ds.fine_targets[:n]
+                ds.coarse_targets = ds.coarse_targets[:n]
+        _clip(tr_ds, args.limit)
+        _clip(va_ds, max(200, args.limit // 10))
     print(f"dataset: train={len(tr_ds)} val={len(va_ds)}")
 
     common = dict(num_workers=args.workers, pin_memory=True, persistent_workers=args.workers > 0)
     # Long-tail: sample by 1/count**power. Power 1.0 = per-class uniform
     # (oversamples groups with many tiny classes and skews coarse priors);
     # 0.5 softens the head-tail trade while keeping coarse priors sane.
-    if args.multilabel:
+    if multilabel_mode:
         counts = torch.bincount(tr_ds.fine_targets.argmax(1), minlength=len(fine_classes)).clamp(min=1)
         weights = torch.tensor(
             [1.0 / (counts[tr_ds.fine_targets[i].argmax()].item() ** args.sample_power)
@@ -251,6 +364,10 @@ def main() -> None:
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = TwoHeadNet(len(fine_classes), len(coarse_classes)).to(device)
+    if args.init_from:
+        ck0 = torch.load(args.init_from, map_location="cpu")
+        model.load_state_dict(ck0["model"])
+        print(f"weights initialized from {args.init_from} (its epoch: {ck0['epoch']})")
 
     backbone_params = list(model.features.parameters()) + list(model.pool.parameters())
     head_params = list(model.head_fine.parameters()) + list(model.head_coarse.parameters())
@@ -277,6 +394,27 @@ def main() -> None:
 
     ce = nn.CrossEntropyLoss(label_smoothing=0.1)
     bce = nn.BCEWithLogitsLoss()
+
+    ema = None
+    if args.ema_decay > 0:
+        ema = {k: v.detach().clone().float().cpu()
+               for k, v in model.state_dict().items()}
+
+    def ema_update():
+        with torch.no_grad():
+            d = args.ema_decay
+            sd = model.state_dict()
+            for k, v in ema.items():
+                if v.dtype.is_floating_point:
+                    v.mul_(d).add_(sd[k].detach().float().cpu(), alpha=1 - d)
+                else:
+                    v.copy_(sd[k].cpu())
+
+    def swap_ema_in():
+        backup = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        model.load_state_dict({k: v.to(device) for k, v in ema.items()})
+        return backup
+
     for epoch in range(start_epoch, args.epochs):
         model.train()
         t0, seen, loss_sum = time.time(), 0, 0.0
@@ -285,20 +423,32 @@ def main() -> None:
             fine = fine.to(device, non_blocking=True)
             coarse = coarse.to(device, non_blocking=True)
             opt.zero_grad(set_to_none=True)
+            use_mix = multilabel_mode and args.mixup > 0 and random.random() < 0.5
+            if use_mix:
+                lam = float(torch.distributions.Beta(args.mixup, args.mixup).sample())
+                perm = torch.randperm(images.size(0), device=images.device)
+                images = lam * images + (1 - lam) * images[perm]
+                fine = lam * fine + (1 - lam) * fine[perm]
+                coarse = lam * coarse + (1 - lam) * coarse[perm]
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device.type == "cuda"):
                 lf, lc = model(images)
-                if args.multilabel:
+                if multilabel_mode:
                     loss = bce(lf, fine) + bce(lc, coarse)
                 else:
                     loss = ce(lf, fine) + ce(lc, coarse)
             loss.backward()
             opt.step()
+            if ema is not None:
+                ema_update()
             loss_sum += loss.item() * images.size(0)
             seen += images.size(0)
             if bi % 100 == 0:
                 print(f"  e{epoch} {bi}/{len(tr)} loss={loss.item():.3f}", flush=True)
         sched.step()
-        m = evaluate(model, va, device, args.multilabel)
+        backup = swap_ema_in() if ema is not None else None
+        m = evaluate(model, va, device, multilabel_mode)
+        if backup is not None:
+            model.load_state_dict(backup)
         lr = sched.get_last_lr()[0]
         line = f"{epoch},{loss_sum/max(seen,1):.4f},{m['fine_top1']:.4f},{m['fine_top5']:.4f},{m['coarse_top1']:.4f},{lr:.2e},{time.time()-t0:.0f}"
         print(line, flush=True)
@@ -308,8 +458,10 @@ def main() -> None:
             "model": model.state_dict(), "opt": opt.state_dict(),
             "sched": sched.state_dict(), "epoch": epoch, "best": best,
             "fine_classes": fine_classes, "coarse_classes": coarse_classes,
-            "multilabel": args.multilabel,
+            "multilabel": multilabel_mode,
         }
+        if ema is not None:
+            state["ema"] = {k: v.clone() for k, v in ema.items()}
         torch.save(state, out / "last.pt")
         if m["fine_top1"] > best:
             best = m["fine_top1"]

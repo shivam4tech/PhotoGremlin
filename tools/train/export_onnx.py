@@ -75,7 +75,7 @@ def main() -> None:
     sys.path.insert(0, str(repo / "tools/train"))
     from train import TwoHeadNet
     model = TwoHeadNet(len(fine_classes), len(coarse_classes))
-    model.load_state_dict(ck["model"])
+    model.load_state_dict(ck.get("ema") or ck["model"])
     model.eval()
 
     runs = ck_path.parent

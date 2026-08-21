@@ -15,6 +15,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 from collections import defaultdict
 
@@ -42,6 +43,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--checkpoint", required=True)
     ap.add_argument("--repo", default=".")
+    ap.add_argument("--gates", action="store_true",
+                    help="print PASS/FAIL against the product definition-of-done")
     args = ap.parse_args()
     repo = pathlib.Path(args.repo).resolve()
 
@@ -116,6 +119,65 @@ def main() -> None:
             for i, cname in enumerate(fine_classes) if cls_recall_n[i] >= 10]
     for acc, sup, cname in sorted(rows)[:15]:
         print(f"  {cname:24} {acc:.2f}  (n={sup})")
+
+    # ---- region-bias audit (openverse held-out slice) ----------------------
+    audit_csv = repo / "ml-corpus/corpus_v2/audit.csv"
+    if audit_csv.exists():
+        import csv as _csv
+        from PIL import Image
+
+        mapping = json.loads((repo / "tools/train/class-map.json").read_text())
+        coarse_of_fine = {k: v["coarse"] for k, v in mapping.items()}
+        REGIONS = {"indian", "nigerian", "ethiopian", "kenyan", "egyptian",
+                   "moroccan", "chinese", "japanese", "korean", "vietnamese",
+                   "thai", "indonesian", "filipino", "turkish", "iranian",
+                   "arab", "israeli", "russian", "polish", "greek", "spanish",
+                   "portuguese", "italian", "mexican", "brazilian", "peruvian",
+                   "colombian", "argentinian", "cuban", "nepalese"}
+        per_region: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+        with open(audit_csv, newline="") as f:
+            next(f)
+            for path, fine, region_query in _csv.reader(f):
+                if fine not in coarse_of_fine:
+                    continue
+                p = repo / "ml-corpus" / path
+                if not p.exists():
+                    continue
+                first = (region_query or "").split(" ")[0]
+                region = first if first in REGIONS else "global"
+                x = ds.tf(Image.open(p).convert("RGB")).unsqueeze(0).to(device)
+                lf, lc = model(x)
+                pred_c = int(lc.argmax(1).item())
+                per_region[region][1] += 1
+                if coarse_classes[pred_c] == coarse_of_fine[fine]:
+                    per_region[region][0] += 1
+        print("\nregion audit (coarse strict top-1 on openverse holdout):")
+        rates = {}
+        for region, (ok, tot) in sorted(per_region.items(), key=lambda kv: -kv[1][1]):
+            rate = ok / max(tot, 1)
+            rates[region] = rate
+            print(f"  {region:12} {rate:.3f}  (n={tot})")
+        if len(rates) >= 2:
+            vals = list(rates.values())
+            print(f"  region delta: {max(vals)-min(vals):.3f}")
+
+    if args.gates:
+        print("\n==== GATES ====")
+        gates = [
+            ("fine top-5 >= 0.95", f5 / n >= 0.95),
+        ]
+        for name, passed in gates:
+            print(f"  [{'PASS' if passed else 'FAIL'}] {name}")
+        print(f"  [{'PASS' if m_ok / n >= 0.90 else 'FAIL'}] merged-coarse >= 0.90 "
+              f"(got {m_ok / n:.4f}; see line above)")
+        calib = pathlib.Path(args.checkpoint).parent / "calibration.json"
+        if calib.exists():
+            cj = json.loads(calib.read_text())
+            passed = cj.get("precision_at_tau", 0) >= 0.90
+            print(f"  [{'PASS' if passed else 'FAIL'}] calibrated tag precision >= 0.90 "
+                  f"(got {cj.get('precision_at_tau')})")
+        else:
+            print("  [SKIP ] calibrated tag precision — run calibrate.py first")
 
 if __name__ == "__main__":
     main()
