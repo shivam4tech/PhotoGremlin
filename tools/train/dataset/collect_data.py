@@ -23,7 +23,7 @@ import sys
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-REPO = HERE.parent.parent
+REPO = HERE.parent.parent.parent
 
 STEPS = [
     ("metadata", [HERE / "download_metadata.py"]),
