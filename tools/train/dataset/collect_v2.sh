@@ -3,6 +3,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."   # repo root
 
+# Openverse credentials (registered app); file is outside the repo, chmod 600
+[ -f "$HOME/.config/photogremlin/openverse.env" ] && . "$HOME/.config/photogremlin/openverse.env"
+
 PY="${PYTHON:-tools/train/.venv/bin/python}"
 if [ ! -x "$PY" ]; then PY="python3"; fi
 

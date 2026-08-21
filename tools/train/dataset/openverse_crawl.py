@@ -36,6 +36,90 @@ import urllib.request
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 API = "https://api.openverse.org/v1/images/"
+AUTH_TOKEN_URL = "https://api.openverse.org/v1/auth_tokens/token/"
+UA = "photogremlin-dataset/0.2"
+
+class TokenManager:
+    """Openverse OAuth2 client-credentials flow.
+
+    Access tokens expire (~12h); this fetches one lazily and re-fetches on
+    demand, caching to disk so re-runs reuse a still-valid token.
+    Falls back to a static OPENVERSE_TOKEN if credentials are not provided.
+    """
+
+    def __init__(self, client_id: str | None, client_secret: str | None,
+                 static_token: str | None, cache_path: pathlib.Path):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.static = static_token
+        self.cache_path = cache_path
+        self._access: str | None = None
+
+    def bearer(self) -> str | None:
+        if self.static:
+            return self.static
+        if self._access:
+            return self._access
+        cache = {}
+        if self.cache_path.exists():
+            try:
+                cache = json.loads(self.cache_path.read_text())
+                if cache.get("expires_at", 0) - 600 > time.time():
+                    self._access = cache["access_token"]
+                    return self._access
+            except Exception:
+                pass
+        if not (self.client_id and self.client_secret):
+            return None
+        data = urllib.parse.urlencode({
+            "client_id": self.client_id, "client_secret": self.client_secret,
+            "grant_type": "client_credentials",
+        }).encode()
+        req = urllib.request.Request(AUTH_TOKEN_URL, data=data, headers={"User-Agent": UA["User-Agent"]})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            payload = json.loads(r.read())
+        self._access = payload["access_token"]
+        expires_in = int(payload.get("expires_in", 43200))
+        self.cache_path.write_text(json.dumps({
+            "access_token": self._access,
+            "expires_at": time.time() + expires_in,
+        }))
+        return self._access
+
+    def invalidate(self) -> None:
+        self._access = None
+        if self.cache_path.exists():
+            self.cache_path.unlink()
+
+def api_get(url: str, auth: TokenManager | None, timeout: int = 60) -> dict:
+    last_err = None
+    refreshed = False
+    for attempt in range(5):
+        headers = {"User-Agent": UA}
+        if auth is not None:
+            bearer = auth.bearer()
+            if bearer:
+                headers["Authorization"] = f"Bearer {bearer}"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            last_err = e
+            if e.code == 401 and auth is not None and not refreshed:
+                auth.invalidate()
+                refreshed = True
+                continue
+            if e.code in (429, 502, 503):
+                wait = min(60 * (attempt + 1), 300)
+                print(f"    {e.code}; backing off {wait}s", flush=True)
+                time.sleep(wait)
+            else:
+                raise
+        except Exception as e:  # transient network
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(f"openverse query failed after retries: {last_err}")
 REGIONS = [
     "indian", "nigerian", "ethiopian", "kenyan", "egyptian", "moroccan",
     "chinese", "japanese", "korean", "vietnamese", "thai", "indonesian",
@@ -57,30 +141,7 @@ def queries_for(classes: list[str]) -> list[tuple[str, str]]:
             out.append((cls, f"{region} {base}"))
     return out
 
-def api_get(url: str, token: str | None, timeout: int = 60) -> dict:
-    headers = {"User-Agent": "photogremlin-dataset/0.2"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    req = urllib.request.Request(url, headers=headers)
-    last_err = None
-    for attempt in range(5):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read())
-        except urllib.error.HTTPError as e:
-            last_err = e
-            if e.code in (429, 502, 503):
-                wait = min(60 * (attempt + 1), 300)
-                print(f"    {e.code}; backing off {wait}s", flush=True)
-                time.sleep(wait)
-            else:
-                raise
-        except Exception as e:  # transient network
-            last_err = e
-            time.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"openverse query failed after retries: {last_err}")
-
-def crawl_metadata(args, classes: list[str], token: str | None) -> pathlib.Path:
+def crawl_metadata(args, classes: list[str], auth) -> pathlib.Path:
     cache_dir = args.repo / "ml-corpus/openverse/cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     targets_path = args.repo / "ml-corpus/openverse/targets.csv"
@@ -113,7 +174,7 @@ def crawl_metadata(args, classes: list[str], token: str | None) -> pathlib.Path:
                     "license_type": "commercial", "page_size": 50, "page": page,
                 })
                 try:
-                    data = api_get(f"{API}?{params}", token)
+                    data = api_get(f"{API}?{params}", auth)
                 except RuntimeError as e:
                     print(f"    giving up on '{query}' page {page}: {e}", flush=True)
                     break
@@ -224,12 +285,20 @@ def main() -> None:
     # per-query budget keeps total near --per-class (1 base + 8 region queries)
     args.per_query = max(20, args.per_class // 9)
 
-    token = os.environ.get("OPENVERSE_TOKEN")
-    if not token:
-        print("WARNING: OPENVERSE_TOKEN not set — running ANONYMOUS (very slow).", flush=True)
+    auth = TokenManager(
+        os.environ.get("OPENVERSE_CLIENT_ID"),
+        os.environ.get("OPENVERSE_CLIENT_SECRET"),
+        os.environ.get("OPENVERSE_TOKEN"),   # legacy static token still honored
+        args.repo / "ml-corpus/openverse/.token.json",
+    )
+    if not (auth.client_id and auth.client_secret) and not auth.static:
+        print("WARNING: OPENVERSE_CLIENT_ID/SECRET not set — running ANONYMOUS "
+              "(heavily rate-limited; register at api.openverse.org).", flush=True)
+    else:
+        print(f"auth: {'static token' if auth.static else 'client credentials'}", flush=True)
 
     if not args.download_only:
-        targets = crawl_metadata(args, classes, token)
+        targets = crawl_metadata(args, classes, auth)
         print(f"targets: {targets}")
     if not args.metadata_only:
         download_targets(args, args.repo / "ml-corpus/openverse/targets.csv")
