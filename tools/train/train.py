@@ -131,7 +131,15 @@ def main() -> None:
     print(f"dataset: train={len(tr_ds)} val={len(va_ds)}")
 
     common = dict(num_workers=args.workers, pin_memory=True, persistent_workers=args.workers > 0)
-    tr = DataLoader(tr_ds, batch_size=args.batch_size, shuffle=True, drop_last=True, **common)
+    # Long-tail fix: sample inversely to fine-class frequency so head classes
+    # (5k+ imgs) don't drown tail classes (~10-100 imgs).
+    counts: dict[int, int] = {}
+    for _, fine, _ in tr_ds.rows:
+        counts[fine] = counts.get(fine, 0) + 1
+    weights = [1.0 / counts[fine] for _, fine, _ in tr_ds.rows]
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights, num_samples=len(tr_ds), replacement=True)
+    tr = DataLoader(tr_ds, batch_size=args.batch_size, sampler=sampler, **common)
     va = DataLoader(va_ds, batch_size=args.batch_size, shuffle=False, **common)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
