@@ -22,6 +22,7 @@ import json
 import pathlib
 import random
 import time
+from collections import defaultdict
 
 import torch
 import torch.nn as nn
@@ -111,6 +112,10 @@ def main() -> None:
     ap.add_argument("--lr-backbone", type=float, default=3e-4)
     ap.add_argument("--lr-heads", type=float, default=3e-3)
     ap.add_argument("--weight-decay", type=float, default=1e-4)
+    ap.add_argument("--min-class-train", type=int, default=25,
+                    help="drop fine classes with fewer train images (unlearnable tails)")
+    ap.add_argument("--sample-power", type=float, default=0.5,
+                    help="sampling weight exponent: 1=per-class uniform (skews coarse priors), 0=natural")
     ap.add_argument("--resume", help="path to last.pt to continue")
     ap.add_argument("--limit", type=int, default=0, help="smoke-test row cap")
     args = ap.parse_args()
@@ -119,6 +124,22 @@ def main() -> None:
     mapping = json.loads((repo / "tools/train/class-map.json").read_text())
     fine_classes = sorted(mapping)                                   # places labels
     coarse_classes = sorted({v["coarse"] for v in mapping.values()})
+
+    # Prune unlearnable micro-tails before sizing the heads: classes with a
+    # handful of train images only steal probability mass from neighbors.
+    freq: dict[str, int] = defaultdict(int)
+    with open(repo / "ml-corpus/openimages/samples/train.csv", newline="") as f:
+        next(f)
+        for row in csv.reader(f):
+            if len(row) >= 3:
+                freq[row[2]] += 1
+    dropped = [c for c in fine_classes if freq.get(c, 0) < args.min_class_train]
+    if dropped and not args.resume:
+        fine_classes = [c for c in fine_classes if c not in dropped]
+        print(f"pruned {len(dropped)} tail classes (<{args.min_class_train} imgs): {sorted(dropped)}")
+    elif dropped:
+        print(f"resume: keeping all {len(fine_classes)} classes (head size must match checkpoint)")
+
     print(f"classes: fine={len(fine_classes)} coarse={len(coarse_classes)}")
 
     samples = repo / "ml-corpus/openimages/samples"
@@ -131,12 +152,13 @@ def main() -> None:
     print(f"dataset: train={len(tr_ds)} val={len(va_ds)}")
 
     common = dict(num_workers=args.workers, pin_memory=True, persistent_workers=args.workers > 0)
-    # Long-tail fix: sample inversely to fine-class frequency so head classes
-    # (5k+ imgs) don't drown tail classes (~10-100 imgs).
+    # Long-tail: sample by 1/count**power. Power 1.0 = per-class uniform
+    # (oversamples groups with many tiny classes and skews coarse priors);
+    # 0.5 softens the head-tail trade while keeping coarse priors sane.
     counts: dict[int, int] = {}
     for _, fine, _ in tr_ds.rows:
         counts[fine] = counts.get(fine, 0) + 1
-    weights = [1.0 / counts[fine] for _, fine, _ in tr_ds.rows]
+    weights = [1.0 / (counts[fine] ** args.sample_power) for _, fine, _ in tr_ds.rows]
     sampler = torch.utils.data.WeightedRandomSampler(
         weights, num_samples=len(tr_ds), replacement=True)
     tr = DataLoader(tr_ds, batch_size=args.batch_size, sampler=sampler, **common)
