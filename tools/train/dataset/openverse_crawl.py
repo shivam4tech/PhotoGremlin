@@ -110,7 +110,7 @@ def api_get(url: str, auth: TokenManager | None, timeout: int = 60) -> dict:
                 auth.invalidate()
                 refreshed = True
                 continue
-            if e.code in (429, 502, 503):
+            if e.code in (429, 500, 502, 503, 504):
                 wait = min(60 * (attempt + 1), 300)
                 print(f"    {e.code}; backing off {wait}s", flush=True)
                 time.sleep(wait)
@@ -271,7 +271,7 @@ def download_targets(args, targets_path: pathlib.Path) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=".")
-    ap.add_argument("--per-class", type=int, default=600,
+    ap.add_argument("--per-class", type=int, default=1500,
                     help="candidate budget per fine class (all its queries combined)")
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--delay", type=float, default=1.2, help="seconds between API pages")

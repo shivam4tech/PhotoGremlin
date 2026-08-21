@@ -7,8 +7,8 @@ in the local corpus (never pushed); this page documents the aggregate.
 | Tier | Source | License filter | Labels | Volume target | Role |
 |---|---|---|---|---|---|
 | D | Open Images v7 human-verified | CC-BY 2.0 / PD URLs only | multi-label, conf >= 0.7 | ~62k | clean fine-tune + val |
-| A | Open Images v7 machine-generated (`oidv7-train-annotations-machine-imagelabels.csv`, 7.3 GB) | same image pool | machine, conf >= 0.9 | ~350-400k | noisy pre-train |
-| B | Openverse API (Flickr/Wikimedia/etc.) | `license=by,cc0,pdm` + `license_type=commercial` | query-tagged (class x region matrix) | 60-120k | demographic balance |
+| A | Open Images v7 machine-generated (`oidv7-train-annotations-machine-imagelabels.csv`, 7.3 GB) | same image pool | machine, conf >= 0.9 | ~25-35k (only ~16% of that pool is CC-BY/PD — measured) | noisy pre-train supplement |
+| B | Openverse API (Flickr/Wikimedia/etc.) | `license=by,cc0,pdm` + `license_type=commercial` | query-tagged (class x region matrix) | ~100-180k (per-class budget 1500) | demographic balance + bulk |
 | C | Optional manual adds: Unsplash Lite Dataset, Nappy.co | their free licenses | keywords/manual | optional | people-class balance |
 
 ## Region matrix (Tier B)
