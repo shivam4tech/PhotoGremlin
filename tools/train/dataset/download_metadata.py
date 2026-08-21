@@ -17,8 +17,10 @@ FILES = {
     "classes-trainable.txt": f"{BASE}/2017_11/classes-trainable.txt",
     "oidv7-train-annotations-human-imagelabels.csv": f"{BASE}/v7/oidv7-train-annotations-human-imagelabels.csv",
     "oidv7-val-annotations-human-imagelabels.csv": f"{BASE}/v7/oidv7-val-annotations-human-imagelabels.csv",
-    "train-images-boxable-with-rotation.csv": f"{BASE}/v7/train-images-boxable-with-rotation.csv",
-    "val-images-boxable-with-rotation.csv": f"{BASE}/v7/val-images-boxable-with-rotation.csv",
+    # Image CSVs live in the v6-era bucket (still current for v7; the /v7/
+    # path 403s).
+    "train-images-boxable-with-rotation.csv": f"{BASE}/2018_04/train/train-images-boxable-with-rotation.csv",
+    "val-images-boxable-with-rotation.csv": f"{BASE}/2018_04/validation/validation-images-with-rotation.csv",
     # Places365 class *names* only (the taxonomy words; images come from
     # Open Images, CC-BY. Names are not copyrightable.)
     "categories_places365.txt": (

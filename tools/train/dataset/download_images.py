@@ -17,7 +17,11 @@ import pathlib
 import sys
 import urllib.request
 
-KEEP_LICENSES = {"Attribution License", "Public Domain"}
+def license_ok(license_url: str) -> bool:
+    l = license_url.lower()
+    # v7 License column holds URLs; keep CC-BY (attribution only) and
+    # CC0/public-domain. Share-alike and unknown are excluded.
+    return "creativecommons.org/licenses/by/2.0" in l or "publicdomain" in l
 
 def load_sample_ids(csv_path: pathlib.Path) -> set[str]:
     with open(csv_path, newline="") as f:
@@ -35,7 +39,7 @@ def build_manifest(meta: pathlib.Path, samples: pathlib.Path, image_csv: str, id
         for r in rows:
             if r[ix["ImageID"]] not in ids:
                 continue
-            if r[ix["License"]] not in KEEP_LICENSES:
+            if not license_ok(r[ix["License"]]):
                 continue
             out.append((r[ix["ImageID"]], r[url_ix], r[ix["Author"]], r[ix["License"]], r[ix["Title"]]))
     return out
