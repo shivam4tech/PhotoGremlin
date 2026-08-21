@@ -377,12 +377,6 @@
     "oi_name": "Hospital",
     "score": 1.0
   },
-  "hospital room": {
-    "coarse": "healthcare",
-    "mid": "/m/0hpnr",
-    "oi_name": "Hospital",
-    "score": 0.762
-  },
   "house": {
     "coarse": "residential",
     "mid": "/m/03jm5",
@@ -459,12 +453,6 @@
     "coarse": "nature",
     "mid": "/m/09d_r",
     "oi_name": "Mountain",
-    "score": 1.0
-  },
-  "north church": {
-    "coarse": "religious",
-    "mid": "/m/01wb7",
-    "oi_name": "Church",
     "score": 1.0
   },
   "nursery": {
@@ -592,12 +580,6 @@
     "mid": "/m/06l8d",
     "oi_name": "Restaurant",
     "score": 1.0
-  },
-  "restaurant patio": {
-    "coarse": "food_dining",
-    "mid": "/m/06l8d",
-    "oi_name": "Restaurant",
-    "score": 0.769
   },
   "river": {
     "coarse": "nature",

@@ -168,7 +168,7 @@ def main() -> None:
     if start_epoch == 0:
         log.write("epoch,train_loss,fine_top1,fine_top5,coarse_top1,lr,secs\n")
 
-    ce = nn.CrossEntropyLoss()
+    ce = nn.CrossEntropyLoss(label_smoothing=0.1)
     for epoch in range(start_epoch, args.epochs):
         model.train()
         t0, seen, loss_sum = time.time(), 0, 0.0

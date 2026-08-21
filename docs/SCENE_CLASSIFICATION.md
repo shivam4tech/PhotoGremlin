@@ -120,3 +120,15 @@ bash tools/train/setup_env.sh                      # 2. one-time venv + CUDA tor
 ```
 
 Every stage is resumable; `--limit N` smoke-tests training.
+
+## Round-1 results (2026-08-21) + round-2 fixes
+
+Baseline (`runs/20260821-165833`, 62,398 train imgs): fine top-1 41.3%,
+top-5 75.7%, coarse top-1 67.2%. Root causes found: three fine labels
+shared one OI MID (contradictory supervision: hospital room/hospital,
+north church/church, restaurant patio/restaurant), coarse assigned
+per-label not per-MID, long-tail (median 108 imgs/class).
+
+Round 2: canonicalize one fine label per MID (130 classes), coarse per
+MID, label smoothing 0.1, 10 epochs. If coarse top-1 still < 0.80 ->
+noisy-student round (machine-labeled conf >= 0.9 pre-training).

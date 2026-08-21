@@ -340,6 +340,34 @@ def main() -> None:
         if (label, norm, mid, name, 1.0) not in exact and (label, norm, mid, name, 1.0) not in fuzzy:
             exact.append((label, norm, mid, name, 1.0))
 
+    # One canonical fine label per MID: several Places365 names can map to the
+    # same OI class (e.g. church/north church -> Church); keeping both gives
+    # identical images contradictory fine/coarse supervision.
+    by_mid: dict[str, list[tuple[str, dict]]] = {}
+    for label, v in mapping.items():
+        by_mid.setdefault(v["mid"], []).append((label, v))
+    final = {}
+    merges = {}
+    for mid, entries in sorted(by_mid.items()):
+        entries.sort(key=lambda t: (-t[1]["score"], t[0]))
+        canon_label, canon_v = entries[0]
+        coarse = canon_v["coarse"]
+        if coarse == "other":
+            for _, v in entries[1:]:
+                if v["coarse"] != "other":
+                    coarse = v["coarse"]
+                    break
+        final[canon_label] = {"mid": mid, "oi_name": canon_v["oi_name"],
+                              "score": canon_v["score"], "coarse": coarse}
+        for l, _ in entries[1:]:
+            merges[l] = canon_label
+    if merges:
+        print("merged duplicates:")
+        for src, dst in sorted(merges.items()):
+            print(f"  {src} -> {dst}")
+
+    mapping = final
+
     review = meta / "map_review.txt"
     with open(review, "w") as f:
         f.write("MISSED (no good OI class) — decide: drop or hand-map\n")

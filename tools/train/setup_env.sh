@@ -35,4 +35,4 @@ if torch.cuda.is_available():
 else:
     print("WARNING: no CUDA device visible — training will be CPU-slow")
 EOF
-echo "done. train with: ./.venv/bin/python tools/train/train.py"
+echo "done. train with (from the repo root): tools/train/.venv/bin/python tools/train/train.py"
