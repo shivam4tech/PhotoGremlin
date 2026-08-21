@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Sprint 17-v2 collection pipeline — every stage resumable; re-run freely.
 set -uo pipefail
-cd "$(dirname "$0")/../.."   # repo root
+cd "$(dirname "$0")/../../.."   # repo root (script lives at tools/train/dataset/)
 
 # Openverse credentials (registered app); file is outside the repo, chmod 600
 [ -f "$HOME/.config/photogremlin/openverse.env" ] && . "$HOME/.config/photogremlin/openverse.env"
