@@ -44,7 +44,9 @@ Face grouping (identity via local embeddings), eyes-open detection, people
 count, **subject/scene classification (Sprint 17–18, planned — see
 SCENE_CLASSIFICATION.md: MobileNetV3-Large trained on a CC-BY Open Images
 corpus, two-tier coarse ≥95% / fine top-1, shipped as a small local ONNX
-model)**, semantic local search.
+model)**, **scenario culling, Aftershoot-style (Sprint 19–21, planned — see
+CULLING.md: genre profiles over measurable features + blur-type/eye-state
+models, ranked buckets, non-destructive)**, semantic local search.
 
 ## v0.4
 

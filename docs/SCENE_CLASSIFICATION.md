@@ -108,3 +108,15 @@ Committed: scripts, `class-map.json`, this plan, the final ONNX artifact.
 
 ~2–3 days wall-clock (downloads + training run overnight), **$0**, commercial
 -safe via CC-BY corpus + documented attribution.
+
+## Running it (Sprint 17 execution)
+
+```
+python3 tools/train/dataset/collect_data.py        # 1. collect all data (resumable)
+bash tools/train/setup_env.sh                      # 2. one-time venv + CUDA torch
+.venv/bin/python tools/train/train.py              # 3. train (~3-5h on RTX 5060)
+.venv/bin/python tools/train/export_onnx.py \
+    --checkpoint tools/train/runs/<ts>/best.pt     # 4. int8 ONNX -> src-tauri/models/
+```
+
+Every stage is resumable; `--limit N` smoke-tests training.
