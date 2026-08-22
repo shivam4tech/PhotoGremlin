@@ -239,12 +239,22 @@ def main() -> None:
     mapping = json.loads((args.repo / "tools/train/class-map.json").read_text())
     classes = sorted(mapping)
     deadline = time.time() + args.minutes * 60
+    targets_path = args.repo / "ml-corpus/commons/targets.csv"
 
-    if not args.download_only:
-        targets = crawl_metadata(args, classes, deadline)
-        print(f"targets: {targets}")
-    if not args.metadata_only:
-        download(args, args.repo / "ml-corpus/commons/targets.csv", deadline)
+    if args.download_only:
+        download(args, targets_path, deadline)
+    elif args.metadata_only:
+        crawl_metadata(args, classes, deadline)
+    else:
+        # Bank first: secure whatever earlier runs already targeted before
+        # spending budget discovering more (a tight budget must never leave
+        # known-good candidates unfetched).
+        download(args, targets_path, deadline)
+        if time.time() < deadline:
+            crawl_metadata(args, classes, deadline)
+            download(args, targets_path, deadline)   # fetch step-2 additions
+            print(f"budget used; re-run to continue where it stopped",
+                  flush=True)
 
 if __name__ == "__main__":
     main()
