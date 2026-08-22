@@ -53,6 +53,7 @@ def main() -> None:
     cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
 
     rows_by_source: dict[str, list[tuple]] = defaultdict(list)
+    audit_rows: list[tuple] = []
     # ---- oi_human (multi-label rows already grouped per image_id) ----------
     with open(base / "openimages/samples/train_multi.csv", newline="") as f:
         next(f)
@@ -74,7 +75,6 @@ def main() -> None:
     # ---- openverse ---------------------------------------------------------
     op = base / "openverse/targets.csv"
     ov_dir = base / "openverse/images/openverse"
-    audit_rows = []
     if op.exists():
         with open(op, newline="") as f:
             for rec in csv.DictReader(f):
@@ -89,8 +89,29 @@ def main() -> None:
                        rec.get("region_query", ""), is_audit)
                 (audit_rows if is_audit else rows_by_source["openverse"]).append(row)
 
+    # ---- commons (tier B+, deep Wikimedia crawl) ---------------------------
+    cp = base / "commons/targets.csv"
+    cm_dir = base / "commons/images"
+    if cp.exists():
+        with open(cp, newline="") as f:
+            for rec in csv.DictReader(f):
+                p = cm_dir / f"{rec['pageid']}.jpg"
+                if not p.exists():
+                    continue
+                fine = rec["fine"]
+                if fine not in coarse_of:
+                    continue
+                is_audit = int(hashlib.sha1(rec["pageid"].encode()).hexdigest(), 16) % 10 == 0
+                row = (p.relative_to(base).as_posix(), fine, 0.75,
+                       rec.get("region_query", ""), is_audit)
+                if is_audit:
+                    audit_rows.append(row)
+                else:
+                    rows_by_source["commons"].append(
+                        (row[0], row[1], row[2]))
+
     # ---- cross-source dedup -------------------------------------------------
-    PRIORITY = {"oi_human": 0, "oi_machine": 1, "openverse": 2}
+    PRIORITY = {"oi_human": 0, "oi_machine": 1, "openverse": 2, "commons": 3}
     by_hash: dict[str, tuple[int, str]] = {}
     kept_rows = []
     dropped = 0

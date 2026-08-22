@@ -15,7 +15,10 @@ echo "=== [1/4] Tier A: Open Images machine labels (bulk, ~35-40GB)"
 echo "=== [2/4] Tier B: Openverse demographic crawl"
 "$PY" tools/train/dataset/openverse_crawl.py "$@" || exit 1
 
-echo "=== [3/4] Build corpus v2 (dedup + manifests)"
+echo "=== [3/4] Tier B+: Wikimedia Commons deep crawl (time-bounded, resumable)"
+"$PY" tools/train/dataset/commons_crawl.py --minutes "${COMMONS_MINUTES:-75}" || exit 1
+
+echo "=== [4/4] Build corpus v2 (dedup + manifests)"
 "$PY" tools/train/dataset/build_corpus_v2.py || exit 1
 
 echo "=== [4/4] done"
