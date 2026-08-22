@@ -76,8 +76,17 @@ class TokenManager:
             "grant_type": "client_credentials",
         }).encode()
         req = urllib.request.Request(AUTH_TOKEN_URL, data=data, headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            payload = json.loads(r.read())
+        payload = None
+        for t_attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as r:
+                    payload = json.loads(r.read())
+                break
+            except Exception as e:
+                if t_attempt == 2:
+                    raise RuntimeError(f"could not fetch Openverse token: {e}") from e
+                print(f"    [auth] token fetch failed ({e}); retrying", flush=True)
+                time.sleep(5 * (t_attempt + 1))
         self._access = payload["access_token"]
         expires_in = int(payload.get("expires_in", 43200))
         self.cache_path.write_text(json.dumps({
@@ -92,23 +101,25 @@ class TokenManager:
             self.cache_path.unlink()
 
 def api_get(url: str, auth: TokenManager | None, timeout: int = 60) -> dict:
+    """GET with full retry coverage: bearer()/token-endpoint hiccups, 401/403
+    (invalidate + refetch token), and server errors (backoff)."""
     last_err = None
-    refreshed = False
-    for attempt in range(5):
-        headers = {"User-Agent": UA}
-        if auth is not None:
-            bearer = auth.bearer()
-            if bearer:
-                headers["Authorization"] = f"Bearer {bearer}"
-        req = urllib.request.Request(url, headers=headers)
+    for attempt in range(6):
         try:
+            headers = {"User-Agent": UA}
+            if auth is not None:
+                bearer = auth.bearer()   # network call — kept inside the try
+                if bearer:
+                    headers["Authorization"] = f"Bearer {bearer}"
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             last_err = e
-            if e.code == 401 and auth is not None and not refreshed:
+            if e.code in (401, 403) and auth is not None:
+                print("    [auth] 401/403 — dropping cached token, will refetch", flush=True)
                 auth.invalidate()
-                refreshed = True
+                time.sleep(5)
                 continue
             if e.code in (429, 500, 502, 503, 504):
                 wait = min(60 * (attempt + 1), 300)
@@ -116,9 +127,10 @@ def api_get(url: str, auth: TokenManager | None, timeout: int = 60) -> dict:
                 time.sleep(wait)
             else:
                 raise
-        except Exception as e:  # transient network
+        except Exception as e:  # transient network or token-endpoint error
             last_err = e
-            time.sleep(2 * (attempt + 1))
+            print(f"    transient error ({last_err}); retrying", flush=True)
+            time.sleep(min(5 * (attempt + 1), 60))
     raise RuntimeError(f"openverse query failed after retries: {last_err}")
 REGIONS = [
     "indian", "nigerian", "ethiopian", "kenyan", "egyptian", "moroccan",
