@@ -96,10 +96,11 @@ def crawl_metadata(args, classes: list[str], deadline: float) -> pathlib.Path:
     added_total = 0
 
     for qi, (fine, query) in enumerate(pairs):
+      try:
         qhash = hashlib.sha1(query.encode()).hexdigest()[:16]
         if done.get(qhash):
             continue
-        if time.time() > deadline:
+        if deadline is not None and time.time() > deadline:
             print("budget reached — metadata phase stops here (resumable)",
                   flush=True)
             break
@@ -141,8 +142,9 @@ def crawl_metadata(args, classes: list[str], deadline: float) -> pathlib.Path:
                 })
                 class_counts[fine] += 1
             cont = data.get("continue") or {}
-            if not cont or class_counts[fine] >= args.per_class \
-                    or time.time() > deadline:
+            if not cont or class_counts[fine] >= args.per_class:
+                break
+            if deadline is not None and time.time() > deadline:
                 break
         # crash-safe: persist this query's rows + done marker immediately
         new_flag = not targets_path.exists()
@@ -163,7 +165,14 @@ def crawl_metadata(args, classes: list[str], deadline: float) -> pathlib.Path:
         print(f"  [{qi+1}/{len(pairs)}] '{query}': {len(rows)} pass "
               f"(class {fine}: {class_counts[fine]}/{args.per_class})",
               flush=True)
-    print(f"metadata phase complete: {added_total} new candidates", flush=True)
+      except Exception as e:
+        # isolate: log, mark not-done, move to the next query
+        print(f"  [{qi+1}/{len(pairs)}] '{query}' FAILED ({e}); continuing",
+              flush=True)
+        time.sleep(10)
+    failed_queries = len(done) and sum(1 for qh, v in list(done.items()))
+    print(f"metadata phase complete: {added_total} new candidates "
+          f"({len(done)}/{len(pairs)} queries processed)", flush=True)
     return targets_path
 
 def download(args, targets_path: pathlib.Path, deadline: float) -> None:
@@ -206,7 +215,7 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
     pending = iter(items)
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         while True:
-            if time.time() > deadline:
+            if deadline is not None and time.time() > deadline:
                 stopped_on_budget = True
                 break
             chunk = list(itertools.islice(pending, args.workers * 8))
@@ -222,8 +231,9 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=".")
-    ap.add_argument("--minutes", type=float, default=90,
-                    help="total wall-clock budget; clean exit on expiry")
+    ap.add_argument("--minutes", type=float, default=None,
+                    help="optional wall-clock budget; OMIT to run until every "
+                         "query is crawled and every target downloaded")
     ap.add_argument("--per-class", type=int, default=1200)
     ap.add_argument("--page-limit", type=int, default=200, choices=range(10, 501))
     ap.add_argument("--min-px", type=int, default=300)
@@ -238,8 +248,10 @@ def main() -> None:
 
     mapping = json.loads((args.repo / "tools/train/class-map.json").read_text())
     classes = sorted(mapping)
-    deadline = time.time() + args.minutes * 60
+    deadline = time.time() + args.minutes * 60 if args.minutes is not None else None
     targets_path = args.repo / "ml-corpus/commons/targets.csv"
+    mode = f"{args.minutes:.0f} min budget" if args.minutes else "RUN TO COMPLETION"
+    print(f"commons crawl mode: {mode}", flush=True)
 
     if args.download_only:
         download(args, targets_path, deadline)
