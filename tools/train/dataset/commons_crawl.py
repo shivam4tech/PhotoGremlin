@@ -192,7 +192,7 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
     pace = {"delay": max(args.delay, 0.4)}
 
     def fetch_one(rec) -> str:
-        if time.time() > deadline and deadline is not None:
+        if deadline is not None and time.time() > deadline:
             return "budget"
         dest = out_dir / f"{rec['pageid']}.jpg"
         if dest.exists() and dest.stat().st_size > 1024:
@@ -237,6 +237,8 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
             return "err"
 
     pending = iter(items)
+    consecutive_errs = 0
+    last_err_key = None
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         while True:
             if deadline is not None and time.time() > deadline:
@@ -247,6 +249,22 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
                 break
             for status in ex.map(fetch_one, chunk):
                 stats[status] = stats.get(status, 0) + 1
+                if status == "err" and err_samples:
+                    top = max(err_samples.items(), key=lambda kv: kv[1])[0]
+                    if top == last_err_key:
+                        consecutive_errs += 1
+                    else:
+                        last_err_key, consecutive_errs = top, 1
+                    if consecutive_errs >= 25:
+                        print(f"    aborting: {consecutive_errs} consecutive "
+                              f"failures ({top}) — fix and re-run to resume",
+                              flush=True)
+                        stopped_on_budget = True   # clean exit, resumable
+                        break
+                else:
+                    consecutive_errs = 0
+            if stopped_on_budget:
+                break
     label = "stopped on budget" if stopped_on_budget else "finished"
     print(f"commons download {label}: {stats}", flush=True)
     for msg, cnt in sorted(err_samples.items(), key=lambda kv: -kv[1])[:5]:
