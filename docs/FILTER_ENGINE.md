@@ -38,6 +38,7 @@ field lives.
  | time | capture_datetime (point, range via `between`) | photos |
  | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
  | local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
+| scene (Sprint 18) | scene_group (`analysis.scene_coarse`, the MERGED product chip from the local scene model; NULL until the pass runs) | analysis |
 | marking (Sprint 13) | rating (int, null = unrated — `is-null`/`not-null` select unrated/rated), flagged (bool, `photos.flag = 1`), color_label (text, fixed enum) | photos (curatorial marks) |
 
 The registry maps each field to (table, column, type, comparator) so

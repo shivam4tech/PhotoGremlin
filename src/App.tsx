@@ -6,13 +6,14 @@ import { api, onProgress, toErrorMessage } from "@/lib/ipc";
 import type {
   AnalysisCompletePayload,
   FaceCompletePayload,
+  SceneCompletePayload,
   MetadataCompletePayload,
   OperationCompletePayload,
   ProgressPayload,
   ScanCompletePayload,
   SimilarityCompletePayload,
 } from "@/types/api";
-import { formatFaceSummaryLine } from "@/features/settings/ai";
+import { formatFaceSummaryLine, formatSceneSummaryLine } from "@/features/settings/ai";
 import { isTypingTarget, shortcutFor } from "@/features/shortcuts";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
@@ -302,7 +303,29 @@ export default function App() {
          void s.refreshStatus();
          void s.loadAiStatus();
        });
-        return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc, uf, ufc];
+       const us = await onProgress<ProgressPayload>("scenes-progress", (p) => {
+         const s = state();
+         s.setClassifyingScenes(true);
+         s.setScenesProgress(p);
+       });
+       const usc = await onProgress<SceneCompletePayload>("scenes-complete", (p) => {
+         const s = state();
+         s.setClassifyingScenes(false);
+         s.setScenesProgress(null);
+         if (p.summary) {
+           s.setScenesSummary(p.summary);
+           if (p.summary.processed > 0 || p.summary.failed > 0 || !p.summary.cancelled) {
+             s.setNotice(formatSceneSummaryLine(p.summary));
+             s.setError(null);
+           }
+         } else {
+           s.setScenesSummary(null);
+           s.setError(p.error ?? "Scene classification failed.");
+         }
+         void s.refreshStatus();
+         void s.loadAiStatus();
+       });
+        return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc, uf, ufc, us, usc];
     })();
 
     let alive = true;

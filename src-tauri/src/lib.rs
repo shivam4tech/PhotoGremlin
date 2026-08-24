@@ -61,6 +61,7 @@ pub fn run() {
                 operation: Arc::new(Mutex::new(None)),
                 similarity: Arc::new(Mutex::new(None)),
                 faces: Arc::new(Mutex::new(None)),
+                scenes: Arc::new(Mutex::new(None)),
                 export: Arc::new(Mutex::new(None)),
                 thumb: Arc::new(crate::thumbnailer::ThumbService::new(
                     paths.thumbnails_dir(),
@@ -125,6 +126,8 @@ pub fn run() {
             commands::set_ai_enabled,
             commands::start_faces,
             commands::stop_faces,
+            commands::start_scene_classification,
+            commands::stop_scene_classification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running PhotoGremlin");

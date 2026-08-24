@@ -13,6 +13,9 @@ pub const SIMILARITY_PROGRESS: &str = "similarity-progress";
 pub const SIMILARITY_COMPLETE: &str = "similarity-complete";
 pub const FACES_PROGRESS: &str = "faces-progress";
 pub const FACES_COMPLETE: &str = "faces-complete";
+/// Scene-classification pass (Sprint 18).
+pub const SCENES_PROGRESS: &str = "scenes-progress";
+pub const SCENES_COMPLETE: &str = "scenes-complete";
 pub const CONTACT_SHEET_PROGRESS: &str = "contact-sheet-progress";
 pub const CONTACT_SHEET_COMPLETE: &str = "contact-sheet-complete";
 

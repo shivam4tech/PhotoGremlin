@@ -33,6 +33,10 @@ pub struct AiStatus {
     pub model_bytes: usize,
     /// Photos with a stored face result / photos in the library.
     pub faces_done: i64,
+    /// Scene model (Sprint 18): name, size, and progress line.
+    pub scene_model: String,
+    pub scene_model_bytes: usize,
+    pub scenes_done: i64,
     pub photo_count: i64,
 }
 
@@ -57,6 +61,9 @@ pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
         model: MODEL_NAME.to_string(),
         model_bytes: ml::model_bytes(),
         faces_done: status.faces_done,
+        scene_model: ml::scene::SCENE_MODEL_NAME.to_string(),
+        scene_model_bytes: ml::scene::SCENE_MODEL.len(),
+        scenes_done: status.scenes_done,
         photo_count: status.photo_count,
     })
 }
@@ -158,6 +165,104 @@ pub fn stop_faces(state: State<'_, AppState>) -> AppResult<bool> {
         if job.running.load(Ordering::Relaxed) {
             job.cancel.store(true, Ordering::Relaxed);
             tracing::info!("faces cancellation requested");
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Payload for the `scenes-complete` event: exactly one is set.
+#[derive(Debug, serde::Serialize)]
+pub struct SceneCompletePayload {
+    pub summary: Option<ml::scene::SceneSummary>,
+    pub error: Option<String>,
+}
+
+/// Run scene classification over the queued photos, in the background.
+/// Same single-slot + cooperative-cancel rules as the face pass.
+#[tauri::command]
+pub async fn start_scene_classification(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let job = {
+        let mut slot = state
+            .scenes
+            .lock()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        if let Some(existing) = slot.as_ref() {
+            if existing.running.load(Ordering::Relaxed) {
+                return Err(AppError::operation("Scene classification is already in progress"));
+            }
+        }
+        let job = Arc::new(Job::new());
+        *slot = Some(job.clone());
+        job
+    };
+
+    let db = state.db.clone();
+    let slot = state.scenes.clone();
+    let cancel = job.cancel.clone();
+    let running = job.running.clone();
+    let cancel_task = cancel.clone();
+    let app_task = app.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let result: AppResult<ml::scene::SceneSummary> =
+            match tauri::async_runtime::spawn_blocking(move || {
+                ml::scene::run_scenes_pass(
+                    db,
+                    Arc::new(move |p| {
+                        let _ = app_task.emit(events::SCENES_PROGRESS, &p);
+                    }),
+                    cancel_task,
+                )
+            })
+            .await
+            {
+                Ok(inner) => inner,
+                Err(e) => Err(AppError::operation(format!("scene run task failed: {e}"))),
+            };
+
+        running.store(false, Ordering::Relaxed);
+
+        {
+            let mut slot = slot.lock().expect("scenes slot poisoned");
+            if let Some(holder) = slot.as_ref() {
+                if holder.cancel.as_ptr() == cancel.as_ptr() {
+                    *slot = None;
+                }
+            }
+        }
+
+        let payload = match result {
+            Ok(summary) => SceneCompletePayload {
+                summary: Some(summary),
+                error: None,
+            },
+            Err(e) => SceneCompletePayload {
+                summary: None,
+                error: Some(e.to_string()),
+            },
+        };
+        let _ = app.emit(events::SCENES_COMPLETE, &payload);
+        tracing::info!(?payload.error, "scenes command finished");
+    });
+    Ok(())
+}
+
+/// Request cancellation of a running scene pass (takes effect at the next
+/// file; already-classified results are kept).
+#[tauri::command]
+pub fn stop_scene_classification(state: State<'_, AppState>) -> AppResult<bool> {
+    let slot = state
+        .scenes
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    if let Some(job) = slot.as_ref() {
+        if job.running.load(Ordering::Relaxed) {
+            job.cancel.store(true, Ordering::Relaxed);
+            tracing::info!("scenes cancellation requested");
             return Ok(true);
         }
     }

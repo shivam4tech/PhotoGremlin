@@ -12,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 13;
+pub const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -304,6 +304,28 @@ impl Db {
                     .map_err(db_err("add photos.color_label"))?;
             }
 
+            // v14 (Sprint 18): scene-classification results from the local
+            // scene model (optional ml layer, mirrors `faces_at`). `coarse`
+            // stores the MERGED product group (10 chips), `fine` the scene
+            // label, `conf` its softmax confidence; NULL until the pass runs
+            // and every core feature works with the model absent.
+            if !table_has_column(&conn, "analysis", "scene_coarse") {
+                conn.execute("ALTER TABLE analysis ADD COLUMN scene_coarse TEXT", [])
+                    .map_err(db_err("add analysis.scene_coarse"))?;
+            }
+            if !table_has_column(&conn, "analysis", "scene_fine") {
+                conn.execute("ALTER TABLE analysis ADD COLUMN scene_fine TEXT", [])
+                    .map_err(db_err("add analysis.scene_fine"))?;
+            }
+            if !table_has_column(&conn, "analysis", "scene_conf") {
+                conn.execute("ALTER TABLE analysis ADD COLUMN scene_conf REAL", [])
+                    .map_err(db_err("add analysis.scene_conf"))?;
+            }
+            if !table_has_column(&conn, "analysis", "scene_at") {
+                conn.execute("ALTER TABLE analysis ADD COLUMN scene_at TEXT", [])
+                    .map_err(db_err("add analysis.scene_at"))?;
+            }
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -374,6 +396,13 @@ impl Db {
                 |r| r.get(0),
             )
             .map_err(db_err("count faces done"))?;
+        let scenes_done: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM analysis WHERE scene_fine IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(db_err("count scenes done"))?;
         Ok(DbStatus {
             photo_count,
             session_count,
@@ -382,6 +411,7 @@ impl Db {
             selected_count,
             rejected_count,
             faces_done,
+            scenes_done,
             schema_version: version,
         })
     }
@@ -602,8 +632,9 @@ impl Db {
                         p.indexed_at, p.file_mtime,
                         a.sharpness, a.brightness, a.contrast, a.saturation,
                         a.highlight_clipping, a.shadow_clipping, a.is_monochrome, a.is_dark,
-                        a.is_bright, a.face_count, a.smile_count, a.perceptual_hash,
-                        a.algorithm_version, a.analyzed_at
+                        a.is_bright, a.face_count, a.smile_count,
+                        a.scene_coarse, a.scene_fine, a.scene_conf,
+                        a.perceptual_hash, a.algorithm_version, a.analyzed_at
                  FROM photos p
                  LEFT JOIN analysis a ON a.photo_id = p.id
                  WHERE p.id = ?1",
@@ -648,9 +679,12 @@ impl Db {
                         is_bright: r.get::<_, Option<i64>>(35)?.unwrap_or(0) != 0,
                         face_count: r.get(36)?,
                         smile_count: r.get(37)?,
-                        perceptual_hash: r.get(38)?,
-                        algorithm_version: r.get(39)?,
-                        analyzed_at: r.get(40)?,
+                        scene_coarse: r.get(38)?,
+                        scene_fine: r.get(39)?,
+                        scene_conf: r.get(40)?,
+                        perceptual_hash: r.get(41)?,
+                        algorithm_version: r.get(42)?,
+                        analyzed_at: r.get(43)?,
                     })
                 },
             )
@@ -1838,6 +1872,76 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         Ok(out)
     }
 
+    /// Photos queued for scene classification (Sprint 18): decodable files
+    /// missing a scene result, or whose file is newer than the last run —
+    /// the same incremental rule as faces/EXIF/similarity.
+    pub fn scenes_queue(&self) -> AppResult<Vec<SceneWork>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT p.id, p.path, p.file_mtime
+                 FROM photos p
+                 LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                   AND (a.scene_fine IS NULL
+                        OR (p.file_mtime IS NOT NULL AND a.scene_at IS NOT NULL
+                            AND a.scene_at < p.file_mtime))
+                 ORDER BY (p.capture_datetime IS NULL) ASC,
+                          COALESCE(p.capture_datetime, p.indexed_at), p.id",
+            )
+            .map_err(db_err("prepare scenes queue"))?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(SceneWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    file_mtime: r.get(2)?,
+                })
+            })
+            .map_err(db_err("query scenes queue"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read scene work row"))?);
+        }
+        Ok(out)
+    }
+
+    /// Store one photo's scene result (Sprint 18). Same face-only-row rule:
+    /// a missing `analysis` row gets created with measurements still NULL.
+    pub fn upsert_scene(
+        &self,
+        photo_id: i64,
+        coarse: &str,
+        fine: &str,
+        conf: f64,
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO analysis (photo_id, scene_coarse, scene_fine, scene_conf, scene_at, analyzed_at, algorithm_version)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)
+             ON CONFLICT(photo_id) DO UPDATE SET
+                scene_coarse = excluded.scene_coarse,
+                scene_fine = excluded.scene_fine,
+                scene_conf = excluded.scene_conf,
+                scene_at = excluded.scene_at",
+            params![photo_id, coarse, fine, conf, source_mtime, crate::time::now_utc()],
+        )
+        .map_err(db_err("upsert scene"))?;
+        Ok(())
+    }
+
+    /// How many photos carry a scene result (the Settings line).
+    pub fn scenes_done(&self) -> AppResult<i64> {
+        let conn = self.lock()?;
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM analysis WHERE scene_fine IS NOT NULL", [], |r| {
+                r.get(0)
+            })
+            .map_err(db_err("count scenes done"))?;
+        Ok(n)
+    }
+
     /// Store one photo's face result. A photo without an `analysis` row gets
     /// a face-only row (measurements stay NULL until the analysis pass runs;
     /// `analyzed_at`/`algorithm_version` are filled so the NOT NULL
@@ -1929,6 +2033,14 @@ pub struct FaceWork {
     pub file_mtime: Option<String>,
 }
 
+/// One queued unit of scene-classification work (Sprint 18): a decodable
+/// photo missing a scene result, or whose file changed since the last run.
+pub struct SceneWork {
+    pub photo_id: i64,
+    pub path: String,
+    pub file_mtime: Option<String>,
+}
+
 /// One queued unit of analysis work: a decodable photo whose row is missing,
 /// stale (older algorithm), or computed from a different file mtime.
 /// One queued unit of metadata work: a photo the EXIF/metadata pass hasn't
@@ -1969,6 +2081,8 @@ pub struct DbStatus {
     pub rejected_count: i64,
     /// Photos with a local-AI face result (Sprint 9; `face_count` set).
     pub faces_done: i64,
+    /// Photos with a scene-classification result (Sprint 18).
+    pub scenes_done: i64,
     pub schema_version: i64,
 }
 
@@ -2107,6 +2221,9 @@ pub struct PhotoFull {
     pub is_bright: bool,
     pub face_count: Option<i64>,
     pub smile_count: Option<i64>,
+    pub scene_coarse: Option<String>,
+    pub scene_fine: Option<String>,
+    pub scene_conf: Option<f64>,
     pub perceptual_hash: Option<String>,
     pub algorithm_version: Option<u32>,
     pub analyzed_at: Option<String>,

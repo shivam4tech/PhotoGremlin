@@ -181,6 +181,8 @@ export const api = {
     invoke("set_ai_enabled", { enabled }),
   startFaces: (): Promise<void> => invoke("start_faces"),
   stopFaces: (): Promise<boolean> => invoke("stop_faces"),
+  startSceneClassification: (): Promise<void> => invoke("start_scene_classification"),
+  stopSceneClassification: (): Promise<boolean> => invoke("stop_scene_classification"),
 };
 
 export type { UnlistenFn };
