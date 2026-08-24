@@ -1,0 +1,115 @@
+# UI Guidelines — the polish bar
+
+Distilled from the [ibelick/ui-skills](https://github.com/ibelick/ui-skills)
+collection (baseline-ui, improve-ui, fixing-accessibility,
+fixing-motion-performance), adapted to PhotoGremlin's real stack: React +
+TypeScript + Zustand over **hand-written CSS driven by design tokens**
+(`src/styles/theme.css`) — no Tailwind, no animation library, no component
+framework. Where a skill says "use Tailwind utilities", the rule here is its
+token-based equivalent.
+
+These are review criteria for every UI change: violations should be quoted
+with a concrete fix, like the skills prescribe.
+
+## 1. Tokens are the law
+
+- Every color, radius, shadow, font comes from `--*` tokens in
+  `theme.css`; raw hex values in components are violations.
+- One accent per view. `--accent` (green) is the single affordance color;
+  `--warning/--danger/--info` exist for state, not decoration.
+- Both themes must always be checked: if you touch a color, verify dark AND
+  light (`data-theme="light"`) contrast.
+- New UI needs new tokens only when existing ones genuinely cannot express
+  it — add them to both theme blocks together, or don't add them.
+
+## 2. Layout & hierarchy baseline
+
+- Spacing steps in multiples of 4px (`4/8/12/16/24/32`); no arbitrary gaps.
+- Hierarchy comes from size + weight + `--text/--text-dim/--text-faint`
+  dimming — never from new colors.
+- Fixed z-index scale only (check `theme.css`); no ad-hoc `z-index: 999`.
+- Square elements use width+height pairs consistently via shared classes;
+  fixed panels respect `--sidebar-w` / `--topbar-h`.
+- Every empty state must offer exactly one clear next action (see
+  `EmptyState.tsx`) — an action, not just an explanation.
+
+## 3. Typography
+
+- Headings and stat labels may set `text-wrap: balance`; body text
+  `text-wrap: pretty`. Never letter-spacing tweaks.
+- **All numeric data uses the mono font with `font-variant-numeric:
+  tabular-nums`** ("sharpness 62", ISO values, counts, dashboard figures) —
+  data columns must not jiggle.
+- Dense UI truncates deliberately (`text-overflow: ellipsis` +
+  `title=` tooltip), never overflows silently.
+
+## 4. Motion (the premium feel is restraint)
+
+- Animate ONLY compositor properties: `transform`, `opacity`. Never
+  animate `width/height/top/left/margin/padding` — use FLIP or opacity.
+- Interaction feedback ≤ 200ms, entrances use ease-out. One-shot effects
+  only; nothing loops except progress indicators.
+- Respect `prefers-reduced-motion: reduce` — transitions collapse to near-
+  instant, looping spinners become static states.
+- Blur/backdrop-filter never animates on large surfaces (photo grid!);
+  `will-change` only during an active animation, then removed.
+- No gradients, no glow-as-affordance, no decorative motion. The accent-glow
+  token exists for focus rings, nothing else.
+
+## 5. Accessibility (non-negotiable)
+
+- Icon-only buttons carry `aria-label`; decorative icons `aria-hidden`.
+- Native elements first (`button/a/input`) — divs-with-onClick are
+  violations even when they look right.
+- Focus must be visible (`:focus-visible` styles exist — keep them),
+  dialogs trap focus and restore it to the trigger on close, Escape closes.
+- Form errors link via `aria-describedby` + `aria-invalid`; destructive
+  actions confirm through the dialog flow (file ops already do — keep it).
+- Hover-only reveals need keyboard equivalents.
+- Photos in the grid get meaningful alt text ("beach — sunset", never "").
+- Critical errors never live in toasts alone (toast + inline/log surface).
+
+## 6. Loading & performance (photo grid specifics)
+
+- Structural skeletons while loading — never blank panes, never spinners
+  where a skeleton fits (`ProgressBar.tsx` covers long jobs).
+- The grid is `VirtualGrid.tsx`: never fight virtualization with CSS that
+  measures content (no auto-height animations inside tiles).
+- Thumbnails are the render unit — never decode originals outside the
+  viewer; lazy-load below the fold via the grid's own mechanism.
+- Batch DOM reads before writes; no scroll-position polling — visibility
+  effects use IntersectionObserver.
+- Long jobs report progress via events (rule 7 of AGENTS.md); the UI never
+  freezes on Rust work.
+
+## 7. Language & copy (product philosophy made visible)
+
+- Measurable characteristics only: "sharpness 62", "high highlight
+  clipping", "similar photograph", "eyes closed". NEVER verdicts: "bad",
+  "good", "delete this?", "you improved".
+- Model-derived tags follow the same honesty rules: show confidence, top-3,
+  and honest "unavailable" instead of fake zeros when the model is absent.
+- Buttons are verbs ("Move to trash"), errors say what happened and what to
+  do next, empty states invite the core loop.
+
+## 8. Review checklist (run before finishing any UI change)
+
+```
+[ ] tokens only — no raw colors/radii/shadows
+[ ] both themes verified
+[ ] one accent per view; semantic colors used semantically
+[ ] motion: transform/opacity only, ≤200ms, reduced-motion respected
+[ ] icon-only controls have aria-labels; focus visible everywhere
+[ ] numbers in mono + tabular-nums
+[ ] loading = skeletons/progress, empty = one clear next action
+[ ] no layout thrash inside VirtualGrid tiles
+[ ] copy passes the "measurable, never verdict" test
+```
+
+## Sources
+
+- baseline-ui — spacing/hierarchy/typography/animation/design baselines
+- fixing-accessibility — §5 checklist priorities
+- fixing-motion-performance — §4 rendering rules (composite vs paint vs layout)
+- improve-ui — evidence-based audit method: findings need contract + runtime
+  proof + a single deterministic correction; prefer no finding to a vague one
