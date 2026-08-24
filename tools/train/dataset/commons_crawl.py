@@ -179,6 +179,7 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
     out_dir = args.repo / "ml-corpus/commons/images"
     out_dir.mkdir(parents=True, exist_ok=True)
     prov = args.repo / "ml-corpus/commons/samples/PROVENANCE_commons.csv"
+    prov.parent.mkdir(parents=True, exist_ok=True)
 
     with open(targets_path, newline="") as f:
         items = list(csv.DictReader(f))
@@ -186,7 +187,13 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
     stopped_on_budget = False
     print(f"downloading {len(items)} commons targets...", flush=True)
 
+    err_samples: dict[str, int] = {}
+
+    pace = {"delay": max(args.delay, 0.4)}
+
     def fetch_one(rec) -> str:
+        if time.time() > deadline and deadline is not None:
+            return "budget"
         dest = out_dir / f"{rec['pageid']}.jpg"
         if dest.exists() and dest.stat().st_size > 1024:
             return "skip"
@@ -197,6 +204,7 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
             with urllib.request.urlopen(req, timeout=60) as r:
                 data = r.read()
+            time.sleep(pace["delay"])
             if len(data) < 1024:
                 return "empty"
             dest.write_bytes(data)
@@ -209,7 +217,23 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
                 w.writerow([rec["pageid"], rec["fine"], rec["title"],
                             rec["license"], rec["artist"], rec["page_url"]])
             return "ok"
-        except Exception:
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                retry_after = float(e.headers.get("Retry-After", 30))
+                print(f"    429 rate-limited; sleeping {retry_after:.0f}s",
+                      flush=True)
+                time.sleep(retry_after)
+                pace["delay"] = min(pace["delay"] * 2, 8.0)
+                err_samples["HTTP 429 throttled"] = \
+                    err_samples.get("HTTP 429 throttled", 0) + 1
+                return "err"
+            key = f"HTTP {e.code}"
+            err_samples[key] = err_samples.get(key, 0) + 1
+            time.sleep(pace["delay"])
+            return "err"
+        except Exception as e:
+            key = f"{type(e).__name__}: {str(e)[:80]}"
+            err_samples[key] = err_samples.get(key, 0) + 1
             return "err"
 
     pending = iter(items)
@@ -225,6 +249,8 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
                 stats[status] = stats.get(status, 0) + 1
     label = "stopped on budget" if stopped_on_budget else "finished"
     print(f"commons download {label}: {stats}", flush=True)
+    for msg, cnt in sorted(err_samples.items(), key=lambda kv: -kv[1])[:5]:
+        print(f"  err[{cnt}]: {msg}", flush=True)
     if stopped_on_budget:
         print("(re-run the same command to continue)", flush=True)
 
@@ -238,7 +264,7 @@ def main() -> None:
     ap.add_argument("--page-limit", type=int, default=200, choices=range(10, 501))
     ap.add_argument("--min-px", type=int, default=300)
     ap.add_argument("--thumb-width", type=int, default=640)
-    ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--delay", type=float, default=0.7,
                     help="seconds between API requests (politeness)")
     ap.add_argument("--download-only", action="store_true")
@@ -262,11 +288,9 @@ def main() -> None:
         # spending budget discovering more (a tight budget must never leave
         # known-good candidates unfetched).
         download(args, targets_path, deadline)
-        if time.time() < deadline:
+        if deadline is not None and time.time() < deadline:
             crawl_metadata(args, classes, deadline)
             download(args, targets_path, deadline)   # fetch step-2 additions
-            print(f"budget used; re-run to continue where it stopped",
-                  flush=True)
 
 if __name__ == "__main__":
     main()
