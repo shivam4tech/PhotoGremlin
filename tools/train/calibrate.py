@@ -20,7 +20,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from train import MultiLabelDataset, CorpusDataset, TwoHeadNet
+import train as train_mod
+from train import CorpusDataset, MultiLabelDataset, TwoHeadNet
 
 @torch.no_grad()
 def collect_logits(model, loader, device):
@@ -53,6 +54,8 @@ def main() -> None:
 
     samples = repo / "ml-corpus/openimages/samples"
     thumbs = repo / "ml-corpus/openimages/images/thumb"
+    mapping = json.loads((repo / "tools/train/class-map.json").read_text())
+    train_mod._COARSE_OF_FINE = {k: v["coarse"] for k, v in mapping.items()}
     corpus_val = repo / "ml-corpus/corpus_v2/val.csv"
     if corpus_val.exists():
         ds = CorpusDataset(corpus_val, repo / "ml-corpus",
@@ -78,7 +81,9 @@ def main() -> None:
             best_T, best_nll = float(T), float(nll)
     print(f"temperature: {best_T:.2f} (nll {best_nll:.4f})")
 
-    # 2. tau for >= precision at max coverage (over all image-label pairs)
+    # 2. tau for >= precision at MAX coverage: precision is non-increasing
+    # along the confidence-sorted prefix, so take the LAST prefix index that
+    # still meets the bar.
     probs = torch.sigmoid(logits / best_T)
     flat_p = probs.flatten().numpy()
     flat_y = truth.flatten().numpy()
@@ -87,7 +92,13 @@ def main() -> None:
     tp = np.cumsum(ys)
     total_shown = np.arange(1, len(ys) + 1)
     prec = tp / total_shown
-    idx = np.argmax(prec >= args.precision)  # first prefix reaching precision
+    ok_idx = np.nonzero(prec >= args.precision)[0]
+    if len(ok_idx) == 0:
+        # even the single most-confident tag misses the bar: clamp to it so
+        # the UI shows essentially nothing rather than wrong things
+        idx = 0
+    else:
+        idx = int(ok_idx[-1])
     tau = float(flat_p[order[idx]])
     print(f"tau={tau:.3f} -> shown-tag precision={prec[idx]:.3f} "
           f"coverage={total_shown[idx]/len(ys):.3f} of all label slots")

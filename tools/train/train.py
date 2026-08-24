@@ -164,7 +164,8 @@ class CorpusDataset(Dataset):
         return self.tf(img), self.fine_targets[i], self.coarse_targets[i]
 
 def coarse_of_fine(fine: str) -> str:
-    global _COARSE_OF_FINE
+    if not _COARSE_OF_FINE:
+        raise RuntimeError("coarse mapping not initialized (set _COARSE_OF_FINE)")
     return _COARSE_OF_FINE.get(fine, "other")
 
 _COARSE_OF_FINE: dict[str, str] = {}
