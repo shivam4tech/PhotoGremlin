@@ -249,6 +249,10 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
                 break
             for status in ex.map(fetch_one, chunk):
                 stats[status] = stats.get(status, 0) + 1
+                if status == "ok":
+                    # successful fetches ease the pace back down toward the
+                    # sustainable floor; only real 429s push it up again
+                    pace["delay"] = max(0.35, pace["delay"] * 0.92)
                 if status == "err" and err_samples:
                     top = max(err_samples.items(), key=lambda kv: kv[1])[0]
                     if top == last_err_key:
@@ -263,6 +267,11 @@ def download(args, targets_path: pathlib.Path, deadline: float) -> None:
                         break
                 else:
                     consecutive_errs = 0
+                total_done = sum(stats.values())
+                if total_done % 250 == 0:
+                    print(f"    … {total_done}/{len(items)} "
+                          f"(ok {stats.get('ok', 0)}, skip {stats.get('skip', 0)}, "
+                          f"pace {pace['delay']:.2f}s)", flush=True)
             if stopped_on_budget:
                 break
     label = "stopped on budget" if stopped_on_budget else "finished"
