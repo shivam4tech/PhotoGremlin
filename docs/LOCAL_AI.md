@@ -36,6 +36,7 @@ never names `ort` and never knows the model exists.
 | smile detection / smile_count | v0.1 → **v0.2 if not stable** | **deferred to v0.2**: no small, stable, permissively-licensed local smile model was available; the plan explicitly defers it |
 | eyes-open detection | v0.3 | planned |
 | face grouping (identity) | v0.3 | planned; local embedding model |
+| scene classification / scene_group filter | v0.2 (Sprint 17–18) | **shipped** — MobileNetV3-Large two-head ONNX trained on CC-BY Open Images corpus; see SCENE_CLASSIFICATION.md and UI_GUIDELINES.md for the honest-confidence display rules |
 | semantic classification / local text search | v0.3 | planned |
 
 If any model proves to destabilize the app, or the build/size cost is not

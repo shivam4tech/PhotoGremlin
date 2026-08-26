@@ -40,6 +40,8 @@ pub struct AppState {
     pub similarity: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single face-detection slot (claim-and-cancel for the local-AI pass).
     pub faces: Arc<Mutex<Option<Arc<Job>>>>,
+    /// Single scene-classification slot (claim-and-cancel; Sprint 18).
+    pub scenes: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single contact-sheet export slot (claim-and-cancel for PNG exports).
     pub export: Arc<Mutex<Option<Arc<Job>>>>,
     pub thumb: Arc<ThumbService>,

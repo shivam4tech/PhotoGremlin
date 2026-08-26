@@ -273,6 +273,16 @@ export function Viewer({
                 <Metric label="Highlight clipping" value={`${(full.highlight_clipping ?? 0).toFixed(3)}`} />
                 <Metric label="Shadow clipping" value={`${(full.shadow_clipping ?? 0).toFixed(3)}`} />
                 {full.face_count != null && <Metric label="Faces" value={full.face_count} />}
+                {full.scene_coarse != null && full.scene_coarse !== "" && (
+                  <Metric
+                    label="Scene"
+                    value={
+                      full.scene_fine && (full.scene_conf ?? 0) >= 0.5
+                        ? `${full.scene_coarse} · ${full.scene_fine}`
+                        : full.scene_coarse
+                    }
+                  />
+                )}
               </>
             ) : (
               <div className="meta-empty">

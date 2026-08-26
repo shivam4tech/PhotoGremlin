@@ -34,6 +34,8 @@ use ort::environment::Environment;
 use ort::session::Session;
 use ort::value::DynValue;
 
+pub mod scene;
+
 use crate::database::{Db, FaceWork};
 use crate::error::{AppError, AppResult};
 use crate::events::ProgressPayload;
@@ -132,7 +134,7 @@ fn resolve_runtime_lib() -> Option<String> {
 static ENV: OnceLock<Result<Arc<Environment>, String>> = OnceLock::new();
 
 /// Load (or reuse) the runtime; friendly error when it is missing.
-fn ensure_runtime() -> AppResult<Arc<Environment>> {
+pub(crate) fn ensure_runtime() -> AppResult<Arc<Environment>> {
     ENV.get_or_init(|| {
         let Some(lib) = resolve_runtime_lib() else {
             return Err(

@@ -14,6 +14,7 @@ import type {
   DbStatus,
   FileOpRow,
   FaceSummary,
+  SceneSummary,
   FilterCondition,
   MetadataSummary,
   OperationSummary,
@@ -85,6 +86,10 @@ interface AppState {
   facesProgress: ProgressPayload | null;
   facesSummary: FaceSummary | null;
 
+  classifyingScenes: boolean;
+  scenesProgress: ProgressPayload | null;
+  scenesSummary: SceneSummary | null;
+
   setView: (v: ViewId) => void;
   setAppInfo: (i: AppInfo) => void;
   setPaths: (p: PathsInfo) => void;
@@ -137,6 +142,9 @@ interface AppState {
   setDetectingFaces: (b: boolean) => void;
   setFacesProgress: (p: ProgressPayload | null) => void;
   setFacesSummary: (s: FaceSummary | null) => void;
+  setClassifyingScenes: (b: boolean) => void;
+  setScenesProgress: (p: ProgressPayload | null) => void;
+  setScenesSummary: (s: SceneSummary | null) => void;
 }
 
 let statusInFlight = false;
@@ -176,6 +184,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   detectingFaces: false,
   facesProgress: null,
   facesSummary: null,
+
+  classifyingScenes: false,
+  scenesProgress: null,
+  scenesSummary: null,
 
   setView: (view) => set({ view }),
   setAppInfo: (appInfo) => set({ appInfo }),
@@ -327,6 +339,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setDetectingFaces: (detectingFaces) => set({ detectingFaces }),
+  setClassifyingScenes: (classifyingScenes) => set({ classifyingScenes }),
+  setScenesProgress: (scenesProgress) => set({ scenesProgress }),
+  setScenesSummary: (scenesSummary) => set({ scenesSummary }),
   setFacesProgress: (facesProgress) => set({ facesProgress }),
   setFacesSummary: (facesSummary) => set({ facesSummary }),
 }));

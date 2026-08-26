@@ -38,6 +38,8 @@ export interface DbStatus {
   rejected_count: number;
   /** Photos with a local-AI face result (Sprint 9). */
   faces_done: number;
+  /** Photos with a scene-classification result (Sprint 18). */
+  scenes_done: number;
   schema_version: number;
 }
 
@@ -56,6 +58,11 @@ export interface AiStatus {
   model_bytes: number;
   /** Photos with a stored face result / photos in the library. */
   faces_done: number;
+  /** Scene model (Sprint 18): name and size, reported for transparency. */
+  scene_model: string;
+  scene_model_bytes: number;
+  /** Photos with a stored scene result. */
+  scenes_done: number;
   photo_count: number;
 }
 
@@ -68,6 +75,22 @@ export interface FaceSummary {
   elapsed_ms: number;
   /** First few friendly per-file messages (the log has the full detail). */
   errors: string[];
+}
+
+/** Result of one scene-classification pass (`scenes-complete`). */
+export interface SceneSummary {
+  processed: number;
+  failed: number;
+  cancelled: boolean;
+  elapsed_ms: number;
+  /** First few friendly messages; the log holds the full detail. */
+  errors: string[];
+}
+
+/** `scenes-complete` event payload: exactly one of the two is set. */
+export interface SceneCompletePayload {
+  summary: SceneSummary | null;
+  error: string | null;
 }
 
 /** `faces-complete` event payload: exactly one of the two is set. */
@@ -279,6 +302,10 @@ export interface PhotoFull {
   is_bright: boolean;
   face_count: number | null;
   smile_count: number | null;
+  /** Scene classification (Sprint 18): merged product chip + fine label. */
+  scene_coarse: string | null;
+  scene_fine: string | null;
+  scene_conf: number | null;
   perceptual_hash: string | null;
   algorithm_version: number | null;
   analyzed_at: string | null;

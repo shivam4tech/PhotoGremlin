@@ -52,6 +52,12 @@ export const FILTER_FIELDS: FieldDef[] = [
   },
   { field: "smiling", label: "Smiling", kind: "bool", area: "Faces & smiles (local models)" },
   {
+    field: "scene_group",
+    label: "Scene group",
+    kind: "text",
+    area: "Scene (local model)",
+  },
+  {
     field: "rating",
     label: "Rating",
     kind: "int",

@@ -127,6 +127,10 @@ const SMILE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.smile_count",
 const RATING: FieldDef = FieldDef { kind: Kind::Int, expr: "p.rating", negate_bool: false };
 const FLAGGED: FieldDef = FieldDef { kind: Kind::Bool, expr: "p.flag = 1", negate_bool: false };
 const COLOR_LABEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.color_label", negate_bool: false };
+/// Scene group (Sprint 18): the MERGED product chip stored by the scene
+/// pass ("nature", "urban", "home_stay", ...). Values come from the local
+/// model; NULL when the scene pass has not run.
+const SCENE_GROUP: FieldDef = FieldDef { kind: Kind::Text, expr: "a.scene_coarse", negate_bool: false };
 
 /// The field registry (FILTER_ENGINE.md): maps each filter field to
 /// (expression, kind) so conditions validate before any SQL runs. Unknown
@@ -160,6 +164,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "rating" => &RATING,
         "flagged" => &FLAGGED,
         "color_label" => &COLOR_LABEL,
+        "scene_group" => &SCENE_GROUP,
         _ => return None,
     })
 }

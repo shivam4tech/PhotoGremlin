@@ -14,6 +14,9 @@ const baseStatus: AiStatus = {
   model: "YuNet 2023mar (OpenCV Zoo, Apache-2.0)",
   model_bytes: 223253,
   faces_done: 0,
+  scene_model: "MobileNetV3-Large two-head (trained on CC-BY Open Images)",
+  scene_model_bytes: 10240,
+  scenes_done: 0,
   photo_count: 0,
 };
 

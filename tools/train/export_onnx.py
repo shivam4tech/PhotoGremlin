@@ -35,29 +35,54 @@ def preprocess(path: pathlib.Path) -> np.ndarray:
     return a.transpose(2, 0, 1)[None]  # 1x3x224x224
 
 class ValReader(CalibrationDataReader):
-    def __init__(self, rows, thumbs, limit):
+    def __init__(self, rows, limit):
         self.rows = rows[:limit]
-        self.thumbs = thumbs
         self.i = 0
 
     def get_next(self):
         if self.i >= len(self.rows):
             return None
-        image_id = self.rows[self.i][0]
+        p, _fine = self.rows[self.i]
         self.i += 1
-        p = self.thumbs / f"{image_id}.jpg"
-        return {"image": preprocess(p)} if p.exists() else self.get_next()
+        return {"image": preprocess(p)}
 
-def accuracy(session, rows, thumbs, fine_ix, limit) -> float:
+def accuracy(session, rows, fine_ix, limit) -> float:
+    """Any-true accuracy over UNIQUE images: an image may carry several
+    verified labels (multi-row manifest); prediction counts if it hits any."""
+    by_path: dict[pathlib.Path, set[str]] = {}
+    for p, fine in rows:
+        by_path.setdefault(p, set()).add(fine)
     n = ok = 0
-    for row in rows[:limit]:
-        p = thumbs / f"{row[0]}.jpg"
-        if not p.exists():
-            continue
+    for p, fines in list(by_path.items())[:limit]:
         out = session.run(None, {"image": preprocess(p)})[0]
-        ok += int(out[0].argmax() == fine_ix[row[2]])
+        pred = fine_ix_inv[out[0].argmax()]
+        ok += int(pred in fines)
         n += 1
     return ok / max(n, 1)
+
+def build_eval_rows(repo: pathlib.Path, fine_ix: dict[str, int]) -> list[tuple[pathlib.Path, str]]:
+    """(absolute_path, fine_label) pairs from the newest val manifest.
+    Prefers corpus_v2/val.csv (4-col corpus schema); falls back to the
+    legacy multi-label val. Rows whose label was pruned from the trained
+    head are excluded (they cannot be scored by design)."""
+    corpus_val = repo / "ml-corpus/corpus_v2/val.csv"
+    rows: list[tuple[pathlib.Path, str]] = []
+    if corpus_val.exists():
+        ml_dir = repo / "ml-corpus"
+        with open(corpus_val, newline="") as f:
+            next(f)
+            for rel, fine, _conf, _source in csv.reader(f):
+                if fine in fine_ix:
+                    rows.append((ml_dir / rel, fine))
+        return rows
+    samples = repo / "ml-corpus/openimages/samples"
+    thumbs = repo / "ml-corpus/openimages/images/thumb"
+    with open(samples / "val_multi.csv", newline="") as f:
+        next(f)
+        for iid, _mid, fine, _coarse, _conf in csv.reader(f):
+            if fine in fine_ix:
+                rows.append((thumbs / f"{iid}.jpg", fine))
+    return rows
 
 def main() -> None:
     ap = argparse.ArgumentParser()
@@ -85,31 +110,42 @@ def main() -> None:
         input_names=["image"], output_names=["fine", "coarse"],
         dynamic_axes={"image": {0: "batch"}, "fine": {0: "batch"}, "coarse": {0: "batch"}},
     )
+    # fold any external weight data into the single file (torch 2.11's
+    # dynamo exporter splits it by default; in-memory loads and quantization
+    # want one file)
+    import onnx
+    from onnx.external_data_helper import convert_model_from_external_data
+    proto = onnx.load(str(fp32))
+    convert_model_from_external_data(proto)
+    onnx.save(proto, str(fp32))
     print(f"fp32 exported: {fp32.stat().st_size/1e6:.1f} MB")
 
-    samples = repo / "ml-corpus/openimages/samples"
-    thumbs = repo / "ml-corpus/openimages/images/thumb"
-    with open(samples / "val.csv", newline="") as f:
-        rows = list(csv.reader(f))[1:]
+    fine_ix = {c: i for i, c in enumerate(fine_classes)}
+    eval_rows = build_eval_rows(repo, fine_ix)
+    print(f"eval rows usable: {len(eval_rows)}")
 
     int8 = runs / "model_int8.onnx"
-    quantize_static(str(fp32), str(int8), ValReader(rows, thumbs, args.calib),
+    quantize_static(str(fp32), str(int8), ValReader(eval_rows, args.calib),
                     weight_type=QuantType.QInt8)
     print(f"int8 exported: {int8.stat().st_size/1e6:.1f} MB")
 
     so = ort.SessionOptions()
+    global fine_ix_inv
+    fine_ix_inv = {i: c for c, i in fine_ix.items()}
     s_fp = ort.InferenceSession(str(fp32), so, providers=["CPUExecutionProvider"])
     s_q = ort.InferenceSession(str(int8), so, providers=["CPUExecutionProvider"])
-    fine_ix = {c: i for i, c in enumerate(fine_classes)}
-    a_fp = accuracy(s_fp, rows, thumbs, fine_ix, args.eval)
-    a_q = accuracy(s_q, rows, thumbs, fine_ix, args.eval)
-    print(f"val subset ({args.eval}): fp32={a_fp:.4f} int8={a_q:.4f} delta={a_fp-a_q:+.4f}")
-    if a_fp - a_q > 0.02:
-        sys.exit("int8 dropped more than 2% — keeping fp32; investigate calibration")
+    a_fp = accuracy(s_fp, eval_rows, fine_ix, args.eval)
+    a_q = accuracy(s_q, eval_rows, fine_ix, args.eval)
+    print(f"val subset ({args.eval} imgs): fp32={a_fp:.4f} int8={a_q:.4f}")
 
     dest = repo / "src-tauri/models/scene_mobilenetv3_large.onnx"
-    shutil.copy2(int8, dest)
-    print(f"installed {dest} ({dest.stat().st_size/1e6:.1f} MB)")
+    if a_fp - a_q <= 0.02:
+        shutil.copy2(int8, dest)
+        print(f"installed int8 {dest} ({dest.stat().st_size/1e6:.1f} MB)")
+    else:
+        shutil.copy2(fp32, dest)
+        print(f"WARNING: int8 collapsed ({a_fp - a_q:+.4f}); installed fp32 "
+              f"{dest} ({dest.stat().st_size/1e6:.1f} MB) instead")
 
 if __name__ == "__main__":
     main()

@@ -21,7 +21,8 @@ from collections import defaultdict
 
 import torch
 
-from train import MultiLabelDataset, SceneDataset, TwoHeadNet
+import train as train_mod
+from train import CorpusDataset, MultiLabelDataset, SceneDataset, TwoHeadNet
 
 MERGED_GROUPS = {
     "nature": "nature", "nature_water": "nature",
@@ -58,12 +59,20 @@ def main() -> None:
     model = model.to(device)
     model.eval()
 
-    samples = repo / "ml-corpus/openimages/samples"
-    thumbs = repo / "ml-corpus/openimages/images/thumb"
-    name = "val_multi.csv" if multilabel else "val.csv"
-    ds = MultiLabelDataset(samples / name, thumbs,
+    mapping = json.loads((repo / "tools/train/class-map.json").read_text())
+    train_mod._COARSE_OF_FINE = {k: v["coarse"] for k, v in mapping.items()}
+    corpus_val = repo / "ml-corpus/corpus_v2/val.csv"
+    if multilabel and corpus_val.exists():
+        ds = CorpusDataset(corpus_val, repo / "ml-corpus",
                            {c: i for i, c in enumerate(fine_classes)},
                            {c: i for i, c in enumerate(coarse_classes)}, train=False)
+    else:
+        samples = repo / "ml-corpus/openimages/samples"
+        thumbs = repo / "ml-corpus/openimages/images/thumb"
+        name = "val_multi.csv" if multilabel else "val.csv"
+        ds = MultiLabelDataset(samples / name, thumbs,
+                               {c: i for i, c in enumerate(fine_classes)},
+                               {c: i for i, c in enumerate(coarse_classes)}, train=False)
     loader = torch.utils.data.DataLoader(ds, batch_size=256, num_workers=4)
 
     n = f1 = f5 = c1 = m_ok = 0

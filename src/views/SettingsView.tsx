@@ -5,6 +5,7 @@ import { MoonIcon, ShieldIcon, SunIcon } from "@/components/Icons";
 import {
   formatFaceSummaryLine,
   formatFacesProgressLine,
+  formatScenesProgressLine,
   formatModelSize,
   runtimeLine,
 } from "@/features/settings/ai";
@@ -143,6 +144,13 @@ function LocalIntelligenceCard() {
           </div>
           <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
             {formatFacesProgressLine(aiStatus)}
+          </div>
+          <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
+            Scene model: {aiStatus.scene_model} ({formatModelSize(aiStatus.scene_model_bytes)}{" "}
+            embedded, never downloaded).
+          </div>
+          <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
+            {formatScenesProgressLine(aiStatus)}
           </div>
 
           <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>

@@ -115,7 +115,7 @@ def main() -> None:
     by_hash: dict[str, tuple[int, str]] = {}
     kept_rows = []
     dropped = 0
-    for source in ("oi_human", "oi_machine", "openverse"):
+    for source in ("oi_human", "oi_machine", "openverse", "commons"):
         for row in rows_by_source[source]:
             p = base / row[0]
             digest = sha1(p, cache, cache_path)
@@ -147,9 +147,25 @@ def main() -> None:
                 n_clean += 1
     print(f"train.csv={len(kept_rows)} rows; train_clean.csv={n_clean} rows (oi_human)")
 
-    # val: unchanged clean human-only multi-label val (comparable metrics)
-    import shutil
-    shutil.copyfile(base / "openimages/samples/val_multi.csv", out / "val.csv")
+    # val: clean human-only multi-label rows converted to the corpus schema
+    # (path,fine,confidence,source) so CorpusDataset can read them; missing
+    # files skipped. Content unchanged -> metrics stay comparable.
+    with open(base / "openimages/samples/val_multi.csv", newline="") as f:
+        next(f)
+        val_rows = []
+        for iid, _mid, fine, _coarse, conf in csv.reader(f):
+            if fine not in coarse_of:
+                continue
+            p = base / "openimages/images/thumb" / f"{iid}.jpg"
+            if not p.exists():
+                continue
+            val_rows.append((p.relative_to(base).as_posix(), fine, conf))
+    with open(out / "val.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["path", "fine", "confidence", "source"])
+        for rel, fine, conf in sorted(val_rows):
+            w.writerow([rel, fine, f"{float(conf):.3f}", "oi_human"])
+    print(f"val rows: {len(val_rows)}")
 
     with open(out / "audit.csv", "w", newline="") as f:
         w = csv.writer(f)
