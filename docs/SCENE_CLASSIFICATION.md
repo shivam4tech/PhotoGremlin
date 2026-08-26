@@ -108,3 +108,40 @@ Committed: scripts, `class-map.json`, this plan, the final ONNX artifact.
 
 ~2–3 days wall-clock (downloads + training run overnight), **$0**, commercial
 -safe via CC-BY corpus + documented attribution.
+
+## Running it (Sprint 17 execution)
+
+```
+python3 tools/train/dataset/collect_data.py        # 1. collect all data (resumable)
+bash tools/train/setup_env.sh                      # 2. one-time venv + CUDA torch
+.venv/bin/python tools/train/train.py              # 3. train (~3-5h on RTX 5060)
+.venv/bin/python tools/train/export_onnx.py \
+    --checkpoint tools/train/runs/<ts>/best.pt     # 4. int8 ONNX -> src-tauri/models/
+```
+
+Every stage is resumable; `--limit N` smoke-tests training.
+
+## Round-1 results (2026-08-21) + round-2 fixes
+
+Baseline (`runs/20260821-165833`, 62,398 train imgs): fine top-1 41.3%,
+top-5 75.7%, coarse top-1 67.2%. Root causes found: three fine labels
+shared one OI MID (contradictory supervision: hospital room/hospital,
+north church/church, restaurant patio/restaurant), coarse assigned
+per-label not per-MID, long-tail (median 108 imgs/class).
+
+Round 2: canonicalize one fine label per MID (130 classes), coarse per
+MID, label smoothing 0.1, 10 epochs. If coarse top-1 still < 0.80 ->
+noisy-student round (machine-labeled conf >= 0.9 pre-training).
+
+## Round 2-3 results (2026-08-21)
+
+Round 2 (label fix + smoothing): fine 41.5 / coarse 69.0 — plateau proved
+the ceiling was the single-label assumption, not bugs. Round 3 switched to
+MULTI-LABEL training (BCE over all verified labels per image,
+samples/*_multi.csv) + sqrt-balanced sampling + tail pruning (<25 imgs):
+**fine top-1 57.1%, top-5 87.7%, coarse(21) 77.1%, coarse(10 merged)
+81.6%** (`runs/20260821-181447`). Metric = prediction is one of the
+image's true labels (product-correct for tagging/filtering). Remaining
+weaknesses: urban/nature boundary, semantically ambiguous tags (city,
+house, coast, lawn). Next lever if needed: noisy-student pre-training on
+machine-labeled OI images.
