@@ -779,6 +779,28 @@ input[type="date"] {
   min-height: 0;
 }
 
+/* Dashboard organize — per ui-skills: compositor-only micro-motion */
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 8px;
+}
+
+.section-head .section-title {
+  flex: 1;
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vg,
+  .home-row,
+  .nav-item,
+  .tile {
+    transition: none !important;
+  }
+}
+
 /* Photo tile */
 .tile {
   position: relative;
