@@ -21,24 +21,26 @@ export interface ShortcutDef {
 /** Display order on the Settings card: global first, then viewer. */
 export const SHORTCUTS: ShortcutDef[] = [
   { id: "open-folder", keys: "⌘ / Ctrl + O", action: "Open a photo folder", scope: "global" },
-  { id: "view-library", keys: "1", action: "Go to Library", scope: "global" },
-  { id: "view-dashboard", keys: "2", action: "Go to Dashboard", scope: "global" },
-  { id: "view-sessions", keys: "3", action: "Go to Sessions", scope: "global" },
-  { id: "view-collections", keys: "4", action: "Go to Collections", scope: "global" },
-  { id: "view-saved-views", keys: "5", action: "Go to Saved Views", scope: "global" },
-  { id: "view-settings", keys: "6", action: "Go to Settings", scope: "global" },
+  { id: "view-home", keys: "1", action: "Go to Home", scope: "global" },
+  { id: "view-library", keys: "2", action: "Go to Library", scope: "global" },
+  { id: "view-dashboard", keys: "3", action: "Go to Dashboard", scope: "global" },
+  { id: "view-sessions", keys: "4", action: "Go to Sessions", scope: "global" },
+  { id: "view-collections", keys: "5", action: "Go to Collections", scope: "global" },
+  { id: "view-saved-views", keys: "6", action: "Go to Saved Views", scope: "global" },
+  { id: "view-settings", keys: "7", action: "Go to Settings", scope: "global" },
   { id: "viewer-close", keys: "Esc", action: "Close the photo viewer", scope: "viewer" },
   { id: "viewer-prev", keys: "←", action: "Previous photograph", scope: "viewer" },
   { id: "viewer-next", keys: "→", action: "Next photograph", scope: "viewer" },
 ];
 
 const VIEW_BY_DIGIT: Record<string, ViewId> = {
-  "1": "library",
-  "2": "dashboard",
-  "3": "sessions",
-  "4": "collections",
-  "5": "saved-views",
-  "6": "settings",
+  "1": "home",
+  "2": "library",
+  "3": "dashboard",
+  "4": "sessions",
+  "5": "collections",
+  "6": "saved-views",
+  "7": "settings",
 };
 
 interface KeyEventLike {

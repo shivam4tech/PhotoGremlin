@@ -137,7 +137,35 @@ export function VirtualGrid({
   }
 
   return (
-    <div ref={ref} className="vg" onScroll={onScroll}>
+    <div
+      ref={ref}
+      className="vg"
+      tabIndex={0}
+      role="grid"
+      aria-label="Photo grid"
+      onScroll={onScroll}
+      onKeyDown={(e) => {
+        const el = ref.current;
+        if (!el) return;
+        const step = rowHeight;
+        if (e.key === "ArrowDown") { e.preventDefault(); el.scrollBy({ top: step }); }
+        if (e.key === "ArrowUp") { e.preventDefault(); el.scrollBy({ top: -step }); }
+        if (e.key === "PageDown") { e.preventDefault(); el.scrollBy({ top: el.clientHeight * 0.9 }); }
+        if (e.key === "PageUp") { e.preventDefault(); el.scrollBy({ top: -el.clientHeight * 0.9 }); }
+        if (e.key === "Home") { e.preventDefault(); el.scrollTop = 0; }
+        if (e.key === "End") { e.preventDefault(); el.scrollTop = el.scrollHeight; }
+      }}
+      onWheel={(e) => {
+        // Let native scroll handle it; prevent parent page scroll when grid can still scroll
+        const el = ref.current;
+        if (!el) return;
+        const atTop = el.scrollTop <= 0;
+        const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+        if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+          e.stopPropagation();
+        }
+      }}
+    >
       <div className="vg-inner" style={{ height: layout.totalHeight, position: "relative" }}>
         {rowsRender}
       </div>

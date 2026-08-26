@@ -4,12 +4,26 @@
  */
 
 export type ViewId =
+  | "home"
   | "library"
   | "dashboard"
   | "sessions"
   | "collections"
   | "saved-views"
   | "settings";
+
+export interface RecentProject {
+  path: string;
+  name: string;
+  parent: string;
+  lastOpenedAt: string;
+  photoCount: number;
+}
+
+export interface DashboardLayout {
+  hidden: string[];
+  order: string[];
+}
 
 export interface AppInfo {
   name: string;

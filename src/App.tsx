@@ -21,6 +21,7 @@ import { SessionsView } from "@/views/SessionsView";
 import { CollectionsView } from "@/views/CollectionsView";
 import { SavedViewsView } from "@/views/SavedViewsView";
 import { SettingsView } from "@/views/SettingsView";
+import { HomeView } from "@/views/HomeView";
 import { VIEW_META } from "@/stores/appStore";
 
 /**
@@ -49,9 +50,23 @@ function useAppShortcuts() {
 
 export default function App() {
   const view = useAppStore((s) => s.view);
+  const activeFolder = useAppStore((s) => s.activeFolder);
   const error = useAppStore((s) => s.error);
   const notice = useAppStore((s) => s.notice);
   const setNotice = useAppStore((s) => s.setNotice);
+
+  // First launch or after close: show Home when no project is open
+  useEffect(() => {
+    const s = useAppStore.getState();
+    if (s.activeFolder === null && s.view !== "home" && s.view !== "settings") {
+      // Defer to next tick so refreshStatus has a chance to restore
+      const t = window.setTimeout(() => {
+        const cur = useAppStore.getState();
+        if (cur.activeFolder === null) cur.setView("home");
+      }, 600);
+      return () => window.clearTimeout(t);
+    }
+  }, [activeFolder, view]);
 
   // Success notices are set by the pass-complete handlers and should be
   // transient: auto-dismiss after a few seconds, or immediately on ×.
@@ -339,6 +354,8 @@ export default function App() {
 
   const body = (() => {
     switch (view) {
+      case "home":
+        return <HomeView />;
       case "library":
         return <LibraryView />;
       case "dashboard":
@@ -358,8 +375,18 @@ export default function App() {
     <div className="app">
       <Sidebar />
       <main className="main">
-        <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description} />
-        <div className={view === "library" ? "view-scroll library-scroll" : "view-scroll"}>{body}</div>
+        <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description}>
+          {view === "library" && activeFolder ? (
+            <button
+              className="btn btn-sm"
+              onClick={() => void useAppStore.getState().closeProject()}
+              aria-label="Close project"
+            >
+              Close project
+            </button>
+          ) : null}
+        </TopBar>
+        <div className={view === "library" ? "view-scroll library-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>{body}</div>
         {notice && (
           <div
             role="status"
