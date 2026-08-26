@@ -115,7 +115,7 @@ def main() -> None:
     by_hash: dict[str, tuple[int, str]] = {}
     kept_rows = []
     dropped = 0
-    for source in ("oi_human", "oi_machine", "openverse"):
+    for source in ("oi_human", "oi_machine", "openverse", "commons"):
         for row in rows_by_source[source]:
             p = base / row[0]
             digest = sha1(p, cache, cache_path)
