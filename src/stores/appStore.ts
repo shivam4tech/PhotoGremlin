@@ -113,6 +113,8 @@ interface AppState {
   setNotice: (n: string | null) => void;
   setError: (e: string | null) => void;
 
+  recentProjects: import("@/types/api").RecentProject[];
+  dashboardLayout: import("@/types/api").DashboardLayout | null;
   refreshStatus: () => Promise<void>;
   /**
    * Pick a photo folder and make it active (Sprint 10: shared by the
@@ -121,6 +123,14 @@ interface AppState {
    * caller decides where the error is shown.
    */
   openFolder: () => Promise<string | null>;
+  /** Project management (Sprint 19): open/recent/close/new. */
+  openProject: (path: string) => Promise<void>;
+  newProject: () => Promise<void>;
+  closeProject: () => Promise<void>;
+  refreshRecentProjects: () => Promise<void>;
+  removeRecentProject: (path: string) => Promise<void>;
+  openInFileManager: (path: string) => Promise<void>;
+  setDashboardLayout: (layout: import("@/types/api").DashboardLayout) => Promise<void>;
   loadSelections: () => Promise<void>;
   /** Set one photo's selection (optimistic + persisted). */
   setSelection: (photoId: number, state: SelectionState | null) => void;
@@ -150,7 +160,7 @@ interface AppState {
 let statusInFlight = false;
 
 export const useAppStore = create<AppState>((set, get) => ({
-  view: "library",
+  view: "home",
   appInfo: null,
   paths: null,
   dbStatus: null,
@@ -164,6 +174,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   opProgress: null,
   opSummary: null,
   recentOps: [],
+  recentProjects: [],
+  dashboardLayout: null,
   libraryVersion: 0,
   selections: {},
   selectionMode: false,
@@ -223,10 +235,13 @@ export const useAppStore = create<AppState>((set, get) => ({
         api.dbStatus(),
         api.getActiveFolder(),
       ]);
-      // Always refresh counts; a folder the user just picked (or that the
-      // backend hasn't confirmed yet) wins over an empty backend answer, so
-      // opening a folder can never be clobbered by its own status refresh.
       set({ dbStatus, activeFolder: activeFolder ?? get().activeFolder });
+      // Keep recent projects in sync; non-critical.
+      api.getRecentProjects().then((r) => set({ recentProjects: r })).catch(() => {});
+      try {
+        const layout = await api.getDashboardLayout();
+        if (layout) set({ dashboardLayout: layout });
+      } catch { /* dashboard layout is non-critical */ }
     } catch {
       // Status is non-critical for the shell; errors surface when actions run.
     } finally {
@@ -237,17 +252,54 @@ export const useAppStore = create<AppState>((set, get) => ({
   openFolder: async () => {
     const picked = await api.pickFolder();
     if (!picked) return null;
-    set({ activeFolder: picked, scanSummary: null, analysisSummary: null });
-    // Persist so the next start restores this folder (get_active_folder
-    // backs it); a persistence failure shows the banner but the folder
-    // still stays active for this session.
+    set({ activeFolder: picked, scanSummary: null, analysisSummary: null, view: "library" as const });
     try {
-      await api.setActiveFolder(picked);
-    } catch (e) {
-      set({ error: toErrorMessage(e) });
+      await api.openProject(picked);
+    } catch {
+      try { await api.setActiveFolder(picked); } catch {}
     }
     await get().refreshStatus();
     return picked;
+  },
+
+  openProject: async (path: string) => {
+    set({ activeFolder: path, scanSummary: null, analysisSummary: null, view: "library" as const });
+    await api.openProject(path);
+    await get().refreshStatus();
+  },
+
+  newProject: async () => {
+    const picked = await api.pickFolder();
+    if (!picked) return;
+    // Create a per-catalog DB alongside the folder
+    await api.openProject(picked);
+    set({ activeFolder: picked, view: "library" as const });
+    await get().refreshStatus();
+  },
+
+  closeProject: async () => {
+    await api.closeProject();
+    set({ activeFolder: null, view: "home" as const });
+    await get().refreshStatus();
+  },
+
+  refreshRecentProjects: async () => {
+    try { set({ recentProjects: await api.getRecentProjects() }); } catch {}
+  },
+
+  removeRecentProject: async (path: string) => {
+    await api.removeRecentProject(path);
+    set((s) => ({ recentProjects: s.recentProjects.filter((p) => p.path !== path) }));
+  },
+
+  openInFileManager: async (path: string) => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_in_file_manager", { path });
+  },
+
+  setDashboardLayout: async (layout) => {
+    set({ dashboardLayout: layout });
+    try { await api.setDashboardLayout(layout); } catch {}
   },
 
   loadSelections: async () => {
@@ -349,6 +401,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 /** View metadata for the sidebar. */
 export const VIEW_META: Record<ViewId, { label: string; description: string }> =
   {
+    home: {
+      label: "Home",
+      description: "Recent projects and quick actions.",
+    },
     library: {
       label: "Library",
       description: "Browse, filter and work with your photographs.",

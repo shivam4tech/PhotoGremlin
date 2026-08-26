@@ -94,8 +94,149 @@ function UsageTable({ title, rows }: { title: string; rows: UsageCount[] }) {
   );
 }
 
+const DASHBOARD_SECTIONS = ["top", "characteristics", "composition", "distributions", "usage", "trend", "selection"] as const;
+type SectionId = (typeof DASHBOARD_SECTIONS)[number];
+const _SECTION_LABELS: Record<SectionId, string> = {
+  top: "Top stats",
+  characteristics: "Characteristics",
+  composition: "Composition shares",
+  distributions: "Distributions",
+  usage: "Usage",
+  trend: "Trend by month",
+  selection: "Selection",
+};
+void _SECTION_LABELS;
+
+function DashboardSections({
+  stats, analyzedPct, hidden, sectionOrder, organizeMode, onToggle, onMove,
+}: {
+  stats: PeriodStats;
+  analyzedPct: number;
+  hidden: Set<string>;
+  sectionOrder: SectionId[];
+  organizeMode: boolean;
+  onToggle: (id: SectionId) => void;
+  onMove: (id: SectionId, dir: -1 | 1) => void;
+}) {
+  const blocks: Record<SectionId, React.ReactNode> = {
+    top: (
+      <div className="stat-grid" style={{ marginBottom: 4 }}>
+        <StatCard label="Photographs" value={stats.photos} sub={stats.period} />
+        <StatCard label="Sessions" value={stats.sessions} sub={stats.photos_per_session !== null ? `${stats.photos_per_session.toFixed(1)} per session` : "—"} />
+        <StatCard label="Analyzed" value={stats.analyzed} sub={`${analyzedPct}% of this period`} />
+      </div>
+    ),
+    characteristics: (
+      <>
+        <div className="section-title">Characteristics — averages of {stats.analyzed} analyzed</div>
+        {stats.analyzed === 0 ? (
+          <div className="card"><div className="faint" style={{ fontSize: 13 }}>No analyzed photographs in this period. Run analysis in the Library.</div></div>
+        ) : (
+          <div className="stat-grid">
+            <StatCard label="Sharpness" value={fmtMetric(stats.avg_sharpness)} sub="0–100" />
+            <StatCard label="Brightness" value={fmtMetric(stats.avg_brightness)} sub="0–100" />
+            <StatCard label="Contrast" value={fmtMetric(stats.avg_contrast)} sub="0–100" />
+            <StatCard label="Saturation" value={fmtMetric(stats.avg_saturation)} sub="0–100" />
+          </div>
+        )}
+      </>
+    ),
+    composition: (
+      <>
+        <div className="section-title">Composition shares</div>
+        <div className="stat-grid">
+          <StatCard label="Monochrome" value={fmtShare(stats.monochrome_share)} sub="of analyzed" />
+          <StatCard label="Color" value={fmtShare(stats.color_share)} sub="of analyzed" />
+          {stats.faces_present_share !== null && <StatCard label="Faces present" value={fmtShare(stats.faces_present_share)} sub="of photos with face data" />}
+          {stats.smiling_share !== null && <StatCard label="Smiling" value={fmtShare(stats.smiling_share)} sub="of photos with smile data" />}
+        </div>
+      </>
+    ),
+    distributions: (
+      <>
+        <div className="section-title">Distributions</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <Histogram title="ISO" bins={stats.iso_histogram} />
+          <Histogram title="Aperture" bins={stats.aperture_histogram} />
+          <Histogram title="Focal length" bins={stats.focal_histogram} />
+          <Histogram title="Shutter" bins={stats.shutter_histogram} />
+        </div>
+      </>
+    ),
+    usage: (
+      <>
+        <div className="section-title">Usage</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 12 }}>
+          <UsageTable title="Cameras" rows={stats.camera_usage} />
+          <UsageTable title="Lenses" rows={stats.lens_usage} />
+        </div>
+      </>
+    ),
+    trend: stats.trend.length === 0 ? (
+      <>
+        <div className="section-title">Trend by month</div>
+        <div className="card"><div className="faint" style={{ fontSize: 13 }}>No months with photographs in this period — only real months are shown.</div></div>
+      </>
+    ) : (
+      <>
+        <div className="section-title">Trend by month</div>
+        <div className="card">
+          <table className="table">
+            <thead><tr><th>Month</th><th style={{ textAlign: "right" }}>Photos</th><th style={{ textAlign: "right" }}>Sessions</th><th style={{ textAlign: "right" }}>Avg sharpness</th><th style={{ textAlign: "right" }}>Avg ISO</th><th style={{ textAlign: "right" }}>Color share</th></tr></thead>
+            <tbody>{stats.trend.map((t) => (<tr key={t.month}><td>{monthLabel(t.month)}</td><td className="mono" style={{ textAlign: "right" }}>{t.photos}</td><td className="mono" style={{ textAlign: "right" }}>{t.sessions}</td><td className="mono" style={{ textAlign: "right" }}>{fmtMetric(t.avg_sharpness)}</td><td className="mono" style={{ textAlign: "right" }}>{fmtIso(t.avg_iso)}</td><td className="mono" style={{ textAlign: "right" }}>{fmtShare(t.color_share)}</td></tr>))}</tbody>
+          </table>
+          <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>Averages use the analyzed photographs of each month. Months without data never appear.</div>
+        </div>
+      </>
+    ),
+    selection: stats.selection ? (
+      <>
+        <div className="section-title">Selection</div>
+        <div className="card">
+          <div className="stat-grid">
+            <StatCard label="Imported" value={stats.selection.imported} sub="this period" />
+            <StatCard label="Selected" value={stats.selection.selected} sub="kept state" />
+            <StatCard label="Rejected" value={stats.selection.rejected} sub="culled state" />
+            <StatCard label="Trashed" value={stats.selection.trashed} sub="all time" />
+            <StatCard label="Selected ÷ imported" value={fmtRatio(stats.selection.kept_ratio)} sub="only counts selection state" />
+          </div>
+          <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>Measured ratio, not a goal.</div>
+        </div>
+      </>
+    ) : null,
+  };
+
+  return (
+    <>
+      {sectionOrder.map((id) => {
+        const content = blocks[id];
+        if (!content) return null;
+        const isHidden = hidden.has(id);
+        if (isHidden && !organizeMode) return null;
+        return (
+          <div key={id} style={{ opacity: isHidden ? 0.4 : 1 }}>
+            {organizeMode && (
+              <div style={{ display: "flex", gap: 4, marginBottom: 4, alignItems: "center" }}>
+                <span className="faint mono" style={{ fontSize: 11 }}>{_SECTION_LABELS[id]}</span>
+                <span style={{ flex: 1 }} />
+                <button className="btn btn-sm" aria-label={isHidden ? `Show ${id}` : `Hide ${id}`} onClick={() => onToggle(id)}>{isHidden ? "Show" : "Hide"}</button>
+                <button className="btn btn-sm" aria-label={`Move ${id} up`} disabled={sectionOrder.indexOf(id) <= 0} onClick={() => onMove(id, -1)}>↑</button>
+                <button className="btn btn-sm" aria-label={`Move ${id} down`} disabled={sectionOrder.indexOf(id) >= sectionOrder.length - 1} onClick={() => onMove(id, 1)}>↓</button>
+              </div>
+            )}
+            {content}
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 export function DashboardView() {
   const dbStatus = useAppStore((s) => s.dbStatus);
+  const dashboardLayout = useAppStore((s) => s.dashboardLayout);
+  const setDashboardLayout = useAppStore((s) => s.setDashboardLayout);
+  const [organizeMode, setOrganizeMode] = useState(false);
   const [kind, setKind] = useState<string>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -139,6 +280,29 @@ export function DashboardView() {
       ? Math.round(((stats?.analyzed ?? 0) / dbStatus.photo_count) * 100)
       : 0;
 
+  const sectionOrder: SectionId[] = dashboardLayout?.order.length
+    ? (dashboardLayout.order.filter((id) => (DASHBOARD_SECTIONS as readonly string[]).includes(id)) as SectionId[]).concat(
+        DASHBOARD_SECTIONS.filter((id) => !dashboardLayout.order.includes(id)),
+      )
+    : ([...DASHBOARD_SECTIONS] as SectionId[]);
+  const hidden = new Set(dashboardLayout?.hidden ?? []);
+  function toggleHidden(id: SectionId) {
+    const next = new Set(hidden);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    void setDashboardLayout({ hidden: [...next], order: sectionOrder });
+  }
+  function moveSection(id: SectionId, dir: -1 | 1) {
+    const idx = sectionOrder.indexOf(id);
+    const j = idx + dir;
+    if (j < 0 || j >= sectionOrder.length) return;
+    const next = [...sectionOrder];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    void setDashboardLayout({ hidden: [...hidden], order: next });
+  }
+  // wired in Sprint 20's section rendering; keep typecheck clean
+  void toggleHidden; void moveSection; void hidden;
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
@@ -176,7 +340,22 @@ export function DashboardView() {
             />
           </span>
         )}
+        <span style={{ flex: 1 }} />
+        <button
+          className={`btn btn-sm${organizeMode ? " btn-primary" : ""}`}
+          onClick={() => setOrganizeMode((v) => !v)}
+          aria-pressed={organizeMode}
+          aria-label="Organize dashboard"
+          title="Show, hide and reorder dashboard sections"
+        >
+          {organizeMode ? "Done" : "Organize"}
+        </button>
       </div>
+      {organizeMode && (
+        <div className="faint" style={{ fontSize: 12, marginBottom: 14 }}>
+          Hide sections with the eye, reorder with ↑↓. Changes save automatically.
+        </div>
+      )}
 
       {error && (
         <div
@@ -200,138 +379,15 @@ export function DashboardView() {
             : "Computing statistics…"}
         </div>
       ) : (
-        <>
-          <div className="stat-grid" style={{ marginBottom: 4 }}>
-            <StatCard label="Photographs" value={stats.photos} sub={stats.period} />
-            <StatCard
-              label="Sessions"
-              value={stats.sessions}
-              sub={
-                stats.photos_per_session !== null
-                  ? `${stats.photos_per_session.toFixed(1)} per session`
-                  : "—"
-              }
-            />
-            <StatCard
-              label="Analyzed"
-              value={stats.analyzed}
-              sub={`${analyzedPct}% of this period`}
-            />
-          </div>
-
-          <div className="section-title">Characteristics — averages of {stats.analyzed} analyzed</div>
-          {stats.analyzed === 0 ? (
-            <div className="card">
-              <div className="faint" style={{ fontSize: 13 }}>
-                No analyzed photographs in this period. Run analysis in the Library and
-                these characteristics appear — nothing is estimated in the meantime.
-              </div>
-            </div>
-          ) : (
-            <div className="stat-grid">
-              <StatCard label="Sharpness" value={fmtMetric(stats.avg_sharpness)} sub="0–100" />
-              <StatCard label="Brightness" value={fmtMetric(stats.avg_brightness)} sub="0–100" />
-              <StatCard label="Contrast" value={fmtMetric(stats.avg_contrast)} sub="0–100" />
-              <StatCard label="Saturation" value={fmtMetric(stats.avg_saturation)} sub="0–100" />
-            </div>
-          )}
-
-          <div className="section-title">Composition shares</div>
-          <div className="stat-grid">
-            <StatCard label="Monochrome" value={fmtShare(stats.monochrome_share)} sub="of analyzed" />
-            <StatCard label="Color" value={fmtShare(stats.color_share)} sub="of analyzed" />
-            {stats.faces_present_share !== null && (
-              <StatCard label="Faces present" value={fmtShare(stats.faces_present_share)} sub="of photos with face data" />
-            )}
-            {stats.smiling_share !== null && (
-              <StatCard label="Smiling" value={fmtShare(stats.smiling_share)} sub="of photos with smile data" />
-            )}
-          </div>
-
-          <div className="section-title">Distributions</div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-              gap: 12,
-            }}
-          >
-            <Histogram title="ISO" bins={stats.iso_histogram} />
-            <Histogram title="Aperture" bins={stats.aperture_histogram} />
-            <Histogram title="Focal length" bins={stats.focal_histogram} />
-            <Histogram title="Shutter" bins={stats.shutter_histogram} />
-          </div>
-
-          <div className="section-title">Usage</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 12 }}>
-            <UsageTable title="Cameras" rows={stats.camera_usage} />
-            <UsageTable title="Lenses" rows={stats.lens_usage} />
-          </div>
-
-          <div className="section-title">Trend by month</div>
-          {stats.trend.length === 0 ? (
-            <div className="card">
-              <div className="faint" style={{ fontSize: 13 }}>
-                No months with photographs in this period — only real months are shown,
-                never filled-in ones.
-              </div>
-            </div>
-          ) : (
-            <div className="card">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Month</th>
-                    <th style={{ textAlign: "right" }}>Photos</th>
-                    <th style={{ textAlign: "right" }}>Sessions</th>
-                    <th style={{ textAlign: "right" }}>Avg sharpness</th>
-                    <th style={{ textAlign: "right" }}>Avg ISO</th>
-                    <th style={{ textAlign: "right" }}>Color share</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.trend.map((t) => (
-                    <tr key={t.month}>
-                      <td>{monthLabel(t.month)}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>{t.photos}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>{t.sessions}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>{fmtMetric(t.avg_sharpness)}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>{fmtIso(t.avg_iso)}</td>
-                      <td className="mono" style={{ textAlign: "right" }}>{fmtShare(t.color_share)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-                Averages use the analyzed photographs of each month. Months without
-                data never appear.
-              </div>
-            </div>
-          )}
-
-          {stats.selection && (
-            <>
-              <div className="section-title">Selection</div>
-              <div className="card">
-                <div className="stat-grid">
-                  <StatCard label="Imported" value={stats.selection.imported} sub="this period" />
-                  <StatCard label="Selected" value={stats.selection.selected} sub="kept state" />
-                  <StatCard label="Rejected" value={stats.selection.rejected} sub="culled state" />
-                  <StatCard label="Trashed" value={stats.selection.trashed} sub="all time" />
-                  <StatCard
-                    label="Selected ÷ imported"
-                    value={fmtRatio(stats.selection.kept_ratio)}
-                    sub="only counts selection state"
-                  />
-                </div>
-                <div className="faint" style={{ fontSize: 11.5, marginTop: 10 }}>
-                  The ratio appears as soon as selection state or file operations exist;
-                  it is a measured ratio, not a goal.
-                </div>
-              </div>
-            </>
-          )}
-        </>
+        <DashboardSections
+          stats={stats}
+          analyzedPct={analyzedPct}
+          hidden={hidden}
+          sectionOrder={sectionOrder}
+          organizeMode={organizeMode}
+          onToggle={toggleHidden}
+          onMove={moveSection}
+        />
       )}
     </div>
   );

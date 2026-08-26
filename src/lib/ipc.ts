@@ -35,6 +35,17 @@ export const api = {
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),
+  getRecentProjects: (): Promise<import("@/types/api").RecentProject[]> =>
+    invoke("get_recent_projects"),
+  removeRecentProject: (path: string): Promise<void> =>
+    invoke("remove_recent_project", { path }),
+  clearRecentProjects: (): Promise<void> => invoke("clear_recent_projects"),
+  closeProject: (): Promise<void> => invoke("close_project"),
+  openProject: (path: string): Promise<void> => invoke("open_project", { path }),
+  getDashboardLayout: (): Promise<import("@/types/api").DashboardLayout | null> =>
+    invoke("get_dashboard_layout"),
+  setDashboardLayout: (layout: import("@/types/api").DashboardLayout): Promise<void> =>
+    invoke("set_dashboard_layout", { layout }),
   startScan: (path: string): Promise<void> => invoke("start_scan", { path }),
   stopScan: (): Promise<boolean> => invoke("stop_scan"),
   startAnalysis: (): Promise<void> => invoke("start_analysis"),

@@ -307,6 +307,21 @@ export function SettingsView() {
         </div>
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Projects</h3>
+        <p className="faint" style={{ marginTop: 0, marginBottom: 10 }}>
+          Recent projects are the last folders you opened — up to the cap below. Removing from the list never deletes photos or folders on disk.
+        </p>
+        <button
+          className="btn btn-sm"
+          onClick={async () => {
+            try { await api.clearRecentProjects(); await useAppStore.getState().refreshRecentProjects(); } catch (e) { useAppStore.getState().setError(toErrorMessage(e)); }
+          }}
+        >
+          Clear recent projects
+        </button>
+      </div>
+
       <div className="card">
         <h3>Local storage</h3>
         {paths ? (

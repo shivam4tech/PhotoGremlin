@@ -3,6 +3,7 @@ import type { ViewId } from "@/types/api";
 import {
   CollectionsIcon,
   DashboardIcon,
+  HomeIcon,
   LibraryIcon,
   LogoMark,
   SavedViewsIcon,
@@ -12,6 +13,7 @@ import {
 } from "./Icons";
 
 const NAV: { id: ViewId; icon: (p: { size?: number }) => JSX.Element }[] = [
+  { id: "home", icon: HomeIcon },
   { id: "library", icon: LibraryIcon },
   { id: "dashboard", icon: DashboardIcon },
   { id: "sessions", icon: SessionsIcon },
