@@ -32,8 +32,15 @@ export default defineConfig({
     port: 1420,
     strictPort: true,
     watch: {
-      // Don't trigger reloads when Rust recompiles.
-      ignored: ["**/src-tauri/**"],
+      ignored: [
+        "**/src-tauri/**",
+        // Training / dataset corpora contain 100k+ images — watching them
+        // exhausts the inotify file-watcher limit (ENOSPC).
+        "**/ml-corpus/**",
+        "**/tools/train/.venv/**",
+        "**/tools/train/runs/**",
+        "**/node_modules/**",
+      ],
     },
   },
   envPrefix: ["VITE_", "TAURI_ENV_"],
