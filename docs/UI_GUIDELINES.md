@@ -33,6 +33,30 @@ with a concrete fix, like the skills prescribe.
 - Every empty state must offer exactly one clear next action (see
   `EmptyState.tsx`) — an action, not just an explanation.
 
+### Library workspace ownership (Sprint 24)
+
+The Library uses a stable three-pane desktop workspace, adapted from the
+source/work-area/task-panel pattern used by photography tools such as
+Lightroom Classic:
+
+- the application sidebar is the **source and management rail**. Review views
+  are first, followed by current/recent folders, saved views, and links to
+  Dashboard, Sessions, Collections, and Saved Views management;
+- the center is the **photograph work area**. It owns progress, similarity
+  groups, culling/file-operation surfaces, the virtualized grid, and its
+  status bar. Filter controls do not consume vertical canvas space;
+- the right Library inspector is the **filter task panel**. It owns active
+  condition chips, measured quick filters, the advanced condition composer,
+  clear, and save-as-view;
+- scan, metadata, analysis, similarity, culling, and review commands remain in
+  the horizontal Library action bar so long-running operations stay visible.
+
+At the supported 1024 px minimum window width, the rails remain visible and
+the center grid stays the only photograph scroller. The inspector has its own
+vertical scroll; it must never make the virtual grid measure its contents.
+This is a structural convention, not an Adobe visual clone: PhotoGremlin keeps
+its own tokens, green accent, language, and local-first controls.
+
 ## 3. Typography
 
 - Headings and stat labels may set `text-wrap: balance`; body text

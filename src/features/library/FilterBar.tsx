@@ -17,6 +17,8 @@ interface FilterBarProps {
   disabled?: boolean;
   /** Keep EXIF value suggestions relevant to the project/shoot on screen. */
   sessionId?: number | null;
+  /** Inspector mode is persistently open inside the Library's right rail. */
+  mode?: "bar" | "inspector";
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
@@ -112,7 +114,7 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
  * engine and (later) stored in saved views. Neutral technical language
  * throughout (FILTER_ENGINE.md).
  */
-export function FilterBar({ draft, onChange, disabled, sessionId = null }: FilterBarProps) {
+export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
   const [open, setOpen] = useState(draft.length > 0);
   const [field, setField] = useState(FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
@@ -151,6 +153,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null }: Filte
     ? { field, operator: "is-null" as const, value: null }
     : buildCondition(field, op, raw, raw2);
   const canAdd = candidate !== null;
+  const expanded = mode === "inspector" || open;
 
   function selectField(f: string) {
     setField(f);
@@ -293,20 +296,22 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null }: Filte
   }
 
   return (
-    <div className="filterbar">
-      <button
-        className={`btn btn-sm ${draft.length > 0 ? "btn-primary" : ""}`}
-        onClick={() => setOpen(!open)}
-        disabled={disabled}
-        aria-expanded={open}
-      >
-        Filters{draft.length > 0 ? ` (${draft.length})` : ""}
-        <span className="faint" style={{ marginLeft: 6 }}>
-          {open ? "▲" : "▼"}
-        </span>
-      </button>
+    <div className={`filterbar filterbar-${mode}`}>
+      {mode === "bar" && (
+        <button
+          className={`btn btn-sm ${draft.length > 0 ? "btn-primary" : ""}`}
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          aria-expanded={open}
+        >
+          Filters{draft.length > 0 ? ` (${draft.length})` : ""}
+          <span className="faint" style={{ marginLeft: 6 }}>
+            {open ? "▲" : "▼"}
+          </span>
+        </button>
+      )}
 
-      {open && (
+      {expanded && (
         <div className="filterbar-panel">
           {draft.length > 0 && (
             <div className="filterbar-chips">

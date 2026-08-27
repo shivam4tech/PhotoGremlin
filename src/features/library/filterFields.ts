@@ -175,6 +175,18 @@ export function replaceFieldConditions(
   return replacement ? [...others, replacement] : others;
 }
 
+/** Toggle one exact condition while preserving every other field. Used by
+ * compact workspace shortcuts such as Review views. */
+export function toggleExactFieldCondition(
+  conditions: FilterCondition[],
+  candidate: FilterCondition,
+): FilterCondition[] {
+  const current = conditions.find((condition) => condition.field === candidate.field);
+  const alreadyActive = current?.operator === candidate.operator
+    && JSON.stringify(current.value) === JSON.stringify(candidate.value);
+  return replaceFieldConditions(conditions, candidate.field, alreadyActive ? null : candidate);
+}
+
 const RELATIONAL: OpDef[] = [
   { op: "=", label: "=" },
   { op: "!=", label: "≠" },

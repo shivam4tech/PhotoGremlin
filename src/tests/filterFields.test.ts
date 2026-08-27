@@ -11,6 +11,7 @@ import {
   activeStandardThreshold,
   replaceFieldConditions,
   standardThresholdCondition,
+  toggleExactFieldCondition,
   visualBandCondition,
   STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
@@ -258,6 +259,16 @@ describe("quick filter controls", () => {
     expect(activeStandardThreshold([
       { field: "iso", operator: "between", value: [100, 800] },
     ], "iso")).toBeNull();
+  });
+
+  it("toggles a review shortcut without discarding unrelated filters", () => {
+    const iso = { field: "iso", operator: "<=", value: 1600 } as const;
+    const unreviewed = { field: "review_state", operator: "is-null", value: null } as const;
+    const kept = { field: "review_state", operator: "=", value: "selected" } as const;
+
+    expect(toggleExactFieldCondition([iso], unreviewed)).toEqual([iso, unreviewed]);
+    expect(toggleExactFieldCondition([iso, unreviewed], kept)).toEqual([iso, kept]);
+    expect(toggleExactFieldCondition([iso, kept], kept)).toEqual([iso]);
   });
 });
 
