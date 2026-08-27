@@ -35,8 +35,20 @@ export const api = {
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),
-  getRecentProjects: (): Promise<import("@/types/api").RecentProject[]> =>
-    invoke("get_recent_projects"),
+  getRecentProjects: async (): Promise<import("@/types/api").RecentProject[]> => {
+    const raw = await invoke<unknown[]>("get_recent_projects");
+    return (raw as unknown[]).map((r: unknown) => {
+      if (typeof r === "string") return { path: r, name: r.split(/[\\/]/).filter(Boolean).pop() ?? r, parent: "", lastOpenedAt: new Date().toISOString(), photoCount: 0 };
+      const o = r as Record<string, unknown>;
+      return {
+        path: String(o.path ?? o["photo_path"] ?? ""),
+        name: String(o.name ?? String(o.path ?? "").split(/[\\/]/).filter(Boolean).pop() ?? ""),
+        parent: String(o.parent ?? o["parent_path"] ?? ""),
+        lastOpenedAt: String(o.lastOpenedAt ?? o["last_opened_at"] ?? new Date().toISOString()),
+        photoCount: Number(o.photoCount ?? o["photo_count"] ?? 0),
+      };
+    });
+  },
   removeRecentProject: (path: string): Promise<void> =>
     invoke("remove_recent_project", { path }),
   clearRecentProjects: (): Promise<void> => invoke("clear_recent_projects"),

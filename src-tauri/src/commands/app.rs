@@ -100,15 +100,19 @@ pub fn get_active_folder(state: State<AppState>) -> AppResult<Option<String>> {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct RecentProject {
     pub path: String,
     pub name: String,
     pub parent: String,
+    #[serde(alias = "last_opened_at")]
     pub last_opened_at: String,
+    #[serde(alias = "photo_count")]
     pub photo_count: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct DashboardLayout {
     pub hidden: Vec<String>,
     pub order: Vec<String>,

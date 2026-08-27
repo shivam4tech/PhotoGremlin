@@ -156,8 +156,8 @@ export function HomeView() {
                     </span>
                     <span className="home-row-meta">
                       <span className="home-row-time" title={p.lastOpenedAt}>{formatLastOpened(p.lastOpenedAt)}</span>
-                      <span className="home-count mono" aria-label={`${p.photoCount} photographs`}>
-                        {p.photoCount.toLocaleString()} photos
+                      <span className="home-count mono" aria-label={`${p.photoCount ?? 0} photographs`}>
+                        {(p.photoCount ?? 0).toLocaleString()} photos
                       </span>
                     </span>
                   </button>
