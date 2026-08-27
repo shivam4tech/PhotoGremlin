@@ -17,8 +17,7 @@ import { draftToFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
 import type { PhotoSummary, SimilarityGroup } from "@/types/api";
 
-/** How many group cards to show before the "N more" note. */
-const GROUPS_SHOWN = 12;
+const GROUPS_PAGE = 12;
 /** A group grid loads up to this many photos at once (groups are small). */
 const GROUP_PAGE = 500;
 
@@ -56,6 +55,9 @@ export function LibraryView() {
   const [group, setGroup] = useState<SimilarityGroup | null>(null);
   const [groupPhotos, setGroupPhotos] = useState<PhotoSummary[]>([]);
   const [groupLoading, setGroupLoading] = useState(false);
+  const [groupTab, setGroupTab] = useState<"all" | "similar" | "burst">("all");
+  const [groupsVisible, setGroupsVisible] = useState(GROUPS_PAGE);
+  useEffect(() => { setGroupsVisible(GROUPS_PAGE); }, [similarityGroups, groupTab]);
 
   // Re-fetch the index when a scan completes, a file operation changed the
   // files on disk, or the folder changed.
@@ -565,16 +567,36 @@ export function LibraryView() {
         </div>
       )}
 
-      {group === null && !findingSimilar && (similarityGroups?.length ?? 0) > 0 && (
+      {group === null && !findingSimilar && (similarityGroups?.length ?? 0) > 0 && (() => {
+        const similarOnly = similarityGroups!.filter((g) => g.group_type === "similar");
+        const burstOnly = similarityGroups!.filter((g) => g.group_type === "burst");
+        const filtered = groupTab === "similar" ? similarOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
+        const visible = filtered.slice(0, groupsVisible);
+        return (
         <div className="similars">
           <div className="similars-head">
-            <span style={{ fontWeight: 600 }}>Similar groups ({similarityGroups!.length})</span>
+            <span style={{ fontWeight: 600 }}>
+              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${burstOnly.length} bursts` :
+               groupTab === "similar" ? `Similar — ${similarOnly.length} groups` :
+               `Bursts — ${burstOnly.length} groups`}
+            </span>
             <span className="faint" style={{ fontSize: 12 }}>
-              Near-duplicates and same-moment runs, found by perceptual hashing on this machine
+              {groupTab === "burst"
+                ? "Runs captured within seconds — time, not look"
+                : groupTab === "similar"
+                ? "Near-identical structure (same moment, tight threshold)"
+                : "Near-duplicates and same-moment runs, found by perceptual hashing on this machine"}
             </span>
           </div>
+          <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
+            {(["all", "similar", "burst"] as const).map((t) => (
+              <button key={t} className={`btn btn-sm${groupTab === t ? " btn-primary" : ""}`} onClick={() => setGroupTab(t)}>
+                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : `Bursts (${burstOnly.length})`}
+              </button>
+            ))}
+          </div>
           <div className="similars-cards">
-            {similarityGroups!.slice(0, GROUPS_SHOWN).map((g) => (
+            {visible.map((g) => (
               <button
                 key={g.id}
                 className="group-card"
@@ -603,17 +625,34 @@ export function LibraryView() {
                 </span>
               </button>
             ))}
-            {similarityGroups!.length > GROUPS_SHOWN && (
-              <span className="faint" style={{ fontSize: 12, alignSelf: "center" }}>
-                …and {similarityGroups!.length - GROUPS_SHOWN} more
-              </span>
+            {filtered.length > groupsVisible && (
+              <button className="btn btn-sm" onClick={() => setGroupsVisible((v) => v + GROUPS_PAGE)}>
+                Load {Math.min(GROUPS_PAGE, filtered.length - groupsVisible)} more — {filtered.length - groupsVisible} remaining
+              </button>
             )}
           </div>
         </div>
-      )}
+        ); })()}
 
       {selectionMode && hasPhotos && (
         <div className="cullbar">
+          <span className="faint" style={{ fontSize: 12 }}>
+            Cull helpers — filters are the science; selection is the decision.
+          </span>
+          <button
+            className="btn btn-sm"
+            onClick={() => store().setFilterConditions([...filterConditions, { field: "sharpness", operator: ">=", value: 60 }])}
+            title="Show sharp photographs (measured sharpness ≥ 60)"
+          >
+            Sharp
+          </button>
+          <button
+            className="btn btn-sm"
+            onClick={() => store().setFilterConditions([...filterConditions, { field: "scene_group", operator: "=", value: "nature" }])}
+            title="Filter by the trained scene tag"
+          >
+            Nature
+          </button>
           <span>
             {selectedIds.length.toLocaleString()} keep{selectedIds.length === 1 ? "" : "s"} · {rejectedCount.toLocaleString()} reject{rejectedCount === 1 ? "" : "ed"}
           </span>
@@ -703,6 +742,7 @@ export function LibraryView() {
             <div className="library-grid-area">
               <VirtualGrid
                 itemCount={pagePhotos.length}
+                onReachEnd={() => { if (group === null && photos.hasMore && !photos.loading) photos.loadMore(); }}
                 render={(i) => (
                   <PhotoTile
                     photo={pagePhotos[i]}
@@ -726,12 +766,14 @@ export function LibraryView() {
               </span>
             ) : filterConditions.length > 0 ? (
               <span>
-                Showing {photos.total.toLocaleString()} of{" "}
-                {(dbStatus?.photo_count ?? 0).toLocaleString()} photographs (
-                {filterConditions.length} filter{filterConditions.length > 1 ? "s" : ""})
+                Showing {pagePhotos.length.toLocaleString()} of {photos.total.toLocaleString()} filtered
+                {photos.hasMore ? " — scroll for more" : ""} · {filterConditions.length} filter{filterConditions.length > 1 ? "s" : ""}
               </span>
             ) : (
-              <span>{photos.total.toLocaleString()} photographs</span>
+              <span>
+                {pagePhotos.length.toLocaleString()} of {photos.total.toLocaleString()} photographs
+                {photos.hasMore ? " — scroll for more" : ""}
+              </span>
             )}
             {group === null && <span className="faint">Page {photos.page + 1}</span>}
             {dbStatus && dbStatus.analyzed_count > 0 && (

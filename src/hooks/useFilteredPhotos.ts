@@ -13,6 +13,8 @@ export interface FilteredPhotosState {
   error: string | null;
   goToPage: (page: number) => void;
   reload: () => void;
+  loadMore: () => void;
+  hasMore: boolean;
 }
 
 /**
@@ -33,17 +35,23 @@ export function useFilteredPhotos(
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
-    async (p: number, fj: string) => {
+    async (p: number, fj: string, append: boolean) => {
       setLoading(true);
       setError(null);
       try {
         const res = await api.listFilteredPhotos(fj, p * PHOTOS_PAGE_SIZE, PHOTOS_PAGE_SIZE);
-        setPhotos(res.photos);
+        if (append && p > 0) {
+          setPhotos((prev) => [...prev, ...res.photos]);
+        } else {
+          setPhotos(res.photos);
+        }
         setTotal(res.total);
         setPage(p);
       } catch (e) {
-        setPhotos([]);
-        setTotal(0);
+        if (!append) {
+          setPhotos([]);
+          setTotal(0);
+        }
         setError(toErrorMessage(e));
       } finally {
         setLoading(false);
@@ -54,7 +62,7 @@ export function useFilteredPhotos(
 
   // (Re)load page 0 when the library changes or the filter changes.
   useEffect(() => {
-    if (enabled) void load(0, filterJson);
+    if (enabled) void load(0, filterJson, false);
   }, [enabled, filterJson, refreshKey, load]);
 
   // Forget contents when the library is cleared.
@@ -70,14 +78,24 @@ export function useFilteredPhotos(
   const goToPage = useCallback(
     (p: number) => {
       const maxPage = Math.max(0, Math.ceil(total / PHOTOS_PAGE_SIZE) - 1);
-      void load(Math.min(Math.max(0, p), maxPage), filterJson);
+      void load(Math.min(Math.max(0, p), maxPage), filterJson, false);
     },
     [load, total, filterJson],
   );
 
   const reload = useCallback(() => {
-    void load(page, filterJson);
+    void load(page, filterJson, false);
   }, [load, page, filterJson]);
 
-  return { photos, total, page, loading, error, goToPage, reload };
+  const loadMore = useCallback(() => {
+    const nextPage = page + 1;
+    const maxPage = Math.max(0, Math.ceil(total / PHOTOS_PAGE_SIZE) - 1);
+    if (nextPage <= maxPage && !loading) {
+      void load(nextPage, filterJson, true);
+    }
+  }, [load, page, total, filterJson, loading]);
+
+  const hasMore = (page + 1) * PHOTOS_PAGE_SIZE < total;
+
+  return { photos, total, page, loading, error, goToPage, reload, loadMore, hasMore };
 }

@@ -62,6 +62,8 @@ export interface VirtualGridProps {
   overscanRows?: number;
   /** Mount one item per visible index. Kept stable across scrolls. */
   render: (index: number) => React.ReactNode;
+  /** Called once when the user scrolls near the end (for infinite scroll). */
+  onReachEnd?: () => void;
 }
 
 /**
@@ -76,6 +78,7 @@ export function VirtualGrid({
   rowHeight = 180,
   overscanRows = 2,
   render,
+  onReachEnd,
 }: VirtualGridProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ w: 0, h: 0 });
@@ -102,6 +105,9 @@ export function VirtualGrid({
     raf.current = requestAnimationFrame(() => {
       raf.current = 0;
       setScrollTop(el.scrollTop);
+      if (onReachEnd && el.scrollTop + el.clientHeight >= el.scrollHeight - rowHeight * 2) {
+        onReachEnd();
+      }
     });
   }
 

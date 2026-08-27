@@ -37,8 +37,10 @@ use crate::events::ProgressPayload;
 
 /// A 64-bit dHash distance at or below this is "similar". Unrelated photos
 /// land near 32 ± a few bits, near-duplicates (re-encodes, tiny crops) stay
-/// well under 8. Pinned by unit tests.
-pub const SIMILAR_THRESHOLD: u32 = 8;
+/// well under 6. 8 → 6 tightened after telemetry on 400-image cards showed
+/// ~100 tiny groups; 6 collapses the 2–3 frame noise without losing true
+/// similar. Pinned by unit tests.
+pub const SIMILAR_THRESHOLD: u32 = 6;
 /// Cross-session threshold (Sprint 16): stricter, because the question is
 /// "was this file imported / re-encoded again?", and same-file copies sit at
 /// distance 0–3. Everything looser is a same-moment question, which stays

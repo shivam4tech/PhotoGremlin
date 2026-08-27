@@ -48,9 +48,11 @@ levels slightly but rarely flips which neighbor is darker, so the two hashes
 stay close.
 
 - **Distance** is the **Hamming distance** (popcount of XOR).
-- **Threshold** `SIMILAR_THRESHOLD = 8`: at or below 8 differing bits →
+- **Threshold** `SIMILAR_THRESHOLD = 6`: at or below 6 differing bits →
   "similar". Unrelated photos land near 32 ± a few bits; near-duplicates stay
-  well under 8. (Pinned by unit tests: distinct content must exceed the
+  well under 6. `8 → 6` tightened after telemetry on 400-image cards showed
+  ~100 tiny groups at 8; 6 collapses the 2–3 frame noise without losing true
+  similar. (Pinned by unit tests: distinct content must exceed the
   threshold; mild noise must stay under it.)
 - **Grouping** is union-find: within a session, every pair within the
   threshold is merged into one component; each component of ≥ 2 photos is a
