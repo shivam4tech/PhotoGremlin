@@ -48,7 +48,8 @@ export function HomeView() {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
         e.preventDefault();
-        const trigger = document.querySelector<HTMLButtonElement>(`[data-menu-trigger="${CSS.escape(menuOpen!)}"]`);
+        const esc = typeof CSS !== "undefined" && typeof CSS.escape === "function" ? CSS.escape(menuOpen!) : menuOpen!.replace(/[^a-zA-Z0-9]/g, "\\$&");
+        const trigger = document.querySelector<HTMLButtonElement>(`[data-menu-trigger="${esc}"]`);
         setMenuOpen(null);
         trigger?.focus();
       }

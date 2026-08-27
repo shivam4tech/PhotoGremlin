@@ -160,7 +160,7 @@ interface AppState {
 let statusInFlight = false;
 
 export const useAppStore = create<AppState>((set, get) => ({
-  view: "home",
+  view: "library",
   appInfo: null,
   paths: null,
   dbStatus: null,
