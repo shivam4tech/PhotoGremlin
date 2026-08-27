@@ -350,38 +350,105 @@ impl Db {
         Ok(version)
     }
 
-    /// Quick status counters for the shell UI.
-    pub fn status(&self) -> Result<DbStatus, AppError> {
-        let conn = self.lock()?;
-        let photo_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0))
-            .map_err(db_err("count photos"))?;
-        let session_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
-            .map_err(db_err("count sessions"))?;
-        let analyzed_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM analysis", [], |r| r.get(0))
-            .map_err(db_err("count analysis"))?;
-        // Photos still awaiting the EXIF/metadata pass (never read yet, or
-        // changed on disk since the last read).
-        let metadata_pending: i64 = conn
+    fn active_session_id(&self, conn: &Connection) -> Result<Option<i64>, AppError> {
+        let active: Option<String> = conn
             .query_row(
-                "SELECT COUNT(*) FROM photos
-                 WHERE exif_at IS NULL
-                    OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)",
+                "SELECT value FROM app_settings WHERE key = 'active_folder'",
                 [],
                 |r| r.get(0),
             )
-            .map_err(db_err("count metadata pending"))?;
-        let (selected_count, rejected_count): (i64, i64) = conn
-            .query_row(
-                "SELECT
-                   (SELECT COUNT(*) FROM selections WHERE state = 'selected'),
-                   (SELECT COUNT(*) FROM selections WHERE state = 'rejected')",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .map_err(db_err("count selections"))?;
+            .optional()
+            .map_err(db_err("read active_folder"))?;
+        if let Some(path) = active {
+            let sid: Option<i64> = conn
+                .query_row(
+                    "SELECT id FROM sessions WHERE root_path = ?1",
+                    params![path],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(db_err("lookup active session"))?;
+            Ok(sid)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Quick status counters for the shell UI. When a project is open
+    /// (active_folder → session), counts are scoped to that session so the
+    /// TopBar badge, dashboard, and progress all reflect the current project,
+    /// not a stale global total. With no project (Home), global counts are
+    /// returned so the dashboard still has data.
+    pub fn status(&self) -> Result<DbStatus, AppError> {
+        let conn = self.lock()?;
+        let active_sid = self.active_session_id(&conn)?;
+        let photo_count: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row("SELECT COUNT(*) FROM photos WHERE session_id = ?1", params![sid], |r| r.get(0))
+                .map_err(db_err("count photos"))?,
+            None => conn
+                .query_row("SELECT COUNT(*) FROM photos", [], |r| r.get(0))
+                .map_err(db_err("count photos"))?,
+        };
+        let session_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .map_err(db_err("count sessions"))?;
+        let analyzed_count: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis a JOIN photos p ON p.id = a.photo_id WHERE p.session_id = ?1",
+                    params![sid],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count analysis"))?,
+            None => conn
+                .query_row("SELECT COUNT(*) FROM analysis", [], |r| r.get(0))
+                .map_err(db_err("count analysis"))?,
+        };
+        // Photos still awaiting the EXIF/metadata pass (never read yet, or
+        // changed on disk since the last read) — scoped to active session.
+        let metadata_pending: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM photos
+                      WHERE session_id = ?1 AND (
+                        exif_at IS NULL
+                        OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
+                      )",
+                    params![sid],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count metadata pending"))?,
+            None => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM photos
+                      WHERE exif_at IS NULL
+                         OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count metadata pending"))?,
+        };
+        let (selected_count, rejected_count): (i64, i64) = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT
+                       (SELECT COUNT(*) FROM selections s JOIN photos p ON p.id = s.photo_id WHERE s.state = 'selected' AND p.session_id = ?1),
+                       (SELECT COUNT(*) FROM selections s JOIN photos p ON p.id = s.photo_id WHERE s.state = 'rejected' AND p.session_id = ?1)",
+                    params![sid],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(db_err("count selections"))?,
+            None => conn
+                .query_row(
+                    "SELECT
+                       (SELECT COUNT(*) FROM selections WHERE state = 'selected'),
+                       (SELECT COUNT(*) FROM selections WHERE state = 'rejected')",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(db_err("count selections"))?,
+        };
         let version: i64 = conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
@@ -389,20 +456,38 @@ impl Db {
                 |r| r.get(0),
             )
             .map_err(db_err("read version"))?;
-        let faces_done: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM analysis WHERE face_count IS NOT NULL",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(db_err("count faces done"))?;
-        let scenes_done: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM analysis WHERE scene_fine IS NOT NULL",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(db_err("count scenes done"))?;
+        let faces_done: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis a JOIN photos p ON p.id = a.photo_id WHERE a.face_count IS NOT NULL AND p.session_id = ?1",
+                    params![sid],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count faces done"))?,
+            None => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis WHERE face_count IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count faces done"))?,
+        };
+        let scenes_done: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis a JOIN photos p ON p.id = a.photo_id WHERE a.scene_fine IS NOT NULL AND p.session_id = ?1",
+                    params![sid],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count scenes done"))?,
+            None => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis WHERE scene_fine IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count scenes done"))?,
+        };
         Ok(DbStatus {
             photo_count,
             session_count,
@@ -515,7 +600,9 @@ impl Db {
             )
             .map_err(db_err("prepare sessions"))?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map(
+                    [],
+                    |r| {
                 Ok(SessionRow {
                     id: r.get(0)?,
                     name: r.get(1)?,
@@ -749,6 +836,7 @@ impl Db {
     /// a resumed run see the same sequence.
     pub fn analysis_queue(&self, extensions: &[&str]) -> AppResult<Vec<AnalysisWork>> {
         let conn = self.lock()?;
+        let active_sid = self.active_session_id(&conn)?;
         let exts: Vec<String> = extensions.iter().map(|s| s.to_string()).collect();
         // ?1 = current algorithm version, ?2.. = the decodable extension list.
         let placeholders = (2..=exts.len() + 1)
@@ -766,14 +854,21 @@ impl Db {
             ") AND (
                  a.photo_id IS NULL
                  OR a.algorithm_version < ?1
-                 OR a.source_mtime IS NOT p.file_mtime)
-             ORDER BY p.capture_datetime IS NULL ASC, p.capture_datetime ASC, p.id ASC",
+                 OR a.source_mtime IS NOT p.file_mtime)",
         );
+        if active_sid.is_some() {
+            sql.push_str(" AND p.session_id = ?");
+            sql.push_str(&(exts.len() + 2).to_string());
+        }
+        sql.push_str(" ORDER BY p.capture_datetime IS NULL ASC, p.capture_datetime ASC, p.id ASC");
         let mut stmt = conn.prepare(&sql).map_err(db_err("prepare analysis_queue"))?;
         let mut params: Vec<Box<dyn rusqlite::ToSql>> =
             vec![Box::new(ANALYSIS_ALGORITHM_VERSION)];
         for e in &exts {
             params.push(Box::new(e.clone()));
+        }
+        if let Some(sid) = active_sid {
+            params.push(Box::new(sid));
         }
         let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
         let rows = stmt
@@ -1800,29 +1895,51 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     /// incremental rule as analysis). Decodable formats only.
     pub fn phash_queue(&self) -> AppResult<Vec<PhashWork>> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, path, extension, file_mtime FROM photos
-                 WHERE extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
-                   AND (phash IS NULL
-                        OR (phash_source_mtime IS NOT NULL AND file_mtime IS NOT NULL
-                            AND phash_source_mtime < file_mtime))
-                 ORDER BY (capture_datetime IS NULL) ASC, COALESCE(capture_datetime, indexed_at), id",
-            )
-            .map_err(db_err("prepare phash queue"))?;
-        let rows = stmt
-            .query_map([], |r| {
+        let active_sid = self.active_session_id(&conn)?;
+        let mut out = Vec::new();
+        if let Some(sid) = active_sid {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, path, extension, file_mtime FROM photos
+                     WHERE extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (phash IS NULL
+                            OR (phash_source_mtime IS NOT NULL AND file_mtime IS NOT NULL
+                                AND phash_source_mtime < file_mtime))
+                       AND session_id = ?1
+                     ORDER BY (capture_datetime IS NULL) ASC, COALESCE(capture_datetime, indexed_at), id",
+                )
+                .map_err(db_err("prepare phash queue"))?;
+            for row in stmt.query_map(params![sid], |r| {
                 Ok(PhashWork {
                     photo_id: r.get(0)?,
                     path: r.get(1)?,
                     extension: r.get(2)?,
                     file_mtime: r.get(3)?,
                 })
-            })
-            .map_err(db_err("query phash queue"))?;
-        let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(db_err("read phash work row"))?);
+            }).map_err(db_err("query phash queue"))? {
+                out.push(row.map_err(db_err("read phash work row"))?);
+            }
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id, path, extension, file_mtime FROM photos
+                     WHERE extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (phash IS NULL
+                            OR (phash_source_mtime IS NOT NULL AND file_mtime IS NOT NULL
+                                AND phash_source_mtime < file_mtime))
+                     ORDER BY (capture_datetime IS NULL) ASC, COALESCE(capture_datetime, indexed_at), id",
+                )
+                .map_err(db_err("prepare phash queue"))?;
+            for row in stmt.query_map([], |r| {
+                Ok(PhashWork {
+                    photo_id: r.get(0)?,
+                    path: r.get(1)?,
+                    extension: r.get(2)?,
+                    file_mtime: r.get(3)?,
+                })
+            }).map_err(db_err("query phash queue"))? {
+                out.push(row.map_err(db_err("read phash work row"))?);
+            }
         }
         Ok(out)
     }
@@ -1850,33 +1967,59 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     /// guard before decoding.
     pub fn faces_queue(&self) -> AppResult<Vec<FaceWork>> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT p.id, p.path, p.width, p.height, p.file_mtime
-                 FROM photos p
-                 LEFT JOIN analysis a ON a.photo_id = p.id
-                 WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
-                   AND (a.face_count IS NULL
-                        OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
-                            AND a.faces_at < p.file_mtime))
-                 ORDER BY (p.capture_datetime IS NULL) ASC,
-                          COALESCE(p.capture_datetime, p.indexed_at), p.id",
-            )
-            .map_err(db_err("prepare faces queue"))?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok(FaceWork {
-                    photo_id: r.get(0)?,
-                    path: r.get(1)?,
-                    width: r.get(2)?,
-                    height: r.get(3)?,
-                    file_mtime: r.get(4)?,
-                })
-            })
-            .map_err(db_err("query faces queue"))?;
+        let active_sid = self.active_session_id(&conn)?;
         let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(db_err("read face work row"))?);
+        if let Some(sid) = active_sid {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime
+                     FROM photos p
+                     LEFT JOIN analysis a ON a.photo_id = p.id
+                     WHERE p.session_id = ?1
+                       AND p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (a.face_count IS NULL
+                            OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
+                                AND a.faces_at < p.file_mtime))
+                     ORDER BY (p.capture_datetime IS NULL) ASC,
+                              COALESCE(p.capture_datetime, p.indexed_at), p.id",
+                )
+                .map_err(db_err("prepare faces queue"))?;
+            for row in stmt.query_map(params![sid], |r| {
+                    Ok(FaceWork {
+                        photo_id: r.get(0)?,
+                        path: r.get(1)?,
+                        width: r.get(2)?,
+                        height: r.get(3)?,
+                        file_mtime: r.get(4)?,
+                    })
+                }).map_err(db_err("query faces queue"))? {
+                out.push(row.map_err(db_err("read face work row"))?);
+            }
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime
+                     FROM photos p
+                     LEFT JOIN analysis a ON a.photo_id = p.id
+                     WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (a.face_count IS NULL
+                            OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
+                                AND a.faces_at < p.file_mtime))
+                     ORDER BY (p.capture_datetime IS NULL) ASC,
+                              COALESCE(p.capture_datetime, p.indexed_at), p.id",
+                )
+                .map_err(db_err("prepare faces queue"))?;
+            for row in stmt.query_map([], |r| {
+                    Ok(FaceWork {
+                        photo_id: r.get(0)?,
+                        path: r.get(1)?,
+                        width: r.get(2)?,
+                        height: r.get(3)?,
+                        file_mtime: r.get(4)?,
+                    })
+                }).map_err(db_err("query faces queue"))? {
+                out.push(row.map_err(db_err("read face work row"))?);
+            }
         }
         Ok(out)
     }
@@ -1886,31 +2029,55 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     /// the same incremental rule as faces/EXIF/similarity.
     pub fn scenes_queue(&self) -> AppResult<Vec<SceneWork>> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT p.id, p.path, p.file_mtime
-                 FROM photos p
-                 LEFT JOIN analysis a ON a.photo_id = p.id
-                 WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
-                   AND (a.scene_fine IS NULL
-                        OR (p.file_mtime IS NOT NULL AND a.scene_at IS NOT NULL
-                            AND a.scene_at < p.file_mtime))
-                 ORDER BY (p.capture_datetime IS NULL) ASC,
-                          COALESCE(p.capture_datetime, p.indexed_at), p.id",
-            )
-            .map_err(db_err("prepare scenes queue"))?;
-        let rows = stmt
-            .query_map([], |r| {
-                Ok(SceneWork {
-                    photo_id: r.get(0)?,
-                    path: r.get(1)?,
-                    file_mtime: r.get(2)?,
-                })
-            })
-            .map_err(db_err("query scenes queue"))?;
+        let active_sid = self.active_session_id(&conn)?;
         let mut out = Vec::new();
-        for row in rows {
-            out.push(row.map_err(db_err("read scene work row"))?);
+        if let Some(sid) = active_sid {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT p.id, p.path, p.file_mtime
+                     FROM photos p
+                     LEFT JOIN analysis a ON a.photo_id = p.id
+                     WHERE p.session_id = ?1
+                       AND p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (a.scene_fine IS NULL
+                            OR (p.file_mtime IS NOT NULL AND a.scene_at IS NOT NULL
+                                AND a.scene_at < p.file_mtime))
+                     ORDER BY (p.capture_datetime IS NULL) ASC,
+                              COALESCE(p.capture_datetime, p.indexed_at), p.id",
+                )
+                .map_err(db_err("prepare scenes queue"))?;
+            for row in stmt.query_map(params![sid], |r| {
+                    Ok(SceneWork {
+                        photo_id: r.get(0)?,
+                        path: r.get(1)?,
+                        file_mtime: r.get(2)?,
+                    })
+                }).map_err(db_err("query scenes queue"))? {
+                out.push(row.map_err(db_err("read scene work row"))?);
+            }
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT p.id, p.path, p.file_mtime
+                     FROM photos p
+                     LEFT JOIN analysis a ON a.photo_id = p.id
+                     WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
+                       AND (a.scene_fine IS NULL
+                            OR (p.file_mtime IS NOT NULL AND a.scene_at IS NOT NULL
+                                AND a.scene_at < p.file_mtime))
+                     ORDER BY (p.capture_datetime IS NULL) ASC,
+                              COALESCE(p.capture_datetime, p.indexed_at), p.id",
+                )
+                .map_err(db_err("prepare scenes queue"))?;
+            for row in stmt.query_map([], |r| {
+                    Ok(SceneWork {
+                        photo_id: r.get(0)?,
+                        path: r.get(1)?,
+                        file_mtime: r.get(2)?,
+                    })
+                }).map_err(db_err("query scenes queue"))? {
+                out.push(row.map_err(db_err("read scene work row"))?);
+            }
         }
         Ok(out)
     }
