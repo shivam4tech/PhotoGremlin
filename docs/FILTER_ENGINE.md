@@ -55,7 +55,7 @@ also offers `Unidentified (n)`, which writes the normal `is-null` condition
 the same filter wire format — no value is inferred, sent to a service, or
 embedded into SQL.
 
-### Quick measured controls (Sprint 22)
+### Quick measured controls (Sprints 22–23)
 
 The Library presents common numeric filters without requiring photographers
 to compose raw operators:
@@ -63,16 +63,23 @@ to compose raw operators:
 - brightness: low `< 35`, mid-range `35–65`, high `> 65`;
 - sharpness: low `< 40`, mid-range `40–70`, high `> 70`;
 - contrast: low `< 35`, mid-range `35–65`, high `> 65`;
-- ISO and focal length: two-ended range controls on familiar photographic
-  stops. The resulting condition is still the ordinary inclusive `between`
-  wire value, so saved views and the Rust engine need no special cases.
+- ISO and focal length: one compact threshold slider on familiar photographic
+  stops, paired with `Up to` (`<=`) and `From` (`>=`) direction buttons. The
+  slider applies immediately; it does not present a second handle or imply a
+  bounded range. Conditions remain ordinary filter wire values, so saved views
+  and the Rust engine need no special cases. Existing advanced `between`
+  conditions remain valid and are still editable through Advanced condition.
 
 Every control reports locally recorded and missing counts from
-`numeric_filter_stats`. A measured band/range follows SQL NULL semantics and
-therefore excludes unmeasured photographs. `Unmeasured` (visual analysis) or
-`Not recorded` (EXIF ranges) writes `is-null`; `Any` removes that field's
+`numeric_filter_stats`. A measured band/threshold follows SQL NULL semantics
+and therefore excludes unmeasured photographs. `Unmeasured` (visual analysis)
+or `Not recorded` (EXIF thresholds) writes `is-null`; `Any` removes that field's
 quick/advanced conditions and includes both known and missing values. Missing
 values are never guessed from filenames, pixels, or neighboring photographs.
+Sprint 23 presents these controls as five dense rows instead of nested cards:
+the three visual fields use compact segmented categories, while ISO and focal
+length use one slider each. A row-level clear button removes its condition and
+restores the `Any` behavior without adding a full action row.
 
 ## Execution
 

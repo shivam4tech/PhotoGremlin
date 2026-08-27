@@ -8,9 +8,11 @@ import {
   draftToFilter,
   endOfDay,
   activeVisualBand,
+  activeStandardThreshold,
   replaceFieldConditions,
+  standardThresholdCondition,
   visualBandCondition,
-  STANDARD_RANGE_STOPS,
+  STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
 
 describe("filter registry", () => {
@@ -238,9 +240,24 @@ describe("quick filter controls", () => {
   });
 
   it("uses familiar, increasing ISO and focal-length stops", () => {
-    expect(STANDARD_RANGE_STOPS.iso).toContain(1600);
-    expect(STANDARD_RANGE_STOPS.focal_length).toEqual(expect.arrayContaining([24, 35, 50, 85, 200]));
-    expect([...STANDARD_RANGE_STOPS.iso]).toEqual([...STANDARD_RANGE_STOPS.iso].sort((a, b) => a - b));
+    expect(STANDARD_FILTER_STOPS.iso).toContain(1600);
+    expect(STANDARD_FILTER_STOPS.focal_length).toEqual(expect.arrayContaining([24, 35, 50, 85, 200]));
+    expect([...STANDARD_FILTER_STOPS.iso]).toEqual([...STANDARD_FILTER_STOPS.iso].sort((a, b) => a - b));
+  });
+
+  it("maps one-slider directions onto inclusive threshold conditions", () => {
+    expect(standardThresholdCondition("iso", "up-to", 1600)).toEqual({
+      field: "iso", operator: "<=", value: 1600,
+    });
+    expect(standardThresholdCondition("focal_length", "from", 85)).toEqual({
+      field: "focal_length", operator: ">=", value: 85,
+    });
+    expect(activeStandardThreshold([
+      { field: "iso", operator: ">=", value: 3200 },
+    ], "iso")).toEqual({ direction: "from", value: 3200 });
+    expect(activeStandardThreshold([
+      { field: "iso", operator: "between", value: [100, 800] },
+    ], "iso")).toBeNull();
   });
 });
 

@@ -6,11 +6,14 @@ import type {
   QuickNumericFilterField,
 } from "@/types/api";
 import {
-  STANDARD_RANGE_STOPS,
+  STANDARD_FILTER_STOPS,
   VISUAL_BANDS,
+  activeStandardThreshold,
   activeVisualBand,
   replaceFieldConditions,
+  standardThresholdCondition,
   visualBandCondition,
+  type ThresholdDirection,
   type VisualQuickField,
 } from "./filterFields";
 
@@ -48,11 +51,12 @@ function Availability({
   );
 }
 
-interface RangeControlProps {
+interface ThresholdControlProps {
   field: "iso" | "focal_length";
   label: string;
   unit?: string;
   stops: readonly number[];
+  defaultValue: number;
   stats?: NumericFilterStats;
   statsReady: boolean;
   draft: FilterCondition[];
@@ -60,93 +64,108 @@ interface RangeControlProps {
   disabled?: boolean;
 }
 
-function StandardRangeControl({ field, label, unit = "", stops, stats, statsReady, draft, onChange, disabled }: RangeControlProps) {
+function nearestStopIndex(stops: readonly number[], value: number): number {
+  return stops.reduce(
+    (closest, stop, index) => Math.abs(stop - value) < Math.abs(stops[closest] - value) ? index : closest,
+    0,
+  );
+}
+
+function StandardThresholdControl({
+  field,
+  label,
+  unit = "",
+  stops,
+  defaultValue,
+  stats,
+  statsReady,
+  draft,
+  onChange,
+  disabled,
+}: ThresholdControlProps) {
   const existing = draft.find((condition) => condition.field === field);
-  const existingRange = existing?.operator === "between" && Array.isArray(existing.value)
-    ? existing.value as [number, number]
-    : null;
-  const initialLow = existingRange ? Math.max(0, stops.indexOf(existingRange[0])) : 0;
-  const initialHigh = existingRange ? stops.indexOf(existingRange[1]) : stops.length - 1;
-  const [lowIndex, setLowIndex] = useState(initialLow >= 0 ? initialLow : 0);
-  const [highIndex, setHighIndex] = useState(initialHigh >= 0 ? initialHigh : stops.length - 1);
+  const existingThreshold = activeStandardThreshold(draft, field);
+  const [direction, setDirection] = useState<ThresholdDirection>(existingThreshold?.direction ?? "up-to");
+  const [stopIndex, setStopIndex] = useState(() => nearestStopIndex(stops, existingThreshold?.value ?? defaultValue));
 
   useEffect(() => {
-    if (!existingRange) return;
-    const low = stops.indexOf(existingRange[0]);
-    const high = stops.indexOf(existingRange[1]);
-    if (low >= 0) setLowIndex(low);
-    if (high >= 0) setHighIndex(high);
-  }, [existingRange?.[0], existingRange?.[1], stops]);
+    if (!existingThreshold) return;
+    setDirection(existingThreshold.direction);
+    setStopIndex(nearestStopIndex(stops, existingThreshold.value));
+  }, [existingThreshold?.direction, existingThreshold?.value, stops]);
 
-  const unmeasured = existing?.operator === "is-null";
-  const rangeActive = existingRange !== null;
+  const notRecorded = existing?.operator === "is-null";
   const noRecordedValues = !stats || stats.recorded_count === 0;
+  const currentValue = stops[stopIndex];
 
-  function applyRange() {
-    onChange(replaceFieldConditions(draft, field, {
+  function applyThreshold(nextDirection: ThresholdDirection, nextIndex: number) {
+    onChange(replaceFieldConditions(
+      draft,
       field,
-      operator: "between",
-      value: [stops[lowIndex], stops[highIndex]],
-    }));
+      standardThresholdCondition(field, nextDirection, stops[nextIndex]),
+    ));
   }
 
   return (
-    <div className="quick-range-card">
-      <div className="quick-filter-card-head">
+    <div className="quick-filter-row quick-filter-threshold-row">
+      <div className="quick-filter-label">
         <strong>{label}</strong>
         <Availability stats={stats} noun="recorded" missingNoun="not recorded" ready={statsReady} />
       </div>
-      <div className="quick-range-values mono">
-        <span>{stops[lowIndex].toLocaleString()}{unit}</span>
-        <span>to</span>
-        <span>{stops[highIndex].toLocaleString()}{unit}</span>
-      </div>
-      <div className="quick-range-sliders">
-        <input
-          type="range"
-          min={0}
-          max={stops.length - 1}
-          value={lowIndex}
-          disabled={disabled || noRecordedValues}
-          aria-label={`${label} minimum`}
-          onChange={(event) => setLowIndex(Math.min(Number(event.target.value), highIndex))}
-        />
-        <input
-          type="range"
-          min={0}
-          max={stops.length - 1}
-          value={highIndex}
-          disabled={disabled || noRecordedValues}
-          aria-label={`${label} maximum`}
-          onChange={(event) => setHighIndex(Math.max(Number(event.target.value), lowIndex))}
-        />
-      </div>
-      {stats?.minimum !== null && stats?.minimum !== undefined && stats.maximum !== null && (
-        <div className="faint mono quick-observed-range">
-          Observed {stats.minimum.toLocaleString()}–{stats.maximum.toLocaleString()}{unit}
+      <div className="quick-threshold-control">
+        <div className="quick-direction" role="group" aria-label={`${label} threshold direction`}>
+          {(["up-to", "from"] as const).map((nextDirection) => (
+            <button
+              type="button"
+              key={nextDirection}
+              className={direction === nextDirection && existingThreshold ? "is-active" : ""}
+              aria-pressed={direction === nextDirection && existingThreshold !== null}
+              disabled={disabled || noRecordedValues}
+              onClick={() => {
+                setDirection(nextDirection);
+                applyThreshold(nextDirection, stopIndex);
+              }}
+            >
+              {nextDirection === "up-to" ? "Up to" : "From"}
+            </button>
+          ))}
         </div>
-      )}
-      <div className="quick-filter-actions">
-        <button
-          className={`btn btn-sm${rangeActive ? " btn-primary" : ""}`}
-          onClick={applyRange}
+        <input
+          type="range"
+          min={0}
+          max={stops.length - 1}
+          value={stopIndex}
           disabled={disabled || noRecordedValues}
-        >
-          Apply range
-        </button>
+          aria-label={`${label} threshold`}
+          aria-valuetext={`${direction === "up-to" ? "Up to" : "From"} ${currentValue.toLocaleString()}${unit}`}
+          onChange={(event) => {
+            const nextIndex = Number(event.target.value);
+            setStopIndex(nextIndex);
+            applyThreshold(direction, nextIndex);
+          }}
+        />
+        <output className="quick-threshold-value mono">
+          {currentValue.toLocaleString()}{unit}
+        </output>
+      </div>
+      <div className="quick-row-actions">
         <button
-          className={`btn btn-sm${unmeasured ? " btn-primary" : ""}`}
+          type="button"
+          className={`quick-missing${notRecorded ? " is-active" : ""}`}
           onClick={() => onChange(replaceFieldConditions(draft, field, { field, operator: "is-null", value: null }))}
           disabled={disabled || !stats || stats.missing_count === 0}
         >
           Not recorded
         </button>
         <button
-          className="btn btn-ghost btn-sm"
+          type="button"
+          className="quick-clear"
           onClick={() => onChange(replaceFieldConditions(draft, field, null))}
           disabled={disabled || !existing}
+          aria-label={`Clear ${label} filter`}
+          title={`Clear ${label} filter and include any value`}
         >
-          Any
+          ×
         </button>
       </div>
     </div>
@@ -184,81 +203,83 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
   return (
     <div className="quick-filters">
       <div className="quick-filter-intro">
-        <div>
-          <strong>Quick measured filters</strong>
-          <div className="faint">
-            Ranges match recorded values only. Any includes missing values; Unmeasured/Not recorded isolates them.
-          </div>
-        </div>
+        <strong>Quick filters</strong>
+        <span className="faint">Local measurements only · clear a row to include any value</span>
       </div>
       {statsReady && VISUAL_BANDS.every((definition) => stats[definition.field]?.recorded_count === 0) && (
         <div className="quick-filter-note">
           Brightness, sharpness and contrast become available after “Analyze photos” finishes.
         </div>
       )}
-      <div className="quick-visual-grid">
+      <div className="quick-filter-rows">
         {VISUAL_BANDS.map((definition) => {
           const active = activeVisualBand(draft, definition.field);
           const fieldStats = stats[definition.field];
           const noMeasuredValues = !fieldStats || fieldStats.recorded_count === 0;
           return (
-            <div className="quick-filter-card" key={definition.field}>
-              <div className="quick-filter-card-head">
+            <div className="quick-filter-row" key={definition.field}>
+              <div className="quick-filter-label">
                 <strong>{definition.label}</strong>
                 <Availability stats={fieldStats} ready={statsReady} />
               </div>
-              <div className="quick-band-buttons" role="group" aria-label={`${definition.label} measured range`}>
+              <div className="quick-band-buttons" role="group" aria-label={`${definition.label} measured category`}>
                 {(["low", "mid", "high"] as const).map((band) => (
                   <button
+                    type="button"
                     key={band}
-                    className={`quick-band ${band}${active === band ? " is-active" : ""}`}
+                    className={`quick-band${active === band ? " is-active" : ""}`}
                     aria-pressed={active === band}
                     disabled={disabled || noMeasuredValues}
                     onClick={() => setVisual(definition.field, band)}
+                    title={`${definition.label} ${band === "low" ? `below ${definition.lowUpper}` : band === "high" ? `above ${definition.highLower}` : `${definition.lowUpper} to ${definition.highLower}`}`}
                   >
-                    <span>{band === "mid" ? "Mid-range" : band[0].toUpperCase() + band.slice(1)}</span>
+                    <span>{band === "mid" ? "Mid" : band[0].toUpperCase() + band.slice(1)}</span>
                     <small>
                       {band === "low" ? `< ${definition.lowUpper}` : band === "high" ? `> ${definition.highLower}` : `${definition.lowUpper}–${definition.highLower}`}
                     </small>
                   </button>
                 ))}
               </div>
-              <div className="quick-filter-actions">
+              <div className="quick-row-actions">
                 <button
-                  className={`btn btn-sm${active === "unmeasured" ? " btn-primary" : ""}`}
+                  type="button"
+                  className={`quick-missing${active === "unmeasured" ? " is-active" : ""}`}
                   onClick={() => setVisual(definition.field, "unmeasured")}
                   disabled={disabled || !fieldStats || fieldStats.missing_count === 0}
                 >
                   Unmeasured
                 </button>
                 <button
-                  className="btn btn-ghost btn-sm"
+                  type="button"
+                  className="quick-clear"
                   onClick={() => setVisual(definition.field, null)}
                   disabled={disabled || !draft.some((condition) => condition.field === definition.field)}
+                  aria-label={`Clear ${definition.label} filter`}
+                  title={`Clear ${definition.label} filter and include any value`}
                 >
-                  Any
+                  ×
                 </button>
               </div>
             </div>
           );
         })}
-      </div>
-      <div className="quick-range-grid">
-        <StandardRangeControl
+        <StandardThresholdControl
           field="iso"
           label="ISO"
-          stops={STANDARD_RANGE_STOPS.iso}
+          stops={STANDARD_FILTER_STOPS.iso}
+          defaultValue={1600}
           stats={stats.iso}
           statsReady={statsReady}
           draft={draft}
           onChange={onChange}
           disabled={disabled}
         />
-        <StandardRangeControl
+        <StandardThresholdControl
           field="focal_length"
           label="Focal length"
           unit=" mm"
-          stops={STANDARD_RANGE_STOPS.focal_length}
+          stops={STANDARD_FILTER_STOPS.focal_length}
+          defaultValue={85}
           stats={stats.focal_length}
           statsReady={statsReady}
           draft={draft}

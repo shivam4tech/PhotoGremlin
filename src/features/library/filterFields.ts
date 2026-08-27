@@ -115,10 +115,31 @@ export const VISUAL_BANDS: VisualBandDefinition[] = [
   { field: "contrast", label: "Contrast", lowUpper: 35, highLower: 65 },
 ];
 
-export const STANDARD_RANGE_STOPS = {
+export const STANDARD_FILTER_STOPS = {
   iso: [25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400],
   focal_length: [8, 14, 16, 20, 24, 28, 35, 50, 70, 85, 105, 135, 200, 300, 400, 600, 800, 1200],
 } as const;
+
+export type ThresholdDirection = "up-to" | "from";
+
+export function standardThresholdCondition(
+  field: "iso" | "focal_length",
+  direction: ThresholdDirection,
+  value: number,
+): FilterCondition {
+  return { field, operator: direction === "up-to" ? "<=" : ">=", value };
+}
+
+export function activeStandardThreshold(
+  conditions: FilterCondition[],
+  field: "iso" | "focal_length",
+): { direction: ThresholdDirection; value: number } | null {
+  const condition = conditions.find((item) => item.field === field);
+  if (!condition || typeof condition.value !== "number") return null;
+  if (condition.operator === "<=") return { direction: "up-to", value: condition.value };
+  if (condition.operator === ">=") return { direction: "from", value: condition.value };
+  return null;
+}
 
 export function visualBandCondition(field: VisualQuickField, band: VisualBandId): FilterCondition {
   const definition = VISUAL_BANDS.find((item) => item.field === field)!;
