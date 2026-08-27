@@ -45,8 +45,10 @@ The script creates `../photogremlin-test-corpus/` by default, beside this
 repository. It separates camera/genre sources into folders, records original
 URLs, file pages and file-specific license details in `manifest.jsonl`, and
 accepts only JPEGs whose downloaded EXIF contains Make, Model and
-DateTimeOriginal. It is resumable through that manifest, `.part` download
-files and `state.json` category cursors.
+DateTimeOriginal. Downloads are serial and conservatively throttled; on an
+HTTP 429/503 it records the server's `Retry-After` cooldown and stops rather
+than continuing to request files. It is resumable through that manifest,
+`.part` download files and `state.json` category cursors.
 
 ```
 python3 tools/datasets/download_photo_test_corpus.py --list-sources

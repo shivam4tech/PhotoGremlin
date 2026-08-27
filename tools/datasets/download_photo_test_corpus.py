@@ -29,6 +29,7 @@ import re
 import struct
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -36,7 +37,10 @@ from typing import Any
 
 
 API = "https://commons.wikimedia.org/w/api.php"
-USER_AGENT = "PhotoGremlin-development-corpus/1.0 (local development use)"
+USER_AGENT = (
+    "PhotoGremlin-development-corpus/1.1 "
+    "(https://github.com/shivam4tech/photogremlin; shivam4tech@gmail.com)"
+)
 DEFAULT_OUTPUT_ROOT = (
     pathlib.Path(__file__).resolve().parents[3] / "photogremlin-test-corpus"
 )
@@ -108,6 +112,32 @@ PERMANENT_STATUSES = {
 SUCCESS_STATUSES = {"downloaded", "skipped_existing"}
 
 
+class RateLimited(RuntimeError):
+    """A remote rate limit that must stop the current run immediately."""
+
+    def __init__(self, wait_seconds: int) -> None:
+        self.wait_seconds = wait_seconds
+        super().__init__(f"Wikimedia requested a {wait_seconds}-second cooldown")
+
+
+def retry_after_seconds(headers: Any) -> int:
+    """Return a conservative cooldown from Retry-After, or two minutes."""
+    raw_value = headers.get("Retry-After") if headers else None
+    if raw_value:
+        try:
+            return max(5, int(float(raw_value)))
+        except ValueError:
+            # HTTP-date Retry-After is rare here, but accepting it costs little.
+            from email.utils import parsedate_to_datetime
+
+            try:
+                target = parsedate_to_datetime(raw_value)
+                return max(5, int((target - dt.datetime.now(dt.timezone.utc)).total_seconds()))
+            except (TypeError, ValueError):
+                pass
+    return 120
+
+
 def jsonl_records(path: pathlib.Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -177,10 +207,23 @@ def commons_request(params: dict[str, Any], delay: float) -> dict[str, Any]:
             with urllib.request.urlopen(request, timeout=90) as response:
                 payload = json.loads(response.read())
             if "error" in payload:
+                if payload["error"].get("code") == "ratelimited":
+                    raise RateLimited(120)
                 raise RuntimeError(payload["error"].get("info", "Commons API error"))
             if delay:
                 time.sleep(delay)
             return payload
+        except urllib.error.HTTPError as error:
+            if error.code in (429, 503):
+                raise RateLimited(retry_after_seconds(error.headers)) from error
+            last_error = error
+            if attempt == 3:
+                break
+            wait = min(5 * (attempt + 1), 30)
+            print(f"  API request failed ({error}); retrying in {wait}s", flush=True)
+            time.sleep(wait)
+        except RateLimited:
+            raise
         except Exception as error:  # network failures are resumable
             last_error = error
             if attempt == 3:
@@ -288,27 +331,32 @@ def download_original(url: str, destination: pathlib.Path, max_bytes: int) -> No
     if prior_bytes:
         headers["Range"] = f"bytes={prior_bytes}-"
     request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=180) as response:
-        status = getattr(response, "status", response.getcode())
-        if prior_bytes and status != 206:
-            prior_bytes = 0
-            partial.unlink(missing_ok=True)
-        content_length = response.headers.get("Content-Length")
-        if content_length and prior_bytes + int(content_length) > max_bytes:
-            raise ValueError("file exceeds configured size limit")
-        mode = "ab" if prior_bytes else "wb"
-        written = prior_bytes
-        with partial.open(mode) as handle:
-            while True:
-                chunk = response.read(1024 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    raise ValueError("file exceeds configured size limit")
-                handle.write(chunk)
-            handle.flush()
-            os.fsync(handle.fileno())
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            status = getattr(response, "status", response.getcode())
+            if prior_bytes and status != 206:
+                prior_bytes = 0
+                partial.unlink(missing_ok=True)
+            content_length = response.headers.get("Content-Length")
+            if content_length and prior_bytes + int(content_length) > max_bytes:
+                raise ValueError("file exceeds configured size limit")
+            mode = "ab" if prior_bytes else "wb"
+            written = prior_bytes
+            with partial.open(mode) as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError("file exceeds configured size limit")
+                    handle.write(chunk)
+                handle.flush()
+                os.fsync(handle.fileno())
+    except urllib.error.HTTPError as error:
+        if error.code in (429, 503):
+            raise RateLimited(retry_after_seconds(error.headers)) from error
+        raise
     if partial.stat().st_size < 1024:
         raise ValueError("downloaded file is unexpectedly small")
     partial.replace(destination)
@@ -352,6 +400,24 @@ def source_progress(records: list[dict[str, Any]], source: Source) -> tuple[set[
     return processed, len(completed)
 
 
+def legacy_rate_limit_not_before(records: list[dict[str, Any]], source: Source) -> float:
+    """Turn 429s recorded by v1.0 into a one-time conservative cooldown."""
+    latest = 0.0
+    for record in records:
+        if record.get("source") != source.identifier or record.get("status") != "failed":
+            continue
+        if "429" not in str(record.get("error", "")):
+            continue
+        try:
+            recorded_at = dt.datetime.fromisoformat(str(record["recorded_at"]))
+            latest = max(latest, recorded_at.timestamp())
+        except (KeyError, TypeError, ValueError):
+            continue
+    # v1.0 did not preserve Retry-After. Five minutes prevents an immediate
+    # repeat while still allowing the new script to resume automatically.
+    return latest + 300 if latest else 0.0
+
+
 def record_from_page(source: Source, page: dict[str, Any], info: dict[str, Any]) -> dict[str, Any]:
     extmetadata = info.get("extmetadata") or {}
     return {
@@ -380,6 +446,17 @@ def process_source(args: argparse.Namespace, source: Source, root: pathlib.Path,
     folder = root / source.folder
     folder.mkdir(parents=True, exist_ok=True)
     source_state = state["sources"].setdefault(source.identifier, {})
+    source_state["not_before_unix"] = max(
+        float(source_state.get("not_before_unix") or 0),
+        legacy_rate_limit_not_before(records, source),
+    )
+    not_before = float(source_state.get("not_before_unix") or 0)
+    remaining = int(not_before - time.time())
+    if remaining > 0:
+        resume_at = dt.datetime.fromtimestamp(not_before).astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+        print(f"{source.identifier}: rate-limit cooldown active; retry after {resume_at} ({remaining}s)")
+        return
+    source_state.pop("not_before_unix", None)
     continuation = source_state.get("continuation") or {}
     if source_state.get("exhausted"):
         print(f"{source.identifier}: category exhausted ({completed}/{source.target})")
@@ -387,16 +464,22 @@ def process_source(args: argparse.Namespace, source: Source, root: pathlib.Path,
 
     print(f"{source.identifier}: {completed}/{source.target}", flush=True)
     while completed < source.target:
-        payload = commons_request({
-            "generator": "categorymembers",
-            "gcmtitle": source.category,
-            "gcmnamespace": "6",
-            "gcmtype": "file",
-            "gcmlimit": "50",
-            "prop": "imageinfo",
-            "iiprop": "url|size|mime|extmetadata",
-            **continuation,
-        }, args.delay)
+        try:
+            payload = commons_request({
+                "generator": "categorymembers",
+                "gcmtitle": source.category,
+                "gcmnamespace": "6",
+                "gcmtype": "file",
+                "gcmlimit": "50",
+                "prop": "imageinfo",
+                "iiprop": "url|size|mime|extmetadata",
+                **continuation,
+            }, args.delay)
+        except RateLimited as limit:
+            source_state["not_before_unix"] = time.time() + limit.wait_seconds
+            save_state(root / "state.json", state)
+            print(f"  Wikimedia rate-limited the metadata request. Stopping; retry after {limit.wait_seconds}s.")
+            return
         pages = payload.get("query", {}).get("pages", [])
         if not pages:
             source_state["exhausted"] = True
@@ -447,6 +530,16 @@ def process_source(args: argparse.Namespace, source: Source, root: pathlib.Path,
                     print(f"  accepted {completed}/{source.target}: {page_id}", flush=True)
                     if completed >= source.target:
                         break
+            except RateLimited as limit:
+                append_jsonl(manifest, {
+                    **base,
+                    "status": "rate_limited",
+                    "retry_after_seconds": limit.wait_seconds,
+                })
+                source_state["not_before_unix"] = time.time() + limit.wait_seconds
+                save_state(root / "state.json", state)
+                print(f"  Wikimedia rate-limited downloads. Stopping; retry after {limit.wait_seconds}s.")
+                return
             except Exception as error:
                 append_jsonl(manifest, {**base, "status": "failed", "error": str(error)})
                 print(f"  failed {page_id}: {error}", file=sys.stderr, flush=True)
@@ -483,8 +576,8 @@ def parse_args() -> argparse.Namespace:
         help="Skip originals larger than this limit (default: 30)",
     )
     parser.add_argument(
-        "--delay", type=float, default=0.3,
-        help="Seconds to wait after each API request and download (default: 0.3)",
+        "--delay", type=float, default=5.0,
+        help="Minimum seconds to wait after every serial API/download request (default: 5)",
     )
     parser.add_argument(
         "--list-sources", action="store_true",
@@ -493,8 +586,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.max_file_mib < 1:
         parser.error("--max-file-mib must be at least 1")
-    if args.delay < 0:
-        parser.error("--delay cannot be negative")
+    if args.delay < 2:
+        parser.error("--delay must be at least 2 seconds to respect Wikimedia rate limits")
     return args
 
 
