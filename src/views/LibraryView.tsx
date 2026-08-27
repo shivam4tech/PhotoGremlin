@@ -508,10 +508,15 @@ export function LibraryView() {
             max={progress.total}
             label={
               progress.total > 0
-                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} photographs`
+                ? `${progress.done.toLocaleString()} / ${progress.total.toLocaleString()} photographs — ${progress.stage}`
                 : progress.stage
             }
           />
+          {progress.current && (
+            <div className="faint mono" style={{ fontSize: 11, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {progress.current}
+            </div>
+          )}
         </div>
       )}
 
