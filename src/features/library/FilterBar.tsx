@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/ipc";
 import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
@@ -21,19 +21,86 @@ interface FilterBarProps {
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
 const UNIDENTIFIED = "__photogremlin_unidentified__";
 
+function monthFromDate(value: string): Date {
+  const matched = /^(\d{4})-(\d{2})-\d{2}$/.exec(value);
+  if (matched) return new Date(Date.UTC(Number(matched[1]), Number(matched[2]) - 1, 1));
+  const today = new Date();
+  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1));
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Click-only date calendar. Native WebKit date popovers lose selections on
+ * some Linux compositors, so this keeps selection in the React filter state. */
 function CalendarInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  const [input, setInput] = useState<HTMLInputElement | null>(null);
-  function openCalendar() {
-    try {
-      input?.showPicker();
-    } catch {
-      input?.focus();
+  const root = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() => monthFromDate(value));
+
+  useEffect(() => {
+    if (value) setMonth(monthFromDate(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
     }
+    window.addEventListener("mousedown", closeOnOutsideClick);
+    return () => window.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  const year = month.getUTCFullYear();
+  const monthIndex = month.getUTCMonth();
+  const monthName = month.toLocaleString(undefined, { month: "long", timeZone: "UTC" });
+  const firstWeekday = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const days = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const cells = Array.from({ length: firstWeekday + days }, (_, index) => index < firstWeekday ? null : index - firstWeekday + 1);
+
+  function moveMonth(delta: number) {
+    setMonth(new Date(Date.UTC(year, monthIndex + delta, 1)));
   }
+
   return (
-    <span className="date-picker">
-      <input ref={setInput} className="input" type="date" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
-      <button className="date-picker-open" type="button" onClick={openCalendar} aria-label={`Open calendar for ${label}`} title="Open calendar">▣</button>
+    <span className="date-picker" ref={root}>
+      <button
+        className={`date-picker-trigger${value ? " has-value" : ""}`}
+        type="button"
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        aria-label={`Select ${label}`}
+        aria-expanded={open}
+      >
+        {value || "Select date"}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="date-picker-popover" role="dialog" aria-label={`Calendar for ${label}`}>
+          <div className="date-picker-head">
+            <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
+            <strong>{monthName} {year}</strong>
+            <button type="button" onClick={() => moveMonth(1)} aria-label="Next month">›</button>
+          </div>
+          <div className="date-picker-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
+          <div className="date-picker-days">
+            {cells.map((day, index) => day === null ? <span key={`blank-${index}`} /> : (
+              <button
+                key={day}
+                type="button"
+                className={value === isoDate(year, monthIndex, day) ? "is-selected" : ""}
+                onClick={() => { onChange(isoDate(year, monthIndex, day)); setOpen(false); }}
+              >
+                {day}
+              </button>
+            ))}
+          </div>
+          <div className="date-picker-foot">
+            <button type="button" onClick={() => { onChange(""); setOpen(false); }} disabled={!value}>Clear</button>
+            <button type="button" onClick={() => { const today = new Date(); onChange(isoDate(today.getFullYear(), today.getMonth(), today.getDate())); setOpen(false); }}>Today</button>
+          </div>
+        </div>
+      )}
     </span>
   );
 }
