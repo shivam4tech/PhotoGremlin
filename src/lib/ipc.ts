@@ -12,11 +12,13 @@ import type {
   FileOpPlan,
   FileOpRow,
   FilterValueOptions,
+  NumericFilterStats,
   PhotoFull,
   PhotoPage,
   PeriodStats,
   SavedView,
   ReviewQueue,
+  QuickNumericFilterField,
   SelectionRow,
   SessionMetrics,
   SessionSummary,
@@ -81,6 +83,8 @@ export const api = {
   ): Promise<PhotoPage> => invoke("list_filtered_photos", { filterJson, offset, limit }),
   filterValueOptions: (field: "camera_make" | "camera_model" | "lens", sessionId: number | null): Promise<FilterValueOptions> =>
     invoke("filter_value_options", { field, sessionId }),
+  numericFilterStats: (field: QuickNumericFilterField, sessionId: number | null): Promise<NumericFilterStats> =>
+    invoke("numeric_filter_stats", { field, sessionId }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>

@@ -282,6 +282,20 @@ export interface FilterValueOptions {
   unidentified_count: number;
 }
 
+export type QuickNumericFilterField =
+  | "sharpness"
+  | "brightness"
+  | "contrast"
+  | "iso"
+  | "focal_length";
+
+export interface NumericFilterStats {
+  recorded_count: number;
+  missing_count: number;
+  minimum: number | null;
+  maximum: number | null;
+}
+
 /** Existing local similarity/burst membership, ordered for shoot review. */
 export interface ReviewSequence {
   id: number;

@@ -7,6 +7,10 @@ import {
   chipLabel,
   draftToFilter,
   endOfDay,
+  activeVisualBand,
+  replaceFieldConditions,
+  visualBandCondition,
+  STANDARD_RANGE_STOPS,
 } from "@/features/library/filterFields";
 
 describe("filter registry", () => {
@@ -168,6 +172,15 @@ describe("chipLabel", () => {
     expect(chipLabel({ field: "iso", operator: "<", value: 1600 })).toBe("iso < 1600");
   });
 
+  it("labels the quick measured bands without aesthetic verdicts", () => {
+    expect(chipLabel(visualBandCondition("brightness", "low"))).toBe(
+      "brightness: low measured range",
+    );
+    expect(chipLabel(visualBandCondition("sharpness", "mid"))).toBe(
+      "sharpness: mid-range measured range",
+    );
+  });
+
   it("phrases booleans as properties, not verdicts", () => {
     expect(chipLabel({ field: "monochrome", operator: "=", value: true })).toBe("monochrome");
     expect(chipLabel({ field: "faces_present", operator: "=", value: true })).toBe(
@@ -193,6 +206,41 @@ describe("chipLabel", () => {
     expect(chipLabel({ field: "camera_model", operator: "in", value: ["A7", "R5"] })).toBe(
       "camera model in {A7, R5}",
     );
+  });
+});
+
+describe("quick filter controls", () => {
+  it("maps stable visual bands onto ordinary filter conditions", () => {
+    expect(visualBandCondition("brightness", "low")).toEqual({
+      field: "brightness", operator: "<", value: 35,
+    });
+    expect(visualBandCondition("sharpness", "mid")).toEqual({
+      field: "sharpness", operator: "between", value: [40, 70],
+    });
+    expect(visualBandCondition("contrast", "high")).toEqual({
+      field: "contrast", operator: ">", value: 65,
+    });
+  });
+
+  it("detects quick bands and owns only the selected field", () => {
+    const initial = [
+      { field: "brightness", operator: ">=" as const, value: 20 },
+      { field: "iso", operator: "<" as const, value: 1600 },
+    ];
+    const next = replaceFieldConditions(initial, "brightness", visualBandCondition("brightness", "high"));
+    expect(next).toEqual([
+      { field: "iso", operator: "<", value: 1600 },
+      { field: "brightness", operator: ">", value: 65 },
+    ]);
+    expect(activeVisualBand(next, "brightness")).toBe("high");
+    expect(activeVisualBand([{ field: "brightness", operator: "is-null", value: null }], "brightness"))
+      .toBe("unmeasured");
+  });
+
+  it("uses familiar, increasing ISO and focal-length stops", () => {
+    expect(STANDARD_RANGE_STOPS.iso).toContain(1600);
+    expect(STANDARD_RANGE_STOPS.focal_length).toEqual(expect.arrayContaining([24, 35, 50, 85, 200]));
+    expect([...STANDARD_RANGE_STOPS.iso]).toEqual([...STANDARD_RANGE_STOPS.iso].sort((a, b) => a - b));
   });
 });
 

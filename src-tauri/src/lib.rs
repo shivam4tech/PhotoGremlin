@@ -128,6 +128,7 @@ fn run_inner() -> Result<(), tauri::Error> {
             commands::recent_file_ops,
             commands::list_filtered_photos,
             commands::filter_value_options,
+            commands::numeric_filter_stats,
             commands::period_stats,
             commands::session_summary,
             commands::compare_sessions,

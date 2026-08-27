@@ -121,11 +121,16 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   come only from the registry; **every user value is a bound parameter**
   (injection-safe). `commands/filters.rs::list_filtered_photos` = parse →
   build → `Db::photos_where`. The grid, saved views, and statistics all share
-   this one object.
+  this one object.
   `filter_value_options(field, sessionId)` is a separate fixed-allowlist
   lookup for `camera_make`, `camera_model`, and `lens`: it returns local,
   in-shoot distinct values and the number of unidentified files. It never
   accepts a caller-provided SQL column and makes EXIF filters selectable.
+  Sprint 22's `numeric_filter_stats(field, sessionId)` follows the same
+  fixed-allowlist rule for brightness, sharpness, contrast, ISO and focal
+  length. It returns session-scoped recorded/missing counts plus observed
+  bounds; the UI uses those facts to disable unavailable quick controls and
+  never substitutes an inferred value.
 - `statistics/` (Sprint 6) — the statistics engine, a UI-independent service
   (see STATISTICS.md). One `Period` model (today / this-week (Monday-based) /
   this-month / this-year / custom / all) resolves against an injected `now`

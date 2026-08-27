@@ -9,6 +9,7 @@ import {
   buildCondition,
   chipLabel,
 } from "./filterFields";
+import { QuickFilterControls } from "./QuickFilterControls";
 
 interface FilterBarProps {
   draft: FilterCondition[];
@@ -326,6 +327,18 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null }: Filte
               </button>
             </div>
           )}
+
+          <QuickFilterControls
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            sessionId={sessionId}
+          />
+
+          <div className="advanced-filter-heading">
+            <strong>Advanced condition</strong>
+            <span className="faint">Combine fields with AND</span>
+          </div>
 
           <div className="filterbar-compose">
             <select className="input" value={field} onChange={(e) => selectField(e.target.value)}>

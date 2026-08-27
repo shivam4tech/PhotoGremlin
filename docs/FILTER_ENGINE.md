@@ -55,6 +55,25 @@ also offers `Unidentified (n)`, which writes the normal `is-null` condition
 the same filter wire format — no value is inferred, sent to a service, or
 embedded into SQL.
 
+### Quick measured controls (Sprint 22)
+
+The Library presents common numeric filters without requiring photographers
+to compose raw operators:
+
+- brightness: low `< 35`, mid-range `35–65`, high `> 65`;
+- sharpness: low `< 40`, mid-range `40–70`, high `> 70`;
+- contrast: low `< 35`, mid-range `35–65`, high `> 65`;
+- ISO and focal length: two-ended range controls on familiar photographic
+  stops. The resulting condition is still the ordinary inclusive `between`
+  wire value, so saved views and the Rust engine need no special cases.
+
+Every control reports locally recorded and missing counts from
+`numeric_filter_stats`. A measured band/range follows SQL NULL semantics and
+therefore excludes unmeasured photographs. `Unmeasured` (visual analysis) or
+`Not recorded` (EXIF ranges) writes `is-null`; `Any` removes that field's
+quick/advanced conditions and includes both known and missing values. Missing
+values are never guessed from filenames, pixels, or neighboring photographs.
+
 ## Execution
 
 1. Parse + validate filter JSON (serde, in `filters` logic on the Rust side).

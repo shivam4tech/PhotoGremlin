@@ -97,6 +97,63 @@ export interface OpDef {
   label: string;
 }
 
+export type VisualQuickField = "brightness" | "sharpness" | "contrast";
+export type VisualBandId = "low" | "mid" | "high";
+
+export interface VisualBandDefinition {
+  field: VisualQuickField;
+  label: string;
+  lowUpper: number;
+  highLower: number;
+}
+
+/** Product-level measured bands. They are deliberately explicit and stable:
+ * changing a threshold changes saved-filter meaning and requires docs/tests. */
+export const VISUAL_BANDS: VisualBandDefinition[] = [
+  { field: "brightness", label: "Brightness", lowUpper: 35, highLower: 65 },
+  { field: "sharpness", label: "Sharpness", lowUpper: 40, highLower: 70 },
+  { field: "contrast", label: "Contrast", lowUpper: 35, highLower: 65 },
+];
+
+export const STANDARD_RANGE_STOPS = {
+  iso: [25, 50, 100, 200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 102400],
+  focal_length: [8, 14, 16, 20, 24, 28, 35, 50, 70, 85, 105, 135, 200, 300, 400, 600, 800, 1200],
+} as const;
+
+export function visualBandCondition(field: VisualQuickField, band: VisualBandId): FilterCondition {
+  const definition = VISUAL_BANDS.find((item) => item.field === field)!;
+  if (band === "low") return { field, operator: "<", value: definition.lowUpper };
+  if (band === "high") return { field, operator: ">", value: definition.highLower };
+  return { field, operator: "between", value: [definition.lowUpper, definition.highLower] };
+}
+
+export function activeVisualBand(
+  conditions: FilterCondition[],
+  field: VisualQuickField,
+): VisualBandId | "unmeasured" | null {
+  const condition = conditions.find((item) => item.field === field);
+  if (!condition) return null;
+  if (condition.operator === "is-null") return "unmeasured";
+  for (const band of ["low", "mid", "high"] as const) {
+    const expected = visualBandCondition(field, band);
+    if (condition.operator === expected.operator && JSON.stringify(condition.value) === JSON.stringify(expected.value)) {
+      return band;
+    }
+  }
+  return null;
+}
+
+/** A quick control owns its field. Replacing it removes advanced conditions
+ * for the same field, preventing contradictory hidden ranges. */
+export function replaceFieldConditions(
+  conditions: FilterCondition[],
+  field: string,
+  replacement: FilterCondition | null,
+): FilterCondition[] {
+  const others = conditions.filter((condition) => condition.field !== field);
+  return replacement ? [...others, replacement] : others;
+}
+
 const RELATIONAL: OpDef[] = [
   { op: "=", label: "=" },
   { op: "!=", label: "≠" },
@@ -270,6 +327,12 @@ export function buildCondition(
 export function chipLabel(c: FilterCondition): string {
   const def = FIELD_BY_NAME[c.field];
   const label = def ? def.label : c.field;
+  if (["brightness", "sharpness", "contrast"].includes(c.field)) {
+    const band = activeVisualBand([c], c.field as VisualQuickField);
+    if (band === "low" || band === "mid" || band === "high") {
+      return `${label.toLowerCase()}: ${band === "mid" ? "mid-range" : band} measured range`;
+    }
+  }
   if (c.operator === "is-null") return `${label.toLowerCase()}: not recorded`;
   if (c.operator === "not-null") return `${label.toLowerCase()}: recorded`;
   if (c.operator === "in") {
