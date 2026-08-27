@@ -486,78 +486,23 @@ export function LibraryView() {
         )}
       </div>
 
-      {group === null ? (
-        <>
-          <FilterBar
-            draft={filterConditions}
-            onChange={(c) => store().setFilterConditions(c)}
-            disabled={anyPassRunning}
-            sessionId={sessionId}
-          />
-
-          {sessionId !== null && (
-            <div className="review-presets" aria-label="Review views">
-              <span className="faint">Review views</span>
-              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "is-null", value: null }])}>Unreviewed</button>
-              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "selected" }])}>Kept</button>
-              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "needs_attention" }])}>Needs attention</button>
-            </div>
-          )}
-
-          {filterConditions.length > 0 && (
-            <div className="library-summaryline filter-saveline">
-              <span className="faint" style={{ fontSize: 12 }}>
-                Current filter:
-              </span>
-              <button
-                className={`btn btn-sm${saveViewOpen ? " btn-primary" : ""}`}
-                onClick={() => setSaveViewOpen(!saveViewOpen)}
-                title="Save this filter with a name; it stays dynamic as the library changes."
-              >
-                {saveViewOpen ? "Name it…" : "Save as view"}
+      <div className="library-workspace">
+        <section className="library-stage" aria-label="Photograph workspace">
+          {group !== null && (
+            <div className="library-summaryline groupbackbar">
+              <button className="btn btn-sm" onClick={() => { setGroup(null); setViewerId(null); }}>
+                ← Back to library
               </button>
-              {saveViewOpen && (
-                <>
-                  <input
-                    className="input"
-                    style={{ width: 240 }}
-                    placeholder="View name…"
-                    value={viewName}
-                    autoFocus
-                    onChange={(e) => setViewName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void saveCurrentView();
-                      if (e.key === "Escape") setSaveViewOpen(false);
-                    }}
-                    aria-label="Saved view name"
-                  />
-                  <button
-                    className="btn btn-sm btn-primary"
-                    onClick={() => void saveCurrentView()}
-                    disabled={busy}
-                  >
-                    Save
-                  </button>
-                </>
-              )}
+              <span style={{ fontWeight: 600 }}>{groupLabel(group.group_type, group.photo_count)}</span>
+              <span className="faint" style={{ fontSize: 12 }}>
+                {group.group_type === "burst"
+                  ? "photographs captured within seconds of each other"
+                  : group.group_type === "face"
+                    ? "photographs with similar locally measured face appearance"
+                    : "photographs with near-identical structure"}
+              </span>
             </div>
           )}
-        </>
-      ) : (
-        <div className="library-summaryline groupbackbar">
-          <button className="btn btn-sm" onClick={() => { setGroup(null); setViewerId(null); }}>
-            ← Back to library
-          </button>
-          <span style={{ fontWeight: 600 }}>{groupLabel(group.group_type, group.photo_count)}</span>
-          <span className="faint" style={{ fontSize: 12 }}>
-            {group.group_type === "burst"
-              ? "photographs captured within seconds of each other"
-              : group.group_type === "face"
-                ? "photographs with similar locally measured face appearance"
-                : "photographs with near-identical structure"}
-          </span>
-        </div>
-      )}
 
       {scanning && progress && (
         <div className="library-scanline">
@@ -914,6 +859,81 @@ export function LibraryView() {
           </div>
         </>
       )}
+
+        </section>
+
+        <aside className="library-inspector" aria-label="Photo filters">
+          <div className="library-inspector-head">
+            <div>
+              <strong>Filters</strong>
+              <span className="faint">Refine this project</span>
+            </div>
+            {filterConditions.length > 0 && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => store().setFilterConditions([])}
+              >
+                Clear {filterConditions.length}
+              </button>
+            )}
+          </div>
+
+          {group === null ? (
+            <>
+              <FilterBar
+                mode="inspector"
+                draft={filterConditions}
+                onChange={(conditions) => store().setFilterConditions(conditions)}
+                disabled={anyPassRunning}
+                sessionId={sessionId}
+              />
+
+              {filterConditions.length > 0 && (
+                <div className="inspector-save">
+                  {!saveViewOpen ? (
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => setSaveViewOpen(true)}
+                      title="Save this filter with a name; it stays dynamic as the library changes."
+                    >
+                      Save as view
+                    </button>
+                  ) : (
+                    <div className="inspector-save-form">
+                      <input
+                        className="input"
+                        placeholder="View name…"
+                        value={viewName}
+                        autoFocus
+                        onChange={(event) => setViewName(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") void saveCurrentView();
+                          if (event.key === "Escape") setSaveViewOpen(false);
+                        }}
+                        aria-label="Saved view name"
+                      />
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={() => void saveCurrentView()}
+                        disabled={busy}
+                      >
+                        Save
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setSaveViewOpen(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="library-inspector-empty">
+              Filters apply to the Library grid. Return from this group to refine the project.
+            </div>
+          )}
+        </aside>
+      </div>
 
       {viewerId !== null && (
         <Viewer

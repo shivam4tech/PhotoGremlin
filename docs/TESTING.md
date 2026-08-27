@@ -157,7 +157,9 @@ Per-sprint coverage (✓ = in place today):
     `draftToFilter` emits the exact wire object the Rust engine parses
     (round-trip JSON asserted). Sprint 23 also pins the compact one-slider
     mapping: `Up to` emits `<=`, `From` emits `>=`, and existing `between`
-    conditions are not misidentified as quick thresholds.
+    conditions are not misidentified as quick thresholds. Sprint 24 pins the
+    left-rail Review view toggles: changing review state retains unrelated
+    conditions, and selecting the active shortcut clears only `review_state`.
   - Statistics formatting (Sprint 6, `src/tests/statsFormat.test.ts`) ✓: the
     honest-data rendering — every formatter returns "unavailable" (never
     "0"/"0%") for `null`; metrics to one decimal; shares as undecimaled

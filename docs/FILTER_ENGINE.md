@@ -81,6 +81,15 @@ the three visual fields use compact segmented categories, while ISO and focal
 length use one slider each. A row-level clear button removes its condition and
 restores the `Any` behavior without adding a full action row.
 
+Sprint 24 moves the complete filter surface into the Library's persistent
+right inspector. `FilterBar` inspector mode is always expanded there; active
+chips, quick measured controls, the advanced composer, clear, and save-as-view
+all share that one owner. The left rail's `Unreviewed`, `Kept`, and
+`Needs attention` shortcuts replace only the `review_state` condition, so a
+photographer can change review state while retaining ISO, lens, brightness, or
+other active conditions. Selecting the active review shortcut again clears
+only `review_state`.
+
 ## Execution
 
 1. Parse + validate filter JSON (serde, in `filters` logic on the Rust side).
