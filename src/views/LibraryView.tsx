@@ -72,18 +72,20 @@ export function LibraryView() {
     if (selectionMode) void store().loadSelections();
   }, [selectionMode, refreshKey]);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [sessionPhotoCount, setSessionPhotoCount] = useState<number | null>(null);
 
   // Resolve the current project's session so the grid shows only its photos.
   useEffect(() => {
-    if (!activeFolder) { setSessionId(null); return; }
+    if (!activeFolder) { setSessionId(null); setSessionPhotoCount(null); return; }
     let cancelled = false;
     api.listSessions().then((rows) => {
       if (cancelled) return;
       const hit = rows.find((r) => r.root_path === activeFolder);
       setSessionId(hit ? hit.id : null);
-    }).catch(() => { if (!cancelled) setSessionId(null); });
+      setSessionPhotoCount(hit ? hit.photo_count : null);
+    }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); } });
     return () => { cancelled = true; };
-  }, [activeFolder, scanSummary]);
+  }, [activeFolder, scanSummary, dbStatus?.photo_count]);
 
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
   const filterJson = useMemo(() => {
@@ -106,6 +108,22 @@ export function LibraryView() {
     filterJson,
     refreshKey,
   );
+
+  // Publish live counts for the TopBar badge: filtered vs session total.
+  // Group view is handled separately (its own count in the statusbar).
+  const setCurrentViewCount = useAppStore((s) => s.setCurrentViewCount);
+  useEffect(() => {
+    if (!activeFolder || group !== null) {
+      // Group view owns the statusbar; TopBar falls back to global.
+      setCurrentViewCount(null, null);
+      return;
+    }
+    // photos.total is session-scoped filtered count; sessionPhotoCount is the
+    // unfiltered session total (null before the session row loads — fall back
+    // to filtered total so the badge never shows 0 while loading).
+    setCurrentViewCount(photos.total, sessionPhotoCount ?? photos.total);
+    return () => { setCurrentViewCount(null, null); };
+  }, [activeFolder, group, photos.total, sessionPhotoCount, setCurrentViewCount]);
 
   // Load the similarity group set once when it isn't known yet (so returning
   // to the Library shows the cards without re-running the pass).

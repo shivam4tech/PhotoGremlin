@@ -155,6 +155,11 @@ interface AppState {
   setClassifyingScenes: (b: boolean) => void;
   setScenesProgress: (p: ProgressPayload | null) => void;
   setScenesSummary: (s: SceneSummary | null) => void;
+
+  /** Current view's photo count (set by LibraryView from its filtered result). */
+  currentViewCount: number | null;
+  currentViewTotal: number | null;
+  setCurrentViewCount: (filtered: number | null, total: number | null) => void;
 }
 
 let statusInFlight = false;
@@ -200,6 +205,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   classifyingScenes: false,
   scenesProgress: null,
   scenesSummary: null,
+
+  currentViewCount: null,
+  currentViewTotal: null,
+  setCurrentViewCount: (filtered, total) => set({ currentViewCount: filtered, currentViewTotal: total }),
 
   setView: (view) => set({ view }),
   setAppInfo: (appInfo) => set({ appInfo }),
