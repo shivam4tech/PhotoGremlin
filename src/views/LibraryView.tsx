@@ -266,28 +266,6 @@ export function LibraryView() {
     store().setSelection(id, null);
   }
 
-  if (!activeFolder) {
-    return (
-      <>
-        <ErrorBanner message={error} />
-        <EmptyState
-          glyph={<FolderIcon size={40} />}
-          title="Open a photo folder"
-          action={
-            <button className="btn btn-primary" onClick={openFolder} disabled={busy}>
-              <FolderIcon size={16} />
-              {busy ? "Opening…" : "Open Folder"}
-            </button>
-          }
-        >
-          Point PhotoGremlin at a folder of photographs. Everything —
-          scanning, thumbnails, analysis, statistics — runs on this machine.
-          Nothing is uploaded, ever.
-        </EmptyState>
-      </>
-    );
-  }
-
   // Forward wheel events from toolbar/filter areas to the photo grid
   function forwardWheel(e: React.WheelEvent) {
     const vg = document.querySelector(".vg") as HTMLDivElement | null;
@@ -310,6 +288,28 @@ export function LibraryView() {
       if (vg) vg.scrollTop = 0;
     }
   }, [activeFolder]);
+
+  if (!activeFolder) {
+    return (
+      <>
+        <ErrorBanner message={error} />
+        <EmptyState
+          glyph={<FolderIcon size={40} />}
+          title="Open a photo folder"
+          action={
+            <button className="btn btn-primary" onClick={openFolder} disabled={busy}>
+              <FolderIcon size={16} />
+              {busy ? "Opening…" : "Open Folder"}
+            </button>
+          }
+        >
+          Point PhotoGremlin at a folder of photographs. Everything —
+          scanning, thumbnails, analysis, statistics — runs on this machine.
+          Nothing is uploaded, ever.
+        </EmptyState>
+      </>
+    );
+  }
 
   return (
     <div className="library" onWheel={forwardWheel}>
