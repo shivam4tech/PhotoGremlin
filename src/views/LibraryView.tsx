@@ -60,21 +60,47 @@ export function LibraryView() {
   useEffect(() => { setGroupsVisible(GROUPS_PAGE); }, [similarityGroups, groupTab]);
 
   // Re-fetch the index when a scan completes, a file operation changed the
-  // files on disk, or the folder changed.
+  // files on disk, or the folder changed. Include activeFolder so switching
+  // projects immediately shows the new project's photos.
   const refreshKey = useMemo(
-    () => `${scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"}:${libraryVersion}`,
-    [scanSummary, libraryVersion],
+    () => `${activeFolder ?? "none"}:${scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"}:${libraryVersion}`,
+    [activeFolder, scanSummary, libraryVersion],
   );
 
   // Load persisted culling state once per library so tiles render their marks.
   useEffect(() => {
     if (selectionMode) void store().loadSelections();
   }, [selectionMode, refreshKey]);
+  const [sessionId, setSessionId] = useState<number | null>(null);
+
+  // Resolve the current project's session so the grid shows only its photos.
+  useEffect(() => {
+    if (!activeFolder) { setSessionId(null); return; }
+    let cancelled = false;
+    api.listSessions().then((rows) => {
+      if (cancelled) return;
+      const hit = rows.find((r) => r.root_path === activeFolder);
+      setSessionId(hit ? hit.id : null);
+    }).catch(() => { if (!cancelled) setSessionId(null); });
+    return () => { cancelled = true; };
+  }, [activeFolder, scanSummary]);
+
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
-  const filterJson = useMemo(
-    () => JSON.stringify(draftToFilter(filterConditions)),
-    [filterConditions],
-  );
+  const filterJson = useMemo(() => {
+    const base = draftToFilter(filterConditions);
+    // When the folder has no session yet (before first scan), show nothing
+    // rather than leaking in photos from other projects.
+    if (sessionId === null && activeFolder) {
+      return JSON.stringify({ operator: "AND", conditions: [{ field: "session_id", operator: "=", value: -1 }] });
+    }
+    if (sessionId === null) return JSON.stringify(base);
+    const sessionCond = { field: "session_id", operator: "=", value: sessionId };
+    if (typeof base === "string" && base === "") {
+      return JSON.stringify({ operator: "AND", conditions: [sessionCond] });
+    }
+    const obj = base as { operator: string; conditions: unknown[] };
+    return JSON.stringify({ ...obj, conditions: [...obj.conditions, sessionCond] });
+  }, [filterConditions, sessionId, activeFolder]);
   const photos = useFilteredPhotos(
     libraryHasPhotos && group === null,
     filterJson,
