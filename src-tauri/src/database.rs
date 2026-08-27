@@ -1248,7 +1248,16 @@ pub fn set_marks(
         .map_err(db_err("set marks"))?;
     Ok(n)
 }
-pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
+    pub fn clear_similarity_groups(&self) -> AppResult<()> {
+        let conn = self.lock()?;
+        conn.execute("DELETE FROM similarity_group_photos", [])
+            .map_err(db_err("clear similarity_group_photos"))?;
+        conn.execute("DELETE FROM similarity_groups", [])
+            .map_err(db_err("clear similarity_groups"))?;
+        Ok(())
+    }
+
+    pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
     if photo_ids.is_empty() {
         return Ok(0);
     }

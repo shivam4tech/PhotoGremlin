@@ -214,6 +214,9 @@ pub fn clear_recent_projects(state: State<AppState>) -> AppResult<()> {
 #[tauri::command]
 pub fn close_project(state: State<AppState>) -> AppResult<()> {
     state.db.clear_setting(SETTING_ACTIVE_FOLDER)?;
+    // Ephemeral similarity groups belong to the previous project — clear them
+    // so the next project starts clean; they regenerate lazily on "Find similar".
+    let _ = state.db.clear_similarity_groups();
     Ok(())
 }
 
@@ -247,6 +250,8 @@ pub fn open_project(state: State<AppState>, path: String) -> AppResult<()> {
             let _ = db.migrate();
         }
     }
+    // Previous project's ephemeral groups must not leak into the new one.
+    let _ = state.db.clear_similarity_groups();
     Ok(())
 }
 
