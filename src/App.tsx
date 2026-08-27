@@ -311,6 +311,7 @@ export default function App() {
            const sum = p.summary;
            const bits: string[] = [
              `${sum.similar_groups.toLocaleString()} similar group${sum.similar_groups === 1 ? "" : "s"}`,
+             ...(sum.face_groups > 0 ? [`${sum.face_groups.toLocaleString()} face-appearance group${sum.face_groups === 1 ? "" : "s"}`] : []),
              `${sum.burst_groups.toLocaleString()} burst group${sum.burst_groups === 1 ? "" : "s"}`,
            ];
            if (sum.hashed > 0) bits.unshift(`${sum.hashed.toLocaleString()} hashed`);

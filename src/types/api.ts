@@ -442,7 +442,7 @@ export interface Collection {
 export interface SimilarityGroup {
   id: number;
   hash: string;
-  group_type: "similar" | "burst";
+  group_type: "similar" | "face" | "burst";
   photo_count: number;
   created_at: string;
   /** Distinct sessions spanned (≥ 2 = cross-session duplicates, Sprint 16). */
@@ -457,6 +457,7 @@ export interface SimilaritySummary {
   failed: number;
   similar_groups: number;
   burst_groups: number;
+  face_groups: number;
   elapsed_ms: number;
   cancelled: boolean;
 }

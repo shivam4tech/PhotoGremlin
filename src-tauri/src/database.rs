@@ -13,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 15;
+pub const CURRENT_SCHEMA_VERSION: i64 = 17;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -358,6 +358,59 @@ impl Db {
                 .map_err(db_err("upgrade selections review states"))?;
             }
 
+            // v16: similarity results are durable per project/session. Older
+            // versions replaced one global result set and cleared it when the
+            // project changed, which made cards from another project appear
+            // (or disappear). Keep groups whose members all belong to one
+            // session; legacy cross-session groups have no honest project
+            // owner and are discarded on this one-time migration.
+            if !table_has_column(&conn, "similarity_groups", "session_id") {
+                conn.execute(
+                    "ALTER TABLE similarity_groups ADD COLUMN session_id INTEGER",
+                    [],
+                )
+                .map_err(db_err("add similarity_groups.session_id"))?;
+                conn.execute_batch(
+                    "UPDATE similarity_groups
+                        SET session_id = (
+                            SELECT p.session_id
+                            FROM similarity_group_photos gp
+                            JOIN photos p ON p.id = gp.photo_id
+                            WHERE gp.group_id = similarity_groups.id
+                            GROUP BY p.session_id
+                            HAVING COUNT(DISTINCT COALESCE(p.session_id, -1)) = 1
+                            LIMIT 1
+                        );
+                     DELETE FROM similarity_group_photos
+                       WHERE group_id IN (
+                           SELECT id FROM similarity_groups WHERE session_id IS NULL
+                       );
+                     DELETE FROM similarity_groups WHERE session_id IS NULL;
+                     CREATE INDEX IF NOT EXISTS idx_similarity_groups_session
+                       ON similarity_groups(session_id);",
+                )
+                .map_err(db_err("scope legacy similarity groups"))?;
+            }
+
+            // v17: face observations hold only compact, local appearance
+            // hashes for detected crops. They let the similarity pass offer
+            // same-face candidates without a cloud identity service or a
+            // heavyweight recognition model. No image pixels leave the
+            // machine, and a missing face runtime simply leaves this table
+            // empty.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS face_observations (
+                    photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                    face_index INTEGER NOT NULL,
+                    appearance_hash INTEGER NOT NULL,
+                    source_mtime TEXT,
+                    PRIMARY KEY (photo_id, face_index)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_face_observations_hash
+                    ON face_observations(appearance_hash);",
+            )
+            .map_err(db_err("create face observations"))?;
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -404,6 +457,14 @@ impl Db {
         } else {
             Ok(None)
         }
+    }
+
+    /// The session for the folder currently open in the desktop app. Long
+    /// running project work must capture this before it starts rather than
+    /// falling back to the entire catalog.
+    pub fn active_project_session_id(&self) -> AppResult<Option<i64>> {
+        let conn = self.lock()?;
+        self.active_session_id(&conn)
     }
 
     /// Quick status counters for the shell UI. When a project is open
@@ -1509,15 +1570,6 @@ pub fn set_marks(
         .map_err(db_err("set marks"))?;
     Ok(n)
 }
-    pub fn clear_similarity_groups(&self) -> AppResult<()> {
-        let conn = self.lock()?;
-        conn.execute("DELETE FROM similarity_group_photos", [])
-            .map_err(db_err("clear similarity_group_photos"))?;
-        conn.execute("DELETE FROM similarity_groups", [])
-            .map_err(db_err("clear similarity_groups"))?;
-        Ok(())
-    }
-
     pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
     if photo_ids.is_empty() {
         return Ok(0);
@@ -1901,6 +1953,9 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     pub fn list_similarity_groups(&self, limit: i64) -> AppResult<Vec<SimilarityGroup>> {
         let conn = self.lock()?;
         let limit = limit.clamp(1, 500);
+        let Some(session_id) = self.active_session_id(&conn)? else {
+            return Ok(Vec::new());
+        };
         let mut stmt = conn
             .prepare(
                 "SELECT g.id, g.hash, g.group_type, g.photo_count, g.created_at,
@@ -1909,12 +1964,13 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
                          JOIN photos p ON p.id = gp.photo_id
                          WHERE gp.group_id = g.id) AS session_count
                  FROM similarity_groups g
+                 WHERE g.session_id = ?1
                  ORDER BY (g.group_type = 'burst') DESC, g.photo_count DESC, g.id
-                 LIMIT ?1",
+                 LIMIT ?2",
             )
             .map_err(db_err("prepare similarity groups"))?;
         let rows = stmt
-            .query_map([limit], |r| {
+            .query_map(params![session_id, limit], |r| {
                 Ok(SimilarityGroup {
                     id: r.get(0)?,
                     hash: r.get(1)?,
@@ -1955,10 +2011,15 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         let conn = self.lock()?;
         let limit = limit.clamp(1, 500);
         let offset = offset.max(0);
+        let Some(session_id) = self.active_session_id(&conn)? else {
+            return Ok((Vec::new(), 0));
+        };
         let total: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM similarity_group_photos WHERE group_id = ?1",
-                [group_id],
+                "SELECT COUNT(*) FROM similarity_group_photos gp
+                 JOIN similarity_groups g ON g.id = gp.group_id
+                 WHERE gp.group_id = ?1 AND g.session_id = ?2",
+                params![group_id, session_id],
                 |r| r.get(0),
             )
             .map_err(db_err("count group photos"))?;
@@ -1974,13 +2035,14 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
                  FROM similarity_group_photos g
                  JOIN photos p ON p.id = g.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
-                 WHERE g.group_id = ?1
+                 JOIN similarity_groups sg ON sg.id = g.group_id
+                 WHERE g.group_id = ?1 AND sg.session_id = ?2
                  ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
-                 LIMIT ?2 OFFSET ?3",
+                 LIMIT ?3 OFFSET ?4",
             )
             .map_err(db_err("prepare group photos"))?;
         let rows = stmt
-            .query_map(params![group_id, limit, offset], Self::page_row_to_summary)
+            .query_map(params![group_id, session_id, limit, offset], Self::page_row_to_summary)
             .map_err(db_err("query group photos"))?;
         let mut out = Vec::new();
         for row in rows {
@@ -1989,27 +2051,32 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         Ok((out, total))
     }
 
-    /// Replace the whole similarity-group set atomically (the pass recomputes
-    /// all groups from the current hashes). Returns the number of groups.
-    pub fn replace_similarity_groups(
+    /// Replace one project's similarity-group set atomically. Groups for
+    /// every other project remain available when that project is reopened.
+    pub fn replace_similarity_groups_for_session(
         &self,
+        session_id: i64,
         groups: &[(String, String, Vec<i64>)],
     ) -> AppResult<usize> {
         let conn = self.lock()?;
         let now = crate::time::now_utc();
         let tx = conn.unchecked_transaction().map_err(db_err("similarity tx"))?;
-        tx.execute("DELETE FROM similarity_group_photos", [])
-            .map_err(db_err("clear group photos"))?;
-        tx.execute("DELETE FROM similarity_groups", [])
-            .map_err(db_err("clear groups"))?;
+        tx.execute(
+            "DELETE FROM similarity_group_photos
+             WHERE group_id IN (SELECT id FROM similarity_groups WHERE session_id = ?1)",
+            [session_id],
+        )
+        .map_err(db_err("clear project group photos"))?;
+        tx.execute("DELETE FROM similarity_groups WHERE session_id = ?1", [session_id])
+            .map_err(db_err("clear project groups"))?;
         for (hash, group_type, photo_ids) in groups {
             if photo_ids.is_empty() {
                 continue;
             }
             tx.execute(
-                "INSERT INTO similarity_groups (hash, group_type, photo_count, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![hash, group_type, photo_ids.len() as i64, now],
+                "INSERT INTO similarity_groups (hash, group_type, photo_count, created_at, session_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![hash, group_type, photo_ids.len() as i64, now, session_id],
             )
             .map_err(db_err("insert group"))?;
             let gid: i64 =
@@ -2028,18 +2095,19 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         Ok(groups.len())
     }
 
-    /// All currently hashed photos (id, hash, session, capture datetime) for
-    /// grouping. Groups are computed within a session (see SIMILARITY.md).
-    pub fn hashed_photos(
+    /// All currently hashed photos for one project/session. The similarity
+    /// pass must never read another project's cached rows.
+    pub fn hashed_photos_for_session(
         &self,
+        session_id: i64,
     ) -> AppResult<Vec<(i64, i64, Option<i64>, Option<String>)>> {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare("SELECT id, phash, session_id, capture_datetime
-                      FROM photos WHERE phash IS NOT NULL")
+                      FROM photos WHERE phash IS NOT NULL AND session_id = ?1")
             .map_err(db_err("prepare hashed photos"))?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map([session_id], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, i64>(1)?,
@@ -2296,8 +2364,23 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         face_count: i64,
         source_mtime: Option<&str>,
     ) -> AppResult<()> {
+        self.upsert_faces_with_observations(photo_id, face_count, &[], source_mtime)
+    }
+
+    /// Store a face count and compact local appearance signatures together.
+    /// A signature is a perceptual hash of one detected face crop, never an
+    /// image or a cloud-recognisable embedding. Replacing rows prevents stale
+    /// observations after a photo changes on disk.
+    pub fn upsert_faces_with_observations(
+        &self,
+        photo_id: i64,
+        face_count: i64,
+        appearance_hashes: &[u64],
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
         let conn = self.lock()?;
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(db_err("face observations tx"))?;
+        tx.execute(
             "INSERT INTO analysis (photo_id, face_count, faces_at, analyzed_at, algorithm_version)
              VALUES (?1, ?2, ?3, ?4, 1)
              ON CONFLICT(photo_id) DO UPDATE SET
@@ -2306,7 +2389,43 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
             params![photo_id, face_count, source_mtime, crate::time::now_utc()],
         )
         .map_err(db_err("upsert faces"))?;
+        tx.execute("DELETE FROM face_observations WHERE photo_id = ?1", [photo_id])
+            .map_err(db_err("clear face observations"))?;
+        for (face_index, hash) in appearance_hashes.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO face_observations (photo_id, face_index, appearance_hash, source_mtime)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![photo_id, face_index as i64, *hash as i64, source_mtime],
+            )
+            .map_err(db_err("insert face observation"))?;
+        }
+        tx.commit().map_err(db_err("commit face observations"))?;
         Ok(())
+    }
+
+    /// Stored local face-appearance hashes for one project. Only photos in
+    /// the requested session are returned, so portrait candidates cannot
+    /// bridge into another project.
+    pub fn face_observations_for_session(&self, session_id: i64) -> AppResult<Vec<(i64, u64)>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT o.photo_id, o.appearance_hash
+                 FROM face_observations o
+                 JOIN photos p ON p.id = o.photo_id
+                 WHERE p.session_id = ?1",
+            )
+            .map_err(db_err("prepare project face observations"))?;
+        let rows = stmt
+            .query_map([session_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as u64))
+            })
+            .map_err(db_err("query project face observations"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read project face observation"))?);
+        }
+        Ok(out)
     }
 
     /// How many photos carry a face result (the Settings "N of M" line).

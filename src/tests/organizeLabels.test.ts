@@ -30,6 +30,11 @@ describe("groupLabel (similarity group cards)", () => {
     expect(groupLabel("burst", 4)).toBe("burst · 4");
   });
 
+  it("labels face-appearance candidates without asserting identity", () => {
+    expect(groupLabel("face", 2)).toBe("2 matching face appearances");
+    expect(groupLabel("face", 4)).toBe("4 matching face appearances");
+  });
+
   it("treats an unknown type as a similar group", () => {
     expect(groupLabel("???", 3)).toBe("3 similar photographs");
   });

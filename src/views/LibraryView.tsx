@@ -58,7 +58,7 @@ export function LibraryView() {
   const [group, setGroup] = useState<SimilarityGroup | null>(null);
   const [groupPhotos, setGroupPhotos] = useState<PhotoSummary[]>([]);
   const [groupLoading, setGroupLoading] = useState(false);
-  const [groupTab, setGroupTab] = useState<"all" | "similar" | "burst">("all");
+  const [groupTab, setGroupTab] = useState<"all" | "similar" | "face" | "burst">("all");
   const [groupsVisible, setGroupsVisible] = useState(GROUPS_PAGE);
   useEffect(() => { setGroupsVisible(GROUPS_PAGE); }, [similarityGroups, groupTab]);
 
@@ -548,7 +548,9 @@ export function LibraryView() {
           <span className="faint" style={{ fontSize: 12 }}>
             {group.group_type === "burst"
               ? "photographs captured within seconds of each other"
-              : "photographs with near-identical structure"}
+              : group.group_type === "face"
+                ? "photographs with similar locally measured face appearance"
+                : "photographs with near-identical structure"}
           </span>
         </div>
       )}
@@ -666,6 +668,7 @@ export function LibraryView() {
       {!findingSimilar && similaritySummary && group === null && (
         <div className="library-summaryline mono">
           Similarity: {similaritySummary.similar_groups.toLocaleString()} similar group{similaritySummary.similar_groups === 1 ? "" : "s"} ·{" "}
+          {similaritySummary.face_groups > 0 && <>{similaritySummary.face_groups.toLocaleString()} face-appearance group{similaritySummary.face_groups === 1 ? "" : "s"} ·{" "}</>}
           {similaritySummary.burst_groups.toLocaleString()} burst{similaritySummary.burst_groups === 1 ? "" : "s"}
           {similaritySummary.hashed > 0 ? ` · ${similaritySummary.hashed.toLocaleString()} hashed in this run` : ""}
           {similaritySummary.failed > 0 && (
@@ -678,15 +681,17 @@ export function LibraryView() {
 
       {group === null && !findingSimilar && (similarityGroups?.length ?? 0) > 0 && (() => {
         const similarOnly = similarityGroups!.filter((g) => g.group_type === "similar");
+        const faceOnly = similarityGroups!.filter((g) => g.group_type === "face");
         const burstOnly = similarityGroups!.filter((g) => g.group_type === "burst");
-        const filtered = groupTab === "similar" ? similarOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
+        const filtered = groupTab === "similar" ? similarOnly : groupTab === "face" ? faceOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
         const visible = filtered.slice(0, groupsVisible);
         return (
         <div className="similars">
           <div className="similars-head">
             <span style={{ fontWeight: 600 }}>
-              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${burstOnly.length} bursts` :
+              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${faceOnly.length} face appearance · ${burstOnly.length} bursts` :
                groupTab === "similar" ? `Similar — ${similarOnly.length} groups` :
+               groupTab === "face" ? `Face appearance — ${faceOnly.length} groups` :
                `Bursts — ${burstOnly.length} groups`}
             </span>
             <span className="faint" style={{ fontSize: 12 }}>
@@ -694,13 +699,15 @@ export function LibraryView() {
                 ? "Runs captured within seconds — time, not look"
                 : groupTab === "similar"
                 ? "Near-identical structure (same moment, tight threshold)"
-                : "Near-duplicates and same-moment runs, found by perceptual hashing on this machine"}
+                : groupTab === "face"
+                ? "Repeat face appearance candidates from optional local face detection — review, not identity labels"
+                : "Near-duplicates, face-appearance candidates and same-moment runs, found on this machine"}
             </span>
           </div>
           <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
-            {(["all", "similar", "burst"] as const).map((t) => (
+            {(["all", "similar", "face", "burst"] as const).map((t) => (
               <button key={t} className={`btn btn-sm${groupTab === t ? " btn-primary" : ""}`} onClick={() => setGroupTab(t)}>
-                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : `Bursts (${burstOnly.length})`}
+                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : t === "face" ? `Faces (${faceOnly.length})` : `Bursts (${burstOnly.length})`}
               </button>
             ))}
           </div>
@@ -713,6 +720,8 @@ export function LibraryView() {
                 title={
                   g.group_type === "burst"
                     ? "A run of photographs captured within seconds of each other."
+                    : g.group_type === "face"
+                    ? "Candidate photographs with similar locally measured face appearance. This is not an identity label."
                     : "Photographs with near-identical structure (likely the same moment)."
                 }
               >
