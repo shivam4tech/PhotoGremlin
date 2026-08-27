@@ -70,6 +70,10 @@ export default function App() {
 
   // Success notices are set by the pass-complete handlers and should be
   // transient: auto-dismiss after a few seconds, or immediately on ×.
+  // Escape bare ampersands so GTK's Pango markup parser doesn't warn
+  // ("Entity did not end with a semicolon").
+  const safeNotice = notice ? notice.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, "&amp;") : null;
+  const safeError = error ? error.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, "&amp;") : null;
   useEffect(() => {
     if (!notice) return;
     const t = window.setTimeout(() => setNotice(null), 8000);
@@ -387,7 +391,7 @@ export default function App() {
           ) : null}
         </TopBar>
         <div className={view === "library" ? "view-scroll library-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>{body}</div>
-        {notice && (
+        {safeNotice && (
           <div
             role="status"
             style={{
@@ -399,7 +403,7 @@ export default function App() {
               position: "relative",
             }}
           >
-            {notice}
+            {safeNotice}
             <button
               aria-label="Dismiss"
               onClick={() => setNotice(null)}
@@ -421,7 +425,7 @@ export default function App() {
             </button>
           </div>
         )}
-        {error && (
+        {safeError && (
           <div
             role="alert"
             style={{
@@ -432,7 +436,7 @@ export default function App() {
               fontSize: 12.5,
             }}
           >
-            {error}
+            {safeError}
           </div>
         )}
       </main>

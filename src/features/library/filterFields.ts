@@ -58,6 +58,12 @@ export const FILTER_FIELDS: FieldDef[] = [
     area: "Scene (local model)",
   },
   {
+    field: "scene_fine",
+    label: "Scene label",
+    kind: "text",
+    area: "Scene (local model)",
+  },
+  {
     field: "rating",
     label: "Rating",
     kind: "int",

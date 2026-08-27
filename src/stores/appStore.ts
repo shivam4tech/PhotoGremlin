@@ -263,7 +263,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openProject: async (path: string) => {
-    set({ activeFolder: path, scanSummary: null, analysisSummary: null, view: "library" as const });
+    set({ activeFolder: path, scanSummary: null, analysisSummary: null, similarityGroups: null, filterConditions: [], view: "library" as const });
     await api.openProject(path);
     await get().refreshStatus();
   },
@@ -271,15 +271,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   newProject: async () => {
     const picked = await api.pickFolder();
     if (!picked) return;
-    // Create a per-catalog DB alongside the folder
+    set({ activeFolder: picked, similarityGroups: null, filterConditions: [], view: "library" as const });
     await api.openProject(picked);
-    set({ activeFolder: picked, view: "library" as const });
     await get().refreshStatus();
   },
 
   closeProject: async () => {
     await api.closeProject();
-    set({ activeFolder: null, view: "home" as const });
+    set({ activeFolder: null, similarityGroups: null, filterConditions: [], view: "home" as const });
     await get().refreshStatus();
   },
 
@@ -345,7 +344,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setFilterConditions: (filterConditions) => set({ filterConditions }),
+  setFilterConditions: (filterConditions) => {
+    // Mutually exclusive boolean pairs: only one polarity can be active at once.
+    // The user's most recent toggle wins — drop the stale opposite.
+    const antonyms: Record<string, string> = { monochrome: "color", color: "monochrome", dark: "bright", bright: "dark" };
+    const seen = new Map<string, FilterCondition>();
+    for (const c of filterConditions) {
+      const opp = antonyms[c.field];
+      if (opp && seen.has(opp)) seen.delete(opp);
+      seen.set(c.field, c);
+    }
+    const deduped = [...seen.values()];
+    // If monochrome/color or dark/bright collapsed, the change is silent — just set.
+    if (deduped.length !== filterConditions.length) set({ filterConditions: deduped });
+    else set({ filterConditions });
+  },
 
   loadSavedViews: async () => {
     try {

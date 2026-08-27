@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
 import { useFilteredPhotos } from "@/hooks/useFilteredPhotos";
@@ -288,8 +288,31 @@ export function LibraryView() {
     );
   }
 
+  // Forward wheel events from toolbar/filter areas to the photo grid
+  function forwardWheel(e: React.WheelEvent) {
+    const vg = document.querySelector(".vg") as HTMLDivElement | null;
+    if (vg && e.deltaY !== 0) {
+      const atTop = vg.scrollTop <= 0;
+      const atBottom = vg.scrollTop + vg.clientHeight >= vg.scrollHeight - 1;
+      if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+        vg.scrollTop += e.deltaY;
+        e.preventDefault();
+      }
+    }
+  }
+
+  // Reset scroll when switching projects
+  const prevFolderRef = useRef(activeFolder);
+  useEffect(() => {
+    if (prevFolderRef.current !== activeFolder) {
+      prevFolderRef.current = activeFolder;
+      const vg = document.querySelector(".vg") as HTMLDivElement | null;
+      if (vg) vg.scrollTop = 0;
+    }
+  }, [activeFolder]);
+
   return (
-    <div className="library">
+    <div className="library" onWheel={forwardWheel}>
       <div className="library-toolbar">
         <FolderIcon size={16} />
         <span className="mono library-toolbar-path" title={activeFolder}>{activeFolder}</span>

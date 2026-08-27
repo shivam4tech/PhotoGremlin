@@ -131,6 +131,7 @@ const COLOR_LABEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.color_label"
 /// pass ("nature", "urban", "home_stay", ...). Values come from the local
 /// model; NULL when the scene pass has not run.
 const SCENE_GROUP: FieldDef = FieldDef { kind: Kind::Text, expr: "a.scene_coarse", negate_bool: false };
+const SCENE_FINE: FieldDef = FieldDef { kind: Kind::Text, expr: "a.scene_fine", negate_bool: false };
 
 /// The field registry (FILTER_ENGINE.md): maps each filter field to
 /// (expression, kind) so conditions validate before any SQL runs. Unknown
@@ -165,6 +166,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "flagged" => &FLAGGED,
         "color_label" => &COLOR_LABEL,
         "scene_group" => &SCENE_GROUP,
+        "scene_fine" => &SCENE_FINE,
         _ => return None,
     })
 }
