@@ -7,7 +7,7 @@
 
 use tauri::State;
 
-use crate::database::{FilterValueOptions, PhotoPage};
+use crate::database::{FilterValueOptions, NumericFilterStats, PhotoPage};
 use crate::error::AppResult;
 use crate::filters;
 use crate::state::AppState;
@@ -37,4 +37,15 @@ pub fn filter_value_options(
     session_id: Option<i64>,
 ) -> AppResult<FilterValueOptions> {
     state.db.filter_value_options(&field, session_id)
+}
+
+/// Recorded/missing counts and observed numeric bounds for the quick filter
+/// controls. All aggregation is local and session-scoped.
+#[tauri::command]
+pub fn numeric_filter_stats(
+    state: State<'_, AppState>,
+    field: String,
+    session_id: Option<i64>,
+) -> AppResult<NumericFilterStats> {
+    state.db.numeric_filter_stats(&field, session_id)
 }

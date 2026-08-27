@@ -66,6 +66,11 @@ Per-sprint coverage (✓ = in place today):
     `is_monochrome`), null-ops, unknown field/op/bad value-type → friendly
     validation errors, and a SQL-injection-looking value is bound, not spliced
     (the table survives). Empty filter returns everything, paginated.
+    Sprint 22 adds a two-session database test for numeric quick-filter stats:
+    recorded/missing counts and min/max stay scoped to the requested shoot,
+    and unknown field names fail the allowlist. Frontend helper tests pin the
+    measured-band thresholds, standard exposure stops, neutral chip labels,
+    and same-field condition replacement used by the quick controls.
   - Statistics engine (Sprint 6, integration `tests/statistics_integration.rs`)
     ✓: a two-session, four-photo seed (two analyzed+EXIF, one unanalyzed
     EXIF, one photo with no EXIF at all — its `indexed_at` pinned so the

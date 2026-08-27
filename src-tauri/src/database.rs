@@ -1265,6 +1265,44 @@ pub fn upsert_exif(
         Ok(FilterValueOptions { values, unidentified_count })
     }
 
+    /// Availability and observed bounds for numeric quick-filter controls.
+    /// Expressions come from this allowlist only; the caller never supplies
+    /// SQL. Missing values remain a first-class count and are never inferred.
+    pub fn numeric_filter_stats(
+        &self,
+        field: &str,
+        session_id: Option<i64>,
+    ) -> AppResult<NumericFilterStats> {
+        let expr = match field {
+            "sharpness" => "a.sharpness",
+            "brightness" => "a.brightness",
+            "contrast" => "a.contrast",
+            "iso" => "p.iso",
+            "focal_length" => "p.focal_length",
+            _ => {
+                return Err(AppError::validation(format!(
+                    "`{field}` has no numeric filter statistics"
+                )))
+            }
+        };
+        let sql = format!(
+            "SELECT COUNT({expr}), COUNT(*) - COUNT({expr}), MIN({expr}), MAX({expr})
+               FROM photos p
+               LEFT JOIN analysis a ON a.photo_id = p.id
+              WHERE (?1 IS NULL OR p.session_id = ?1)"
+        );
+        let conn = self.lock()?;
+        conn.query_row(&sql, params![session_id], |row| {
+            Ok(NumericFilterStats {
+                recorded_count: row.get(0)?,
+                missing_count: row.get(1)?,
+                minimum: row.get(2)?,
+                maximum: row.get(3)?,
+            })
+        })
+        .map_err(db_err("read numeric filter statistics"))
+    }
+
     /// Session-first review data. This returns lightweight grid rows plus the
     /// existing similarity/burst memberships in one local SQLite transaction;
     /// pixel decoding remains on demand in the UI.
@@ -2650,6 +2688,15 @@ pub struct FilterValueOptions {
     pub unidentified_count: i64,
 }
 
+/// Local availability for one numeric filter field in the requested shoot.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NumericFilterStats {
+    pub recorded_count: i64,
+    pub missing_count: i64,
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+}
+
 /// One reusable similarity/burst decision unit for the session review UI.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReviewSequence {
@@ -2881,6 +2928,79 @@ mod tests {
         assert_eq!(scoped.values[0].count, 1);
         assert_eq!(scoped.unidentified_count, 1);
         assert!(db.filter_value_options("filename", Some(first)).is_err());
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn numeric_filter_stats_are_scoped_and_keep_missing_explicit() {
+        let dir = std::env::temp_dir().join(format!(
+            "pg_db_test_numeric_filter_stats_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+        let first = db.upsert_session("First", Some("/first-stats")).unwrap();
+        let second = db.upsert_session("Second", Some("/second-stats")).unwrap();
+
+        let mut ids = Vec::new();
+        for (name, session) in [("a.jpg", first), ("b.jpg", first), ("c.jpg", second)] {
+            ids.push(
+                db.upsert_photo(&PhotoUpsert {
+                    path: dir.join(name).display().to_string(),
+                    filename: name.to_string(),
+                    extension: "jpg".to_string(),
+                    size_bytes: Some(1),
+                    width: Some(10),
+                    height: Some(10),
+                    orientation: None,
+                    session_id: Some(session),
+                    file_mtime: None,
+                })
+                .unwrap(),
+            );
+        }
+        {
+            let conn = db.lock().unwrap();
+            conn.execute(
+                "UPDATE photos SET iso = 400, focal_length = 50 WHERE id = ?1",
+                [ids[0]],
+            )
+            .unwrap();
+            conn.execute("UPDATE photos SET iso = 1600 WHERE id = ?1", [ids[2]])
+                .unwrap();
+        }
+        db.upsert_analysis(
+            ids[0],
+            &crate::analysis::metrics::Metrics {
+                sharpness: 72.0,
+                brightness: 31.0,
+                contrast: 55.0,
+                saturation: 40.0,
+                highlight_clipping: 0.0,
+                shadow_clipping: 1.0,
+                is_monochrome: false,
+                is_dark: true,
+                is_bright: false,
+            },
+            None,
+        )
+        .unwrap();
+
+        let iso = db.numeric_filter_stats("iso", Some(first)).unwrap();
+        assert_eq!(iso.recorded_count, 1);
+        assert_eq!(iso.missing_count, 1);
+        assert_eq!(iso.minimum, Some(400.0));
+        assert_eq!(iso.maximum, Some(400.0));
+        let brightness = db.numeric_filter_stats("brightness", Some(first)).unwrap();
+        assert_eq!(brightness.recorded_count, 1);
+        assert_eq!(brightness.missing_count, 1);
+        assert_eq!(brightness.minimum, Some(31.0));
+        assert!(db.numeric_filter_stats("filename", Some(first)).is_err());
 
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);

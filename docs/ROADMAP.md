@@ -46,7 +46,10 @@ SCENE_CLASSIFICATION.md: MobileNetV3-Large trained on a CC-BY Open Images
 corpus, two-tier coarse ≥95% / fine top-1, shipped as a small local ONNX
 model)**, **scenario culling, Aftershoot-style (Sprint 19–21, planned — see
 CULLING.md: genre profiles over measurable features + blur-type/eye-state
-models, ranked buckets, non-destructive)**, semantic local search.
+models, ranked buckets, non-destructive)**, **filter quick controls (Sprint
+22 — done 2026-08-28: measured visual bands, standard-stop exposure ranges,
+and explicit unmeasured handling; see FILTER_ENGINE.md)**, semantic local
+search.
 
 ## v0.4
 
