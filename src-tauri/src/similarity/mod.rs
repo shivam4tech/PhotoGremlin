@@ -23,7 +23,7 @@
 //! delete this". Deciding stays with the photographer (Sprint 7 file ops make
 //! the cleanup one click).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -53,6 +53,9 @@ const GLOBAL_MIN_ENTROPY: u32 = 2;
 /// Bursts: consecutive photographs within this window (seconds) on the same
 /// shoot. Pinned by unit tests.
 pub const BURST_WINDOW_SECS: i64 = 3;
+/// A deliberately conservative threshold for local face-crop appearance
+/// hashes. This produces candidates for review, not a claim of identity.
+pub const FACE_APPEARANCE_THRESHOLD: u32 = 10;
 const MIN_GROUP_SIZE: usize = 2;
 
 /// A photo inside a grouping pass: (id, phash, capture timestamp).
@@ -66,6 +69,8 @@ pub struct SimilaritySummary {
     pub failed: u32,
     pub similar_groups: u32,
     pub burst_groups: u32,
+    /// Groups formed from optional local face-crop appearance hashes.
+    pub face_groups: u32,
     pub elapsed_ms: u64,
     pub cancelled: bool,
 }
@@ -160,6 +165,46 @@ pub fn group_similar(items: &[(i64, u64)], threshold: u32) -> Vec<Vec<i64>> {
         .collect();
     for g in groups.iter_mut() {
         g.sort_unstable();
+    }
+    groups.sort_by_key(|g| g[0]);
+    groups
+}
+
+/// Group photographs when any locally detected face crop has a close
+/// appearance hash. This is intentionally a candidate finder, not identity
+/// recognition: only compact crop hashes are compared, it never crosses a
+/// project boundary, and different faces in the same photo never make a
+/// group by themselves.
+pub fn group_face_appearances(items: &[(i64, u64)], threshold: u32) -> Vec<Vec<i64>> {
+    let photo_ids: Vec<i64> = items.iter().map(|(id, _)| *id).collect::<HashSet<_>>().into_iter().collect();
+    let mut photo_ids = photo_ids;
+    photo_ids.sort_unstable();
+    let mut positions = HashMap::new();
+    for (index, id) in photo_ids.iter().enumerate() {
+        positions.insert(*id, index);
+    }
+    let mut parent: Vec<usize> = (0..photo_ids.len()).collect();
+    for i in 0..items.len() {
+        for j in (i + 1)..items.len() {
+            if items[i].0 == items[j].0 || hamming(items[i].1, items[j].1) > threshold {
+                continue;
+            }
+            let left = positions[&items[i].0];
+            let right = positions[&items[j].0];
+            let a = uf_find(&mut parent, left);
+            let b = uf_find(&mut parent, right);
+            if a != b {
+                parent[b] = a;
+            }
+        }
+    }
+    let mut comps: HashMap<usize, Vec<i64>> = HashMap::new();
+    for (index, id) in photo_ids.iter().enumerate() {
+        comps.entry(uf_find(&mut parent, index)).or_default().push(*id);
+    }
+    let mut groups: Vec<Vec<i64>> = comps.into_values().filter(|g| g.len() >= MIN_GROUP_SIZE).collect();
+    for group in &mut groups {
+        group.sort_unstable();
     }
     groups.sort_by_key(|g| g[0]);
     groups
@@ -295,6 +340,19 @@ pub fn run_similarity(
     cancel: Arc<AtomicBool>,
 ) -> AppResult<SimilaritySummary> {
     let started = Instant::now();
+    // Capture the project once so an active-folder switch cannot make this
+    // background task hash or regroup a different project's cache.
+    let Some(session_id) = db.active_project_session_id()? else {
+        return Ok(SimilaritySummary {
+            hashed: 0,
+            failed: 0,
+            similar_groups: 0,
+            burst_groups: 0,
+            face_groups: 0,
+            elapsed_ms: 0,
+            cancelled: false,
+        });
+    };
 
     // Phase 1: hash everything that needs it.
     let queue = db.phash_queue()?;
@@ -328,22 +386,18 @@ pub fn run_similarity(
         );
     }
 
-    // Phase 2: group. Pass A — within each session, unchanged since
-    // Sprint 8 (same-moment question at SIMILAR_THRESHOLD). Pass B —
-    // cross-session, stricter threshold + entropy guard. Bursts stay
-    // per-session (time-based; the same moment belongs to one shoot).
+    // Phase 2: group this project only. Per-project results stay persisted
+    // when another project is opened; cross-project duplicate detection is
+    // deliberately not part of the active shoot workflow.
     progress(ProgressPayload::new(1, 0, "grouping"));
-    let rows = db.hashed_photos()?;
-        let mut by_session: HashMap<Option<i64>, Vec<SessionRow>> = HashMap::new();
-    for (id, hash, session, capture) in rows {
-        by_session
-            .entry(session)
-            .or_default()
-            .push((id, hash as u64, secs_from_rfc3339(capture.as_deref())));
-    }
-
+    let rows = db.hashed_photos_for_session(session_id)?;
+    let items: Vec<SessionRow> = rows
+        .into_iter()
+        .map(|(id, hash, _session, capture)| (id, hash as u64, secs_from_rfc3339(capture.as_deref())))
+        .collect();
     let mut similar: Vec<(String, String, Vec<i64>)> = Vec::new();
     let mut bursts: Vec<(String, String, Vec<i64>)> = Vec::new();
+    let mut faces: Vec<(String, String, Vec<i64>)> = Vec::new();
 
     let label_of =
         |items: &[(i64, u64, Option<i64>)], first_id: i64| -> String {
@@ -355,45 +409,38 @@ pub fn run_similarity(
             format!("{h:016x}")
         };
 
-    for items in by_session.values() {
-        let hashes: Vec<(i64, u64)> = items.iter().map(|(id, h, _)| (*id, *h)).collect();
-        for g in group_similar(&hashes, SIMILAR_THRESHOLD) {
-            similar.push((label_of(items, g[0]), "similar".to_string(), g));
-        }
-        let timed: Vec<(i64, Option<i64>)> = items.iter().map(|(id, _, t)| (*id, *t)).collect();
-        for g in group_bursts(&timed, BURST_WINDOW_SECS) {
-            // Label with the burst's earliest known capture time (stable id).
-            let t = items
-                .iter()
-                .filter(|(id, _, _)| g.contains(id))
-                .filter_map(|(_, _, t)| *t)
-                .min()
-                .unwrap_or(0);
-            bursts.push((format!("burst:{t}"), "burst".to_string(), g));
-        }
+    let hashes: Vec<(i64, u64)> = items.iter().map(|(id, h, _)| (*id, *h)).collect();
+    for g in group_similar(&hashes, SIMILAR_THRESHOLD) {
+        similar.push((label_of(&items, g[0]), "similar".to_string(), g));
     }
-
-    // Pass B: cross-session similar groups.
-    let global: Vec<SessionRow> = by_session
-        .iter()
-        .flat_map(|(s, items)| items.iter().map(move |(id, h, _)| (*id, *h, *s)))
-        .collect();
-    for g in cross_session_groups(&global, GLOBAL_SIMILAR_THRESHOLD) {
-        similar.push((label_of(&global, g[0]), "similar".to_string(), g));
+    let timed: Vec<(i64, Option<i64>)> = items.iter().map(|(id, _, t)| (*id, *t)).collect();
+    for g in group_bursts(&timed, BURST_WINDOW_SECS) {
+        let t = items
+            .iter()
+            .filter(|(id, _, _)| g.contains(id))
+            .filter_map(|(_, _, t)| *t)
+            .min()
+            .unwrap_or(0);
+        bursts.push((format!("burst:{t}"), "burst".to_string(), g));
+    }
+    for g in group_face_appearances(&db.face_observations_for_session(session_id)?, FACE_APPEARANCE_THRESHOLD) {
+        faces.push((format!("face:{}", g[0]), "face".to_string(), g));
     }
 
     let all: Vec<(String, String, Vec<i64>)> = similar
         .iter()
         .chain(bursts.iter())
+        .chain(faces.iter())
         .map(|(h, t, g)| (h.clone(), t.clone(), g.clone()))
         .collect();
-    db.replace_similarity_groups(&all)?;
+    db.replace_similarity_groups_for_session(session_id, &all)?;
 
     Ok(SimilaritySummary {
         hashed,
         failed,
         similar_groups: similar.len() as u32,
         burst_groups: bursts.len() as u32,
+        face_groups: faces.len() as u32,
         elapsed_ms: started.elapsed().as_millis() as u64,
         cancelled,
     })
@@ -494,6 +541,18 @@ mod tests {
         // A lone photo never forms a group.
         let base = dhash64(&gradient(64, 48));
         assert!(group_similar(&[(7, base)], SIMILAR_THRESHOLD).is_empty());
+    }
+
+    #[test]
+    fn face_appearance_groups_deduplicate_faces_from_one_photo() {
+        let base = 0x1234_5678_9abc_def0u64;
+        // Photo 1 has two detected faces. Only the close observation on
+        // photo 2 may create a two-photo candidate group.
+        let groups = group_face_appearances(
+            &[(1, base), (1, base ^ 0b11), (2, base ^ 0b1), (3, !base)],
+            FACE_APPEARANCE_THRESHOLD,
+        );
+        assert_eq!(groups, vec![vec![1, 2]]);
     }
 
     #[test]

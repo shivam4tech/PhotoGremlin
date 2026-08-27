@@ -149,3 +149,9 @@ in the core code is platform-branching.
 - Lockfiles are committed (`package-lock.json`, `Cargo.lock`).
 - `src/` (UI) and `src-tauri/` (core) stay the two halves; `docs/` tracks
   reality; `RESUME.md` is transient (never committed long-term).
+## Build resource guard
+
+The repository includes `.cargo/config.toml` with `build.jobs = 2`. This
+keeps Tauri/image/ONNX compilation from consuming all workstation RAM while
+the desktop app and browser are open. It applies automatically to Cargo,
+Tauri CLI builds, and IDE builds; do not override it for routine development.

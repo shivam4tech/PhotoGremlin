@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use image::imageops::{resize, FilterType};
+use image::imageops::{crop_imm, grayscale, resize, FilterType};
 use image::{image_dimensions, ImageReader, RgbImage};
 use ort::environment::Environment;
 use ort::session::Session;
@@ -171,6 +171,26 @@ pub struct FaceBox {
     pub w: f32,
     pub h: f32,
     pub score: f32,
+}
+
+/// Compact local signature for one detected face crop. The crop includes a
+/// small margin for hair/pose context, then becomes the same deterministic
+/// dHash used by core similarity. It is useful for surfacing repeat portrait
+/// candidates, but is intentionally not represented as person identity.
+pub fn face_appearance_hash(rgb: &RgbImage, face: FaceBox) -> Option<u64> {
+    let margin_x = face.w * 0.18;
+    let margin_y = face.h * 0.18;
+    let left = (face.x1 - margin_x).max(0.0).floor() as u32;
+    let top = (face.y1 - margin_y).max(0.0).floor() as u32;
+    let right = (face.x1 + face.w + margin_x).min(rgb.width() as f32).ceil() as u32;
+    let bottom = (face.y1 + face.h + margin_y).min(rgb.height() as f32).ceil() as u32;
+    let width = right.saturating_sub(left);
+    let height = bottom.saturating_sub(top);
+    if width < 12 || height < 12 {
+        return None;
+    }
+    let crop = crop_imm(rgb, left, top, width, height).to_image();
+    Some(crate::similarity::dhash64(&grayscale(&crop)))
 }
 
 /// IoU of two axis-aligned boxes (0.0 when disjoint).
@@ -481,11 +501,15 @@ fn process_one(db: &Db, det: &FaceDetector, w: &FaceWork) -> Result<u32, String>
         return guard_stamp(db, w, "image too large for face detection");
     }
     let rgb = read_rgb(path).map_err(|_| format!("{} — image could not be decoded", name()))?;
-    let count = det
+    let boxes = det
         .detect(&rgb, dw, dh)
-        .map(|boxes| boxes.len() as u32)
         .map_err(|_| format!("{} — face detection failed", name()))?;
-    db.upsert_faces(w.photo_id, count as i64, w.file_mtime.as_deref())
+    let signatures: Vec<u64> = boxes
+        .iter()
+        .filter_map(|face| face_appearance_hash(&rgb, *face))
+        .collect();
+    let count = boxes.len() as u32;
+    db.upsert_faces_with_observations(w.photo_id, count as i64, &signatures, w.file_mtime.as_deref())
         .map_err(|e| {
             tracing::error!(path = %w.path, error = %e, "face result store failed");
             format!("{} — could not store the result", name())

@@ -118,7 +118,7 @@ export interface FaceCompletePayload {
 /** Culling state for one photograph. */
 export interface SelectionRow {
   photo_id: number;
-  state: "selected" | "rejected";
+  state: "selected" | "rejected" | "needs_attention";
   updated_at: string;
 }
 
@@ -272,6 +272,29 @@ export interface PhotoPage {
   total: number;
 }
 
+export interface FilterValueOption {
+  value: string;
+  count: number;
+}
+
+export interface FilterValueOptions {
+  values: FilterValueOption[];
+  unidentified_count: number;
+}
+
+/** Existing local similarity/burst membership, ordered for shoot review. */
+export interface ReviewSequence {
+  id: number;
+  group_type: string;
+  photo_ids: number[];
+}
+
+/** Lightweight session photos and decision units; pixels stay on demand. */
+export interface ReviewQueue {
+  photos: PhotoSummary[];
+  sequences: ReviewSequence[];
+}
+
 /** Full photo + analysis (analysis fields NULL until the analysis pass). */
 export interface PhotoFull {
   id: number;
@@ -419,7 +442,7 @@ export interface Collection {
 export interface SimilarityGroup {
   id: number;
   hash: string;
-  group_type: "similar" | "burst";
+  group_type: "similar" | "face" | "burst";
   photo_count: number;
   created_at: string;
   /** Distinct sessions spanned (≥ 2 = cross-session duplicates, Sprint 16). */
@@ -434,6 +457,7 @@ export interface SimilaritySummary {
   failed: number;
   similar_groups: number;
   burst_groups: number;
+  face_groups: number;
   elapsed_ms: number;
   cancelled: boolean;
 }

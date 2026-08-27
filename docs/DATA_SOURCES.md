@@ -34,6 +34,30 @@ are too large.
 - Corpora/checkpoints/provenance never enter git; scripts and class-map do.
 - Attribution ships as docs notes per bundled model artifact.
 
+## Developer-only photo application regression corpus
+
+`tools/datasets/download_photo_test_corpus.py` builds a separate, 1,000-image
+photo-application test corpus from Wikimedia Commons originals. It is for
+manual scanning, filtering, metadata and culling evaluation; it is not an ML
+training source and does not change the application's offline runtime policy.
+
+The script creates `../photogremlin-test-corpus/` by default, beside this
+repository. It separates camera/genre sources into folders, records original
+URLs, file pages and file-specific license details in `manifest.jsonl`, and
+accepts only JPEGs whose downloaded EXIF contains Make, Model and
+DateTimeOriginal. Downloads are serial and conservatively throttled; on an
+HTTP 429/503 it records the server's `Retry-After` cooldown and stops rather
+than continuing to request files. It is resumable through that manifest,
+`.part` download files and `state.json` category cursors.
+
+```
+python3 tools/datasets/download_photo_test_corpus.py --list-sources
+python3 tools/datasets/download_photo_test_corpus.py
+```
+
+The resulting photos, manifests and provenance remain local development data:
+they must never enter this repository or any release bundle.
+
 ## Commands
 
 ```

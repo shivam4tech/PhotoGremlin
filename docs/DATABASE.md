@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 11). Tests assert both expected-table presence and idempotency.
+(currently 15). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -40,6 +40,17 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   LOCAL_AI.md). Added via `ALTER TABLE`, guarded by the same
   `PRAGMA table_info` probe
 - v14 (Sprint 18): `analysis.scene_coarse` / `scene_fine` / `scene_conf` / `scene_at` — local scene-model results (NULL until the optional pass runs; incremental via mtime like `faces_at`).
+- v15 (Sprint 19 review workflow): rebuilds the small `selections` table to
+  allow its third, non-destructive state, `needs_attention`. Existing
+  `selected` and `rejected` rows are copied unchanged. An absent row remains
+  the canonical **unreviewed** state, so no bulk initialization is needed.
+- v16: `similarity_groups.session_id` makes similar/burst/face-appearance
+  results durable per project. Legacy groups with one session are retained;
+  old cross-session groups are removed because they cannot safely belong to a
+  single project.
+- v17: `face_observations(photo_id, face_index, appearance_hash,
+  source_mtime)` stores compact local detected-face crop hashes for optional
+  face-appearance candidates; it never stores face pixels or identity data.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
@@ -62,7 +73,7 @@ A shoot or imported body of work.
 | name | TEXT | human name (e.g. folder name) |
 | root_path | TEXT | the scanned folder, if any |
 | start_time / end_time | TEXT | UTC RFC3339 — the shoot period, derived from the photos' `COALESCE(capture_datetime, indexed_at)` (NULLs while the session has no dated photos) |
-| photo_count | INTEGER | denormalized counter, refreshed by the scan (per session) and the metadata pass (all sessions) |
+| photo_count | INTEGER | denormalized counter, refreshed by the scan and metadata pass for the active session |
 | created_at | TEXT | |
 
 ### photos
@@ -110,8 +121,9 @@ refreshes its name; `refresh_session_counts` re-derives `photo_count` after
 each scan pass. Rows for files that vanished from disk are **not** deleted
 silently — they stay until a future reconcile step flags them to the user.
 
-**Metadata (EXIF) merge (Sprint 5, incremental since v11/Sprint 11):** the
-metadata pass (`exif_queue` → `upsert_exif`) reads each file, stamps
+**Metadata (EXIF) merge (Sprint 5, incremental since v11/Sprint 11):** after
+each scan, the metadata pass starts automatically. Its `exif_queue` is scoped
+to the active project (`Home` retains a global queue), reads each file, stamps
 `exif_at`, and re-reads any file whose mtime is newer than its last read
 (same incremental rule as analysis — a re-exported/edited file's metadata
 stays truthful). `status().metadata_pending` counts the same queue (never
@@ -193,13 +205,15 @@ feeding `filter_json` through the same filter engine the grid uses.
 
 ### similarity_groups / similarity_group_photos
 Groups found by the similarity pass (Sprint 8, see SIMILARITY.md).
-`group_type` ∈ `similar` (perceptual-hash cluster within one session) |
-`burst` (photographs captured within `BURST_WINDOW_SECS` of each other);
+`session_id` owns the group set for one project. `group_type` ∈ `similar`
+(perceptual-hash cluster) | `face` (optional local face-appearance candidate)
+| `burst` (photographs captured within `BURST_WINDOW_SECS` of each other);
 `hash` labels the group (hex dHash for similar groups, `burst:<epoch secs>`
 for bursts) and `photo_count` is denormalized. The whole group set is
-**replaced atomically** on each pass (`replace_similarity_groups` in one
-transaction), so a group set always reflects the current hashes — partial
-state is impossible. `similarity_group_photos` is the join with composite
+**replaced atomically per project** on each pass
+(`replace_similarity_groups_for_session` in one transaction), so a group set
+always reflects that project's current hashes — partial state is impossible.
+`similarity_group_photos` is the join with composite
 PK; up to the first 4 member ids (by id order) are surfaced as `cover_photos`
 by the list query for UI cover strips.
 
@@ -262,8 +276,8 @@ post-scan face pass auto-run, it never forces inference).
   `photo_id`; updates only analysis-owned columns.
 - `analysis_progress_counts(extensions)` — (decodable photos, analyzed of
   them) for the status line.
-- `exif_queue()` — photos the metadata pass hasn't read yet
-  (`exif_at IS NULL`), in capture-time order, carrying current dimensions.
+- `exif_queue()` — pending photos in the active project (or the global Home
+  queue) in capture-time order, carrying current dimensions.
 - `upsert_exif(photo_id, record)` — merge one file's EXIF extraction
   (`COALESCE`, GPS 0→1 only, stamps `exif_at`); see the photos section.
 - `status()` — returns `metadata_pending` (count of `exif_at IS NULL`),
@@ -327,18 +341,15 @@ post-scan face pass auto-run, it never forces inference).
   for the hash pass.
 - `upsert_phash(photo_id, hash, source_mtime)` — persist one 64-bit hash
   (stored as `INTEGER`) + the mtime it was computed from.
-- `hashed_photos()` — all rows with `phash IS NOT NULL`, returning
-  `(id, hash, session_id, capture_datetime)` — the similarity pass's
-  grouping input (session + capture time are how groups stay scoped to a
-  shoot, see SIMILARITY.md).
+- `hashed_photos_for_session(session_id)` — hashed rows for the active
+  project only, returning `(id, hash, session_id, capture_datetime)`.
 - `list_similarity_groups(limit)` — current groups, bursts first then by
   size (stable by `id`), each with ≤4 `cover_photos`.
 - `group_photos(group_id, offset, limit)` — a group's photographs as
   `PhotoSummary` pages ordered by capture time (an empty/unknown group is a
   clean `( [], 0 )`, not an error).
-- `replace_similarity_groups([(hash, group_type, photo_ids)]) -> count` — one
-  transaction: delete all groups + memberships, insert the full new set
-  (atomic replacement; the pass is the only writer).
+- `replace_similarity_groups_for_session(session_id, groups) -> count` — one
+  transaction: replace that project's groups and memberships only.
 
 ### Local intelligence (Sprint 9)
 
@@ -346,10 +357,12 @@ post-scan face pass auto-run, it never forces inference).
   NULL` or `file_mtime` newer than the `faces_at` stamp, decodable
   extensions only, capture-time order. The mirror of `phash_queue` for the
   face pass (see LOCAL_AI.md).
-- `upsert_faces(photo_id, face_count, source_mtime)` — store one photo's
+- `upsert_faces_with_observations(photo_id, face_count, hashes, source_mtime)` — store one photo's
   result, idempotent by `photo_id`; creates a face-only analysis row where
   needed (see the analysis section) and the update path touches only the
   face columns — never the measurements, never `source_mtime`.
+- `face_observations_for_session(session_id)` — compact local face-crop hashes
+  used by the similarity pass's face-appearance candidates.
 - `faces_done()` — count of photos with a stored result (Settings line).
 
 ## Conventions

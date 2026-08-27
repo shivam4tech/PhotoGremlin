@@ -136,6 +136,9 @@ Per-sprint coverage (✓ = in place today):
 ## Frontend tests (`npm test`, Vitest)
 
 - Store behavior (view switching, progress payloads) ✓
+- Error reporting (`src/tests/errorReporting.test.ts`) ✓: arbitrary browser
+  rejections become bounded local-log records, and all GTK/Pango markup
+  metacharacters are escaped before notices or errors are rendered.
 - Virtual grid math (Sprint 3): `computeVisibleRange` window/overscan/
   clamping (never past item count, start≤end, zero-item safe, abnormal col
   count) and `computeColumns` fit + min-one-column. The pure math is tested

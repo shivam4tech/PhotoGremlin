@@ -1,4 +1,6 @@
 import { useEffect } from "react";
+import type { ErrorInfo } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { useAppStore } from "@/stores/appStore";
@@ -23,6 +25,27 @@ import { SavedViewsView } from "@/views/SavedViewsView";
 import { SettingsView } from "@/views/SettingsView";
 import { HomeView } from "@/views/HomeView";
 import { VIEW_META } from "@/stores/appStore";
+import { clientErrorReport, escapeGtkMarkupText } from "@/lib/errorReporting";
+
+function reportClientError(source: string, value: unknown) {
+  const report = clientErrorReport(source, value);
+  // Logging must never become another unhandled error if the app is already
+  // shutting down or IPC is unavailable.
+  void api.logClientError(report.source, report.message, report.stack).catch(() => {});
+}
+
+function useClientErrorLogging() {
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => reportClientError("window-error", event.error ?? event.message);
+    const onRejection = (event: PromiseRejectionEvent) => reportClientError("unhandled-rejection", event.reason);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+}
 
 /**
  * Global keyboard shortcuts (Sprint 10): ⌘/Ctrl+O opens a photo folder,
@@ -55,6 +78,8 @@ export default function App() {
   const notice = useAppStore((s) => s.notice);
   const setNotice = useAppStore((s) => s.setNotice);
 
+  useClientErrorLogging();
+
   // First launch or after close: show Home when no project is open
   useEffect(() => {
     const s = useAppStore.getState();
@@ -70,10 +95,10 @@ export default function App() {
 
   // Success notices are set by the pass-complete handlers and should be
   // transient: auto-dismiss after a few seconds, or immediately on ×.
-  // Escape bare ampersands so GTK's Pango markup parser doesn't warn
-  // ("Entity did not end with a semicolon").
-  const safeNotice = notice ? notice.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, "&amp;") : null;
-  const safeError = error ? error.replace(/&(?!amp;|lt;|gt;|quot;|apos;|#)/g, "&amp;") : null;
+  // Some Linux webview paths pass rendered text through Pango markup. Keep
+  // notices and errors literal even when a filename contains markup syntax.
+  const safeNotice = notice ? escapeGtkMarkupText(notice) : null;
+  const safeError = error ? escapeGtkMarkupText(error) : null;
   useEffect(() => {
     if (!notice) return;
     const t = window.setTimeout(() => setNotice(null), 8000);
@@ -115,12 +140,14 @@ export default function App() {
       const pending = s.dbStatus?.metadata_pending ?? 0;
       if (pending <= 0) return;
       s.setReadingMetadata(true);
+      s.setMetadataPaused(false);
       s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
       try {
         await api.startMetadata();
       } catch {
         const st = useAppStore.getState();
         st.setReadingMetadata(false);
+        st.setMetadataPaused(false);
         st.setProgress(null);
       }
     }, 1000);
@@ -151,6 +178,7 @@ export default function App() {
       const ucm = await onProgress<MetadataCompletePayload>("metadata-complete", (p) => {
         const s = state();
         s.setReadingMetadata(false);
+        s.setMetadataPaused(false);
         s.setProgress(null);
         if (p.summary) {
           s.setMetadataSummary(p.summary);
@@ -211,12 +239,14 @@ export default function App() {
         // camera metadata in the background (a no-op when nothing is new).
         if (p.summary && p.summary.indexed > 0) {
           s.setReadingMetadata(true);
+          s.setMetadataPaused(false);
           s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
           api
             .startMetadata()
             .catch(() => {
               const st = useAppStore.getState();
               st.setReadingMetadata(false);
+              st.setMetadataPaused(false);
               st.setProgress(null);
             });
           // …and, when the user turned local intelligence on, detect faces
@@ -281,6 +311,7 @@ export default function App() {
            const sum = p.summary;
            const bits: string[] = [
              `${sum.similar_groups.toLocaleString()} similar group${sum.similar_groups === 1 ? "" : "s"}`,
+             ...(sum.face_groups > 0 ? [`${sum.face_groups.toLocaleString()} face-appearance group${sum.face_groups === 1 ? "" : "s"}`] : []),
              `${sum.burst_groups.toLocaleString()} burst group${sum.burst_groups === 1 ? "" : "s"}`,
            ];
            if (sum.hashed > 0) bits.unshift(`${sum.hashed.toLocaleString()} hashed`);
@@ -390,7 +421,16 @@ export default function App() {
             </button>
           ) : null}
         </TopBar>
-        <div className={view === "library" ? "view-scroll library-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>{body}</div>
+        <div className={view === "library" ? "view-scroll library-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>
+          <ErrorBoundary
+            key={view}
+            onError={(viewError: Error, info: ErrorInfo) =>
+              reportClientError(`view-render:${view}`, new Error(`${viewError.message}\n${info.componentStack ?? ""}`))
+            }
+          >
+            {body}
+          </ErrorBoundary>
+        </div>
         {safeNotice && (
           <div
             role="status"

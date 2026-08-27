@@ -27,7 +27,7 @@ import type {
   ViewId,
 } from "@/types/api";
 
-export type SelectionState = "selected" | "rejected";
+export type SelectionState = "selected" | "rejected" | "needs_attention";
 
 interface AppState {
   view: ViewId;
@@ -40,6 +40,7 @@ interface AppState {
   scanning: boolean;
   analyzing: boolean;
   readingMetadata: boolean;
+  metadataPaused: boolean;
   /// A rename/move/copy/trash operation is running.
   operating: boolean;
   progress: ProgressPayload | null;
@@ -100,6 +101,7 @@ interface AppState {
   setScanning: (b: boolean) => void;
   setAnalyzing: (b: boolean) => void;
   setReadingMetadata: (b: boolean) => void;
+  setMetadataPaused: (b: boolean) => void;
   setOperating: (b: boolean) => void;
   setOpProgress: (p: ProgressPayload | null) => void;
   setOpSummary: (s: OperationSummary | null) => void;
@@ -174,6 +176,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   scanning: false,
   analyzing: false,
   readingMetadata: false,
+  metadataPaused: false,
   operating: false,
   progress: null,
   opProgress: null,
@@ -223,6 +226,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setScanning: (scanning) => set({ scanning }),
   setAnalyzing: (analyzing) => set({ analyzing }),
   setReadingMetadata: (readingMetadata) => set({ readingMetadata }),
+  setMetadataPaused: (metadataPaused) => set({ metadataPaused }),
   setOperating: (operating) => set({ operating }),
   setOpProgress: (opProgress) => set({ opProgress }),
   setOpSummary: (opSummary) => set({ opSummary }),

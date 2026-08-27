@@ -11,10 +11,12 @@ import type {
   DbStatus,
   FileOpPlan,
   FileOpRow,
+  FilterValueOptions,
   PhotoFull,
   PhotoPage,
   PeriodStats,
   SavedView,
+  ReviewQueue,
   SelectionRow,
   SessionMetrics,
   SessionSummary,
@@ -31,6 +33,9 @@ export const api = {
       "app_paths",
     ),
   dbStatus: (): Promise<DbStatus> => invoke("db_status"),
+  /** Records browser failures in the local application log. Best-effort only. */
+  logClientError: (source: string, message: string, stack: string | null): Promise<void> =>
+    invoke("log_client_error", { source, message, stack }),
   pickFolder: (): Promise<string | null> => invoke("pick_folder"),
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
@@ -64,6 +69,8 @@ export const api = {
   stopAnalysis: (): Promise<boolean> => invoke("stop_analysis"),
   startMetadata: (): Promise<void> => invoke("start_metadata"),
   stopMetadata: (): Promise<boolean> => invoke("stop_metadata"),
+  pauseMetadata: (): Promise<boolean> => invoke("pause_metadata"),
+  resumeMetadata: (): Promise<boolean> => invoke("resume_metadata"),
   listPhotos: (offset: number, limit: number): Promise<PhotoPage> =>
     invoke("list_photos", { offset, limit }),
   // `filterJson` is the exact structured-filter object ("" = no filter).
@@ -72,10 +79,14 @@ export const api = {
     offset: number,
     limit: number,
   ): Promise<PhotoPage> => invoke("list_filtered_photos", { filterJson, offset, limit }),
+  filterValueOptions: (field: "camera_make" | "camera_model" | "lens", sessionId: number | null): Promise<FilterValueOptions> =>
+    invoke("filter_value_options", { field, sessionId }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>
     invoke("get_thumbnail", { photoId, kind }),
+  reviewQueue: (sessionId: number): Promise<ReviewQueue> =>
+    invoke("review_queue", { sessionId }),
   listSessions: (): Promise<SessionRow[]> => invoke("list_sessions"),
   // Statistics engine (Sprint 6). Synchronous, local aggregation.
   periodStats: (periodJson: string): Promise<PeriodStats> =>
@@ -120,11 +131,11 @@ export const api = {
   stopOperation: (): Promise<boolean> => invoke("stop_operation"),
 
   // Selection (culling) state.
-  setSelection: (photoId: number, selection: "selected" | "rejected"): Promise<void> =>
+  setSelection: (photoId: number, selection: "selected" | "rejected" | "needs_attention"): Promise<void> =>
     invoke("set_selection", { photoId, selection }),
   setSelections: (
     photoIds: number[],
-    selection: "selected" | "rejected",
+    selection: "selected" | "rejected" | "needs_attention",
   ): Promise<number> => invoke("set_selections", { photoIds, selection }),
   clearSelection: (photoId: number): Promise<void> =>
     invoke("clear_selection", { photoId }),

@@ -11,27 +11,24 @@ core, not an AI feature.
 
 ## What it finds
 
-Two independent group types:
+Three independent group types, all scoped to the project currently open:
 
 - **Similar** — photographs whose *perceptual hashes* are close (a
   near-duplicate: re-encode, tiny crop, same shot). "Which of these 40 frames
   are the same moment?"
-  - **Within a session** (`SIMILAR_THRESHOLD = 8` bits): the same-moment
-    question inside one shoot.
-  - **Cross-session** (Sprint 16, `GLOBAL_SIMILAR_THRESHOLD = 4` bits): the
-    stricter "was this file imported again?" question. A pair unites only
-    when both photos are *in different sessions* (a photo with no session
-    never cross-links). Group cards carrying matches over ≥ 2 sessions show a
-    "N sessions" chip.
+- **Face appearance** — optional candidates from the local face pass. YuNet
+  supplies a face box; PhotoGremlin hashes only that crop plus a small margin
+  and groups close crop hashes at `FACE_APPEARANCE_THRESHOLD = 10`. This is a
+  repeat-portrait aid, **not identity recognition**: the UI never names a
+  person and the photographer reviews every candidate.
 - **Burst** — photographs *captured within seconds of each other*
   (`BURST_WINDOW_SECS = 3`), always within one session. "This run is one
   burst." Time-based, so bursts never span sessions — two shoots at the same
   wall-clock second stay separate.
 
-Both group types need **≥ 2 photos** (`MIN_GROUP_SIZE = 2`); a lone photo
-never forms a group. A photo can legitimately appear in both a within-session
-and a cross-session group (it *is* both "the same moment" and "imported
-twice").
+All group types need **≥ 2 photos** (`MIN_GROUP_SIZE = 2`); a lone photo
+never forms a group. A photo may appear in more than one group when it is
+both a burst frame and a visual or face-appearance candidate.
 
 ## The algorithm (dHash)
 
@@ -61,9 +58,15 @@ stay close.
 All constants are `pub` in `src-tauri/src/similarity/mod.rs` and asserted by
 unit tests, so changing one is a conscious, tested act.
 
-## Cross-session similar (Sprint 16)
+## Project ownership (v16)
 
-Same dHash, different (stricter) question:
+The active-project workflow intentionally has no cross-project matching.
+`similarity_groups.session_id` owns each stored set: a pass captures the
+active session, reads only that session's photos and face observations, and
+atomically replaces only that session's groups. Opening or closing another
+project never removes these results, while list and group-photo queries apply
+the same project check on read. The remaining notes below describe legacy
+helpers retained for old test coverage, not the active UI workflow.
 
 - **`GLOBAL_SIMILAR_THRESHOLD = 4`** — importing the same file twice (or a
   re-encode of it) lands at distance 0–3; looser matches are same-moment
@@ -132,28 +135,26 @@ in `AppState`).
    a file mid-hash). Unreadable/undecodable files are skipped and counted
    (`failed`), logged individually — one bad file never aborts the pass.
    Progress streams per file (`similarity-progress`, stage `hashing`).
-2. **Group**: read `hashed_photos()`, bucket by session (NULL session = one
-   bucket). Per bucket, run `group_similar` (similar) and `group_bursts`
-   (bursts). A burst is labelled `burst:<earliest capture epoch>` (a stable id);
-   a similar group is labelled with the hex dHash of its first photo.
-3. **Persist**: `replace_similarity_groups` swaps the whole group set in one
-   transaction.
+2. **Group**: read `hashed_photos_for_session(active_session)`, run
+   `group_similar`, `group_bursts`, and (when available)
+   `group_face_appearances`. Capture time affects bursts only, never visual or
+   face-appearance candidates.
+3. **Persist**: `replace_similarity_groups_for_session` swaps only that
+   project's group set in one transaction.
 
 **Grouping still runs after a cancel**, over whatever got hashed — so the app
 always ends on a *consistent* group set (never half-groups). Cancellation is
 always reported (`cancelled: true`) and the summary returned.
 
 **`SimilaritySummary`** = `{ hashed, failed, similar_groups, burst_groups,
-elapsed_ms, cancelled }`, carried in `similarity-complete`.
+face_groups, elapsed_ms, cancelled }`, carried in `similarity-complete`.
 
 ## What we do NOT do (v0.1)
 
 - **No automatic deletion or "keep best".** We surface groups; the user
   decides (via culling + file ops).
-- **No cross-session *auto* anything** — the group appears; deciding stays
-  with the photographer.
-- **No face/subject-based similarity** (that is the AI pass, Sprint 9, and is
-  always optional).
+- **No person identity or name inference.** Face-appearance candidates are
+  local, optional and deliberately labelled as candidates.
 - **No permanent delete** anywhere — trash only (Sprint 7).
 
 ## Testing

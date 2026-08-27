@@ -71,6 +71,13 @@ export const FILTER_FIELDS: FieldDef[] = [
   },
   { field: "flagged", label: "Flagged", kind: "bool", area: "Marking" },
   {
+    field: "review_state",
+    label: "Review state",
+    kind: "text",
+    area: "Review",
+    values: ["selected", "rejected", "needs_attention"],
+  },
+  {
     field: "color_label",
     label: "Color label",
     kind: "text",
@@ -289,4 +296,3 @@ export function draftToFilter(conditions: FilterCondition[]): Filter {
 export function filterToDraft(filter: Filter): FilterCondition[] {
   return filter.conditions;
 }
-

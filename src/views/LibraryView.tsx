@@ -11,6 +11,7 @@ import { FilterBar } from "@/features/library/FilterBar";
 import { FileOpsPanel } from "@/features/fileops/FileOpsPanel";
 import { ExportSheetButton } from "@/features/library/ExportSheetButton";
 import { MarksPanel } from "@/features/library/MarksPanel";
+import { ReviewMode } from "@/features/review/ReviewMode";
 import { CoverThumb } from "@/features/similarity/CoverThumb";
 import { cleanName, groupLabel } from "@/features/organize/labels";
 import { draftToFilter } from "@/features/library/filterFields";
@@ -30,6 +31,7 @@ export function LibraryView() {
   const analyzing = useAppStore((s) => s.analyzing);
   const analysisSummary = useAppStore((s) => s.analysisSummary);
   const readingMetadata = useAppStore((s) => s.readingMetadata);
+  const metadataPaused = useAppStore((s) => s.metadataPaused);
   const metadataSummary = useAppStore((s) => s.metadataSummary);
   const operating = useAppStore((s) => s.operating);
   const selections = useAppStore((s) => s.selections);
@@ -46,6 +48,7 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  const [reviewMode, setReviewMode] = useState(false);
 
   // Saving the current filter as a named view.
   const [saveViewOpen, setSaveViewOpen] = useState(false);
@@ -55,7 +58,7 @@ export function LibraryView() {
   const [group, setGroup] = useState<SimilarityGroup | null>(null);
   const [groupPhotos, setGroupPhotos] = useState<PhotoSummary[]>([]);
   const [groupLoading, setGroupLoading] = useState(false);
-  const [groupTab, setGroupTab] = useState<"all" | "similar" | "burst">("all");
+  const [groupTab, setGroupTab] = useState<"all" | "similar" | "face" | "burst">("all");
   const [groupsVisible, setGroupsVisible] = useState(GROUPS_PAGE);
   useEffect(() => { setGroupsVisible(GROUPS_PAGE); }, [similarityGroups, groupTab]);
 
@@ -73,17 +76,19 @@ export function LibraryView() {
   }, [selectionMode, refreshKey]);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionPhotoCount, setSessionPhotoCount] = useState<number | null>(null);
+  const [sessionName, setSessionName] = useState("This shoot");
 
   // Resolve the current project's session so the grid shows only its photos.
   useEffect(() => {
-    if (!activeFolder) { setSessionId(null); setSessionPhotoCount(null); return; }
+    if (!activeFolder) { setSessionId(null); setSessionPhotoCount(null); setSessionName("This shoot"); return; }
     let cancelled = false;
     api.listSessions().then((rows) => {
       if (cancelled) return;
       const hit = rows.find((r) => r.root_path === activeFolder);
       setSessionId(hit ? hit.id : null);
       setSessionPhotoCount(hit ? hit.photo_count : null);
-    }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); } });
+      setSessionName(hit?.name ?? "This shoot");
+    }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); setSessionName("This shoot"); } });
     return () => { cancelled = true; };
   }, [activeFolder, scanSummary, dbStatus?.photo_count]);
 
@@ -194,20 +199,54 @@ export function LibraryView() {
 
   async function startMetadata() {
     setError(null);
+    // Set the visible pending state before invoking Rust. The task can emit
+    // its first real progress event before invoke() resolves; assigning 0/0
+    // afterwards would overwrite it and make a healthy pass look stuck.
+    store().setReadingMetadata(true);
     try {
       store().setMetadataSummary(null);
-      await api.startMetadata();
-      store().setReadingMetadata(true);
+      store().setMetadataPaused(false);
       store().setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+      await api.startMetadata();
     } catch (e) {
       setError(toErrorMessage(e));
       store().setReadingMetadata(false);
+      store().setMetadataPaused(false);
+      store().setProgress(null);
     }
   }
 
   async function stopMetadata() {
     try {
-      await api.stopMetadata();
+      const stopping = await api.stopMetadata();
+      if (stopping) {
+        store().setMetadataPaused(false);
+        const progress = useAppStore.getState().progress;
+        store().setProgress({
+          total: progress?.total ?? 0,
+          done: progress?.done ?? 0,
+          stage: "stopping metadata",
+          current: progress?.current ?? null,
+        });
+      }
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }
+
+  async function toggleMetadataPause() {
+    try {
+      const changed = metadataPaused ? await api.resumeMetadata() : await api.pauseMetadata();
+      if (!changed) return;
+      const nextPaused = !metadataPaused;
+      store().setMetadataPaused(nextPaused);
+      const progress = useAppStore.getState().progress;
+      store().setProgress({
+        total: progress?.total ?? 0,
+        done: progress?.done ?? 0,
+        stage: nextPaused ? "metadata paused" : "reading metadata",
+        current: progress?.current ?? null,
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -330,6 +369,7 @@ export function LibraryView() {
   useEffect(() => {
     if (prevFolderRef.current !== activeFolder) {
       prevFolderRef.current = activeFolder;
+      setReviewMode(false);
       const vg = document.querySelector(".vg") as HTMLDivElement | null;
       if (vg) vg.scrollTop = 0;
     }
@@ -357,6 +397,10 @@ export function LibraryView() {
     );
   }
 
+  if (reviewMode && sessionId !== null) {
+    return <ReviewMode sessionId={sessionId} sessionName={sessionName} onClose={() => setReviewMode(false)} />;
+  }
+
   return (
     <div className="library" onWheel={forwardWheel}>
       <div className="library-toolbar">
@@ -379,15 +423,20 @@ export function LibraryView() {
             className="btn btn-sm"
             onClick={startMetadata}
             disabled={scanning || analyzing || findingSimilar || busy || !libraryHasPhotos}
-            title={`Read camera metadata (EXIF) for ${metadataPending.toLocaleString()} photograph${metadataPending === 1 ? "" : "s"} — never-read files plus any changed on disk since their last read.`}
+            title={`Camera metadata is read automatically after each scan. Retry the ${metadataPending.toLocaleString()} pending photograph${metadataPending === 1 ? "" : "s"} only if a previous read was stopped or files changed on disk.`}
           >
-            Read metadata ({metadataPending.toLocaleString()})
+            Retry metadata ({metadataPending.toLocaleString()})
           </button>
         ) : null}
         {readingMetadata ? (
-          <button className="btn btn-sm btn-danger" onClick={stopMetadata}>
-            Stop reading
-          </button>
+          <>
+            <button className="btn btn-sm" onClick={() => void toggleMetadataPause()}>
+              {metadataPaused ? "Resume metadata" : "Pause metadata"}
+            </button>
+            <button className="btn btn-sm btn-danger" onClick={() => void stopMetadata()}>
+              Stop reading
+            </button>
+          </>
         ) : null}
         {!analyzing ? (
           <button
@@ -425,6 +474,16 @@ export function LibraryView() {
         >
           {selectionMode ? "Done culling" : "Cull"}
         </button>
+        {sessionId !== null && (
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => setReviewMode(true)}
+            disabled={anyPassRunning || operating || findingSimilar || photos.total === 0}
+            title="Review this shoot in capture-time order, with burst and similar-frame context. No files are changed."
+          >
+            Review this shoot
+          </button>
+        )}
       </div>
 
       {group === null ? (
@@ -433,7 +492,17 @@ export function LibraryView() {
             draft={filterConditions}
             onChange={(c) => store().setFilterConditions(c)}
             disabled={anyPassRunning}
+            sessionId={sessionId}
           />
+
+          {sessionId !== null && (
+            <div className="review-presets" aria-label="Review views">
+              <span className="faint">Review views</span>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "is-null", value: null }])}>Unreviewed</button>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "selected" }])}>Kept</button>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "needs_attention" }])}>Needs attention</button>
+            </div>
+          )}
 
           {filterConditions.length > 0 && (
             <div className="library-summaryline filter-saveline">
@@ -483,7 +552,9 @@ export function LibraryView() {
           <span className="faint" style={{ fontSize: 12 }}>
             {group.group_type === "burst"
               ? "photographs captured within seconds of each other"
-              : "photographs with near-identical structure"}
+              : group.group_type === "face"
+                ? "photographs with similar locally measured face appearance"
+                : "photographs with near-identical structure"}
           </span>
         </div>
       )}
@@ -601,6 +672,7 @@ export function LibraryView() {
       {!findingSimilar && similaritySummary && group === null && (
         <div className="library-summaryline mono">
           Similarity: {similaritySummary.similar_groups.toLocaleString()} similar group{similaritySummary.similar_groups === 1 ? "" : "s"} ·{" "}
+          {similaritySummary.face_groups > 0 && <>{similaritySummary.face_groups.toLocaleString()} face-appearance group{similaritySummary.face_groups === 1 ? "" : "s"} ·{" "}</>}
           {similaritySummary.burst_groups.toLocaleString()} burst{similaritySummary.burst_groups === 1 ? "" : "s"}
           {similaritySummary.hashed > 0 ? ` · ${similaritySummary.hashed.toLocaleString()} hashed in this run` : ""}
           {similaritySummary.failed > 0 && (
@@ -613,15 +685,17 @@ export function LibraryView() {
 
       {group === null && !findingSimilar && (similarityGroups?.length ?? 0) > 0 && (() => {
         const similarOnly = similarityGroups!.filter((g) => g.group_type === "similar");
+        const faceOnly = similarityGroups!.filter((g) => g.group_type === "face");
         const burstOnly = similarityGroups!.filter((g) => g.group_type === "burst");
-        const filtered = groupTab === "similar" ? similarOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
+        const filtered = groupTab === "similar" ? similarOnly : groupTab === "face" ? faceOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
         const visible = filtered.slice(0, groupsVisible);
         return (
         <div className="similars">
           <div className="similars-head">
             <span style={{ fontWeight: 600 }}>
-              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${burstOnly.length} bursts` :
+              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${faceOnly.length} face appearance · ${burstOnly.length} bursts` :
                groupTab === "similar" ? `Similar — ${similarOnly.length} groups` :
+               groupTab === "face" ? `Face appearance — ${faceOnly.length} groups` :
                `Bursts — ${burstOnly.length} groups`}
             </span>
             <span className="faint" style={{ fontSize: 12 }}>
@@ -629,13 +703,15 @@ export function LibraryView() {
                 ? "Runs captured within seconds — time, not look"
                 : groupTab === "similar"
                 ? "Near-identical structure (same moment, tight threshold)"
-                : "Near-duplicates and same-moment runs, found by perceptual hashing on this machine"}
+                : groupTab === "face"
+                ? "Repeat face appearance candidates from optional local face detection — review, not identity labels"
+                : "Near-duplicates, face-appearance candidates and same-moment runs, found on this machine"}
             </span>
           </div>
           <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
-            {(["all", "similar", "burst"] as const).map((t) => (
+            {(["all", "similar", "face", "burst"] as const).map((t) => (
               <button key={t} className={`btn btn-sm${groupTab === t ? " btn-primary" : ""}`} onClick={() => setGroupTab(t)}>
-                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : `Bursts (${burstOnly.length})`}
+                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : t === "face" ? `Faces (${faceOnly.length})` : `Bursts (${burstOnly.length})`}
               </button>
             ))}
           </div>
@@ -648,6 +724,8 @@ export function LibraryView() {
                 title={
                   g.group_type === "burst"
                     ? "A run of photographs captured within seconds of each other."
+                    : g.group_type === "face"
+                    ? "Candidate photographs with similar locally measured face appearance. This is not an identity label."
                     : "Photographs with near-identical structure (likely the same moment)."
                 }
               >

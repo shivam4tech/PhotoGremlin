@@ -111,9 +111,11 @@ const COLOR: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_monochrome", ne
 const DARK: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_dark", negate_bool: false };
 const BRIGHT: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_bright", negate_bool: false };
 const ORIENTATION: FieldDef = FieldDef { kind: Kind::Text, expr: "p.orientation", negate_bool: false };
-const CAMERA_MAKE: FieldDef = FieldDef { kind: Kind::Text, expr: "p.camera_make", negate_bool: false };
-const CAMERA_MODEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.camera_model", negate_bool: false };
-const LENS: FieldDef = FieldDef { kind: Kind::Text, expr: "p.lens", negate_bool: false };
+// Normal metadata writes already turn blank EXIF strings into NULL; `NULLIF`
+// also treats legacy/hand-edited blanks as unidentified for the picker.
+const CAMERA_MAKE: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.camera_make), '')", negate_bool: false };
+const CAMERA_MODEL: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.camera_model), '')", negate_bool: false };
+const LENS: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.lens), '')", negate_bool: false };
 const ISO: FieldDef = FieldDef { kind: Kind::Int, expr: "p.iso", negate_bool: false };
 const APERTURE: FieldDef = FieldDef { kind: Kind::Real, expr: "p.aperture", negate_bool: false };
 const SHUTTER_SPEED: FieldDef = FieldDef { kind: Kind::Real, expr: "p.shutter_speed", negate_bool: false };
@@ -127,6 +129,9 @@ const SMILE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.smile_count",
 const RATING: FieldDef = FieldDef { kind: Kind::Int, expr: "p.rating", negate_bool: false };
 const FLAGGED: FieldDef = FieldDef { kind: Kind::Bool, expr: "p.flag = 1", negate_bool: false };
 const COLOR_LABEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.color_label", negate_bool: false };
+/// The explicit local review state. A missing selection row is intentionally
+/// useful: `review_state is-null` means the photographer has not reviewed it.
+const REVIEW_STATE: FieldDef = FieldDef { kind: Kind::Text, expr: "(SELECT state FROM selections rs WHERE rs.photo_id = p.id)", negate_bool: false };
 /// Scene group (Sprint 18): the MERGED product chip stored by the scene
 /// pass ("nature", "urban", "home_stay", ...). Values come from the local
 /// model; NULL when the scene pass has not run.
@@ -165,6 +170,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "rating" => &RATING,
         "flagged" => &FLAGGED,
         "color_label" => &COLOR_LABEL,
+        "review_state" => &REVIEW_STATE,
         "scene_group" => &SCENE_GROUP,
         "scene_fine" => &SCENE_FINE,
         _ => return None,
@@ -531,7 +537,7 @@ mod tests {
             "in",
             json!(["Gr-1", "Gr-33"]),
         )]);
-        assert_eq!(sql, "WHERE p.camera_model IN (?, ?)");
+        assert_eq!(sql, "WHERE NULLIF(TRIM(p.camera_model), '') IN (?, ?)");
         assert_eq!(
             params,
             vec![SqlParam::Text("Gr-1".into()), SqlParam::Text("Gr-33".into())]
@@ -554,7 +560,7 @@ mod tests {
     #[test]
     fn null_operators_need_no_value() {
         let (sql, params) = build_conds(vec![cond("lens", "is-null", json!(null))]);
-        assert_eq!(sql, "WHERE p.lens IS NULL");
+        assert_eq!(sql, "WHERE NULLIF(TRIM(p.lens), '') IS NULL");
         assert!(params.is_empty());
     }
 
@@ -606,6 +612,27 @@ mod tests {
         assert_eq!(sql, "WHERE p.color_label IS NOT NULL");
         let (sql, _) = build_conds(vec![cond("color_label", "=", json!("red"))]);
         assert_eq!(sql, "WHERE p.color_label = ?");
+    }
+
+    #[test]
+    fn review_state_supports_unreviewed_and_explicit_decisions() {
+        let (sql, params) = build_conds(vec![cond("review_state", "is-null", json!(null))]);
+        assert_eq!(
+            sql,
+            "WHERE (SELECT state FROM selections rs WHERE rs.photo_id = p.id) IS NULL"
+        );
+        assert!(params.is_empty());
+
+        let (sql, params) = build_conds(vec![cond(
+            "review_state",
+            "=",
+            json!("needs_attention"),
+        )]);
+        assert_eq!(
+            sql,
+            "WHERE (SELECT state FROM selections rs WHERE rs.photo_id = p.id) = ?"
+        );
+        assert_eq!(params, vec![SqlParam::Text("needs_attention".into())]);
     }
 
     #[test]

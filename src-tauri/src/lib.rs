@@ -30,7 +30,23 @@ use crate::paths::AppPaths;
 use tauri::Manager;
 
 pub fn run() {
-    let _app = tauri::Builder::default()
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run_inner)) {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            logging::write_runtime_error(&error.to_string());
+            std::process::exit(1);
+        }
+        Err(_) => {
+            // The hook records the panic and backtrace before unwinding reaches
+            // here. This marker makes an abrupt app shutdown easy to identify.
+            logging::write_panic_boundary_marker();
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_inner() -> Result<(), tauri::Error> {
+    tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -41,6 +57,7 @@ pub fn run() {
             let log_dir = paths.log_dir.clone();
             paths.ensure().expect("could not create app directories");
             logging::init(&log_dir, "photogremlin");
+            logging::install_panic_hook(&log_dir);
             tracing::info!(
                 version = env!("CARGO_PKG_VERSION"),
                 "PhotoGremlin starting (local-only mode)"
@@ -73,6 +90,7 @@ pub fn run() {
             commands::app_info,
             commands::app_paths,
             commands::db_status,
+            commands::log_client_error,
             commands::pick_folder,
             commands::set_active_folder,
             commands::get_active_folder,
@@ -90,6 +108,8 @@ pub fn run() {
             commands::stop_analysis,
             commands::start_metadata,
             commands::stop_metadata,
+            commands::pause_metadata,
+            commands::resume_metadata,
             commands::plan_group_rename,
             commands::start_group_rename,
             commands::plan_move_copy,
@@ -107,11 +127,13 @@ pub fn run() {
             commands::stop_export,
             commands::recent_file_ops,
             commands::list_filtered_photos,
+            commands::filter_value_options,
             commands::period_stats,
             commands::session_summary,
             commands::compare_sessions,
             commands::list_sessions,
             commands::list_photos,
+            commands::review_queue,
             commands::get_photo_full,
             commands::get_thumbnail,
             commands::start_similarity,
@@ -138,5 +160,4 @@ pub fn run() {
             commands::stop_scene_classification,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running PhotoGremlin");
 }

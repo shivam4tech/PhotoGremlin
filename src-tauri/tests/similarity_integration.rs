@@ -75,6 +75,7 @@ impl Env {
         let db = Arc::new(Db::open(&db_path).unwrap());
         db.migrate().unwrap();
         let session = db.upsert_session("Shoot", Some(shoot.to_str().unwrap())).unwrap();
+        db.set_setting("active_folder", shoot.to_str().unwrap()).unwrap();
         for (name, _) in files {
             let p = shoot.join(name);
             db.upsert_photo(&PhotoUpsert {
@@ -364,12 +365,10 @@ fn similarity_hashing_groups_similar_and_bursts() {
 }
 
 #[test]
-fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
-    // Sprint 16: session 1 has stripes b + c (one burst) and a flat d;
-    // session 2 has a re-encoded stripe scene (b2, "imported twice") and
-    // its own flat d2. The cross-session pass must link b/b2/c into one
-    // group spanning both sessions, must NOT burst b2 (time-based, scoped
-    // to a session), and must NOT weld the two flat frames together.
+fn groups_are_saved_per_project_and_never_cross_into_the_active_project() {
+    // Each project gets a durable independent result set. The second project
+    // deliberately has a re-encoded scene from the first: opening it must
+    // never display or merge the first project's groups.
     let env = Env::new(&[
         ("b.jpg", "stripes"),
         ("c.jpg", "stripes"),
@@ -399,7 +398,8 @@ fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
             })
             .unwrap();
     }
-    // Same absolute seconds in both sessions: bursts must stay per-session.
+    // Same absolute seconds in both sessions: bursts and all similar groups
+    // must still stay project-scoped.
     env.raw(
         "UPDATE photos SET capture_datetime = '2026-08-16T10:00:00Z' \
          WHERE filename IN ('b.jpg','c.jpg')",
@@ -413,8 +413,8 @@ fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
          WHERE filename IN ('d.jpg','d2.jpg')",
     );
 
-    let s = env.run_similarity();
-    assert_eq!(s.hashed, 5, "{s:?}");
+    let first = env.run_similarity();
+    assert_eq!(first.hashed, 3, "{first:?}");
 
     let groups = env.db.list_similarity_groups(50).unwrap();
     let b = env.ids_for(&["b.jpg"])[0];
@@ -423,20 +423,8 @@ fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
     let b2 = env.ids_for(&["b2.jpg"])[0];
     let d2 = env.ids_for(&["d2.jpg"])[0];
 
-    // Cross-session group: b2 (session 2) + b + c (session 1).
-    let cross = groups
-        .iter()
-        .find(|g| {
-            g.group_type == "similar"
-                && g.cover_photos.contains(&b2)
-        })
-        .expect("b2 must join a similar group");
-    assert_eq!(cross.photo_count, 3, "b + c + b2, got: {groups:?}");
-    assert_eq!(cross.session_count, 2, "group spans both shoots");
-    assert!(group_contains(&env.db, cross.id, b));
-    assert!(group_contains(&env.db, cross.id, c));
-
-    // Within-session group {b, c} still exists with session_count 1.
+    // This project's within-session group exists and never includes the
+    // other project's re-encoded file.
     let within = groups
         .iter()
         .find(|g| g.group_type == "similar" && g.photo_count == 2 && g.session_count == 1)
@@ -444,15 +432,23 @@ fn cross_session_similar_spans_shoots_but_bursts_and_flat_frames_do_not() {
     assert!(group_contains(&env.db, within.id, b));
     assert!(group_contains(&env.db, within.id, c));
 
-    // Bursts: only session 1's b + c (b2 shares the same wall-clock seconds
-    // but is a different shoot; d/d2 are 30s later).
-    assert_eq!(s.burst_groups, 1, "bursts never span sessions: {s:?}");
+    // Bursts: only session 1's b + c.
+    assert_eq!(first.burst_groups, 1, "bursts never span sessions: {first:?}");
     for g in groups.iter().filter(|g| g.group_type == "burst") {
         assert!(!group_contains(&env.db, g.id, b2), "burst must not include b2");
     }
 
-    // Flat frames hash to ~0: d and d2 must never be "similar" to each
-    // other (nor to anything else).
+    // The active project switches to shoot 2. Its run does not delete shoot
+    // 1's groups and it cannot show those old cards.
+    env.db.set_setting("active_folder", shoot2.to_str().unwrap()).unwrap();
+    let second = env.run_similarity();
+    assert_eq!(second.hashed, 2, "{second:?}");
+    assert!(env.db.list_similarity_groups(50).unwrap().is_empty());
+    env.db.set_setting("active_folder", env.root.join("shoot").to_str().unwrap()).unwrap();
+    let restored = env.db.list_similarity_groups(50).unwrap();
+    assert!(restored.iter().any(|g| group_contains(&env.db, g.id, b) && group_contains(&env.db, g.id, c)));
+
+    // Flat frames stay out of regular similarity groups.
     for g in groups.iter().filter(|g| g.group_type == "similar") {
         assert!(
             !(group_contains(&env.db, g.id, d) && group_contains(&env.db, g.id, d2)),

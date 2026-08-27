@@ -7,7 +7,7 @@
 
 use tauri::State;
 
-use crate::database::PhotoPage;
+use crate::database::{FilterValueOptions, PhotoPage};
 use crate::error::AppResult;
 use crate::filters;
 use crate::state::AppState;
@@ -26,4 +26,15 @@ pub fn list_filtered_photos(
     let (where_sql, params) = filters::build_where(&filter)?;
     let (photos, total) = state.db.photos_where(&where_sql, params, offset, limit)?;
     Ok(PhotoPage { photos, total })
+}
+
+/// Distinct local EXIF values for a selectable filter field, optionally
+/// scoped to the shoot open in the Library.
+#[tauri::command]
+pub fn filter_value_options(
+    state: State<'_, AppState>,
+    field: String,
+    session_id: Option<i64>,
+) -> AppResult<FilterValueOptions> {
+    state.db.filter_value_options(&field, session_id)
 }

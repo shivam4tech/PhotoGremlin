@@ -1,0 +1,6 @@
+# Keep local builds responsive on a workstation running the desktop app and a
+# browser. Rust's default is one compiler process per CPU, which can exhaust
+# RAM while compiling Tauri + image/ONNX dependencies. Two jobs is ample for
+# this project and applies to `cargo`, `tauri build`, and IDE builds alike.
+[build]
+jobs = 2

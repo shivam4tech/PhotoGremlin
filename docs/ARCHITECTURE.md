@@ -58,6 +58,15 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 - `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
   (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
   the `State` guard before awaiting — Tauri command futures must be `Send`).
+- `commands/review.rs` — `review_queue(sessionId)` returns lightweight,
+  capture-time-ordered photo rows together with existing local burst/similar
+  group membership. It performs no pixel decode, score, or automatic choice;
+  the review UI fetches thumbnails only for the decision currently in view.
+- `features/review/ReviewMode.tsx` — session-only, keyboard-first review
+  surface. `K`/`X`/`L` write a local selection state through the store and
+  advance through a burst/similar decision context; `U` restores the previous
+  state. The pure `reviewQueue.ts` resolves overlapping groups once and keeps
+  the capture order intact, so rendering stays predictable for large shoots.
 - `analysis/` (Sprint 4) — local image analysis. `metrics.rs` holds pure,
   Tauri/I-O-free math on an `RgbImage` (Rec.709 luma → one 256-bin histogram
   pass yields brightness/contrast/clipping/percentiles; per-pixel saturation;
@@ -82,7 +91,8 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   (`'none'` → `'exif'`; date estimation extends the order later). A readable
   image with no EXIF is an empty record (not an error); an unparseable file
   is a friendly error. `mod.rs` runs the pass, mirroring the analysis
-  pipeline: `exif_queue` → round-robin slices to `METADATA_WORKERS = 3` std
+  pipeline: automatic post-scan `exif_queue` for the active project →
+  round-robin slices to `METADATA_WORKERS = 3` std
   threads → `upsert_exif` (scanner dims win; EXIF-owned fields refreshed by
   the newest read, empty reads never erase; stamps `exif_at`) → per-item
   progress; cooperative cancel; a 256 MB per-file guard. The queue is
@@ -92,6 +102,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `spawn_blocking`s the pass, returns immediately) / `stop_metadata`;
   `metadata-progress` + `metadata-complete` events carry the
   `MetadataSummary { processed, failed, cancelled, elapsed_ms, errors }`.
+  `pause_metadata` / `resume_metadata` use a condition-variable gate between
+  files, so pausing never interrupts an EXIF read or holds the SQLite lock;
+  stopping wakes a paused pass and cancels it. Progress events are throttled
+  to 10 Hz at the command boundary to keep a very large shoot from flooding
+  the WebView event queue.
   The auto-run: the UI fires `start_metadata` as soon as `scan-complete` has
   indexed new photos (the pass is a cheap no-op when nothing is new), and
   again ~1 s after app start, draining whatever backlog exists (re-reads of
@@ -107,6 +122,10 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   (injection-safe). `commands/filters.rs::list_filtered_photos` = parse →
   build → `Db::photos_where`. The grid, saved views, and statistics all share
    this one object.
+  `filter_value_options(field, sessionId)` is a separate fixed-allowlist
+  lookup for `camera_make`, `camera_model`, and `lens`: it returns local,
+  in-shoot distinct values and the number of unidentified files. It never
+  accepts a caller-provided SQL column and makes EXIF filters selectable.
 - `statistics/` (Sprint 6) — the statistics engine, a UI-independent service
   (see STATISTICS.md). One `Period` model (today / this-week (Monday-based) /
   this-month / this-year / custom / all) resolves against an injected `now`
@@ -371,6 +390,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 2. Command returns `Err(AppError)`.
 3. Tauri maps to `InvokeError` (string = friendly message).
 4. `ipc.ts` → `toErrorMessage` → UI error banner (never a stack trace).
+5. Browser `error` and `unhandledrejection` events are sent through the typed
+   `log_client_error` command, which records bounded message/stack details in
+   the local log only. A React error boundary keeps a failed view from blanking
+   the whole application shell.
+6. After local paths and tracing are ready, a Rust panic hook writes the panic
+   location and forced backtrace synchronously to
+   `photogremlin.crash.log`; the top-level unwind boundary then exits with a
+   non-zero status. The hook also runs in aborting release builds.
 
 ## Key decisions & why
 

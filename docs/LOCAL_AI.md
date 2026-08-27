@@ -35,7 +35,8 @@ never names `ort` and never knows the model exists.
 | face detection / face_count / faces_present | v0.1 (Sprint 9) | **shipped** — YuNet 2023mar (below) |
 | smile detection / smile_count | v0.1 → **v0.2 if not stable** | **deferred to v0.2**: no small, stable, permissively-licensed local smile model was available; the plan explicitly defers it |
 | eyes-open detection | v0.3 | planned |
-| face grouping (identity) | v0.3 | planned; local embedding model |
+| face-appearance candidates | v0.1 | **shipped** — local detected-face crop dHash; review candidates only, never identity |
+| face grouping (identity) | v0.3 | planned; requires a separate local embedding model and explicit privacy review |
 | scene classification / scene_group filter | v0.2 (Sprint 17–18) | **shipped** — MobileNetV3-Large two-head ONNX trained on CC-BY Open Images corpus; see SCENE_CLASSIFICATION.md and UI_GUIDELINES.md for the honest-confidence display rules |
 | semantic classification / local text search | v0.3 | planned |
 
@@ -142,6 +143,12 @@ is immaterial).
 5. **Back-map:** blob-space boxes scale by `(W₀/640, H₀/640)` to original
    pixels. `face_count` = the number of surviving boxes (0 is a real
    result, stored as such).
+6. **Face-appearance candidate hash:** each valid back-mapped face crop plus
+   an 18% margin becomes a local grayscale dHash. Only that signed 64-bit
+   integer and its photo id/index are persisted in `face_observations`; no
+   face pixel or identity embedding is stored. The similarity pass compares
+   these hashes only within the active project and presents matches for review
+   as “matching face appearances,” never as a named person.
 
 Constants live in `src-tauri/src/ml/mod.rs` (`INPUT_SIZE`, `MEAN_BGR`,
 `FACE_SCORE_THRESHOLD`, `FACE_NMS_THRESHOLD`, `FACE_TOP_K`, `STRIDES`) and
@@ -168,6 +175,9 @@ Mirrors the similarity pass, on `analysis.faces_at`:
 
 - `analysis.face_count` (the count) + `analysis.faces_at` (v10: the file
   mtime the count was computed from).
+- `face_observations(photo_id, face_index, appearance_hash, source_mtime)`
+  (v17): replaced transactionally with each face result so changed files have
+  no stale face-appearance candidates.
 - A photo that has faces but no measurements yet gets a **face-only
   analysis row**: the face pass must be able to store a count without
   fabricating any measurement. Its `sharpness`/… columns stay `NULL` until

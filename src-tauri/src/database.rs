@@ -5,6 +5,7 @@
 //!
 //! Schema is versioned via `schema_version` and applied incrementally.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -12,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 17;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -326,6 +327,90 @@ impl Db {
                     .map_err(db_err("add analysis.scene_at"))?;
             }
 
+            // v15 (Review workflow): selection remains the one durable,
+            // non-destructive review state. Rebuild its small CHECK
+            // constraint to add `needs_attention`; existing keep/reject
+            // rows are copied verbatim. SQLite cannot alter CHECK clauses.
+            let selection_sql: Option<String> = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'selections'",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(db_err("read selections schema"))?;
+            if !selection_sql
+                .as_deref()
+                .unwrap_or_default()
+                .contains("needs_attention")
+            {
+                conn.execute_batch(
+                    "CREATE TABLE selections_v15 (
+                        photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+                        state TEXT NOT NULL CHECK (state IN ('selected', 'rejected', 'needs_attention')),
+                        updated_at TEXT
+                     );
+                     INSERT INTO selections_v15 (photo_id, state, updated_at)
+                        SELECT photo_id, state, updated_at FROM selections;
+                     DROP TABLE selections;
+                     ALTER TABLE selections_v15 RENAME TO selections;",
+                )
+                .map_err(db_err("upgrade selections review states"))?;
+            }
+
+            // v16: similarity results are durable per project/session. Older
+            // versions replaced one global result set and cleared it when the
+            // project changed, which made cards from another project appear
+            // (or disappear). Keep groups whose members all belong to one
+            // session; legacy cross-session groups have no honest project
+            // owner and are discarded on this one-time migration.
+            if !table_has_column(&conn, "similarity_groups", "session_id") {
+                conn.execute(
+                    "ALTER TABLE similarity_groups ADD COLUMN session_id INTEGER",
+                    [],
+                )
+                .map_err(db_err("add similarity_groups.session_id"))?;
+                conn.execute_batch(
+                    "UPDATE similarity_groups
+                        SET session_id = (
+                            SELECT p.session_id
+                            FROM similarity_group_photos gp
+                            JOIN photos p ON p.id = gp.photo_id
+                            WHERE gp.group_id = similarity_groups.id
+                            GROUP BY p.session_id
+                            HAVING COUNT(DISTINCT COALESCE(p.session_id, -1)) = 1
+                            LIMIT 1
+                        );
+                     DELETE FROM similarity_group_photos
+                       WHERE group_id IN (
+                           SELECT id FROM similarity_groups WHERE session_id IS NULL
+                       );
+                     DELETE FROM similarity_groups WHERE session_id IS NULL;
+                     CREATE INDEX IF NOT EXISTS idx_similarity_groups_session
+                       ON similarity_groups(session_id);",
+                )
+                .map_err(db_err("scope legacy similarity groups"))?;
+            }
+
+            // v17: face observations hold only compact, local appearance
+            // hashes for detected crops. They let the similarity pass offer
+            // same-face candidates without a cloud identity service or a
+            // heavyweight recognition model. No image pixels leave the
+            // machine, and a missing face runtime simply leaves this table
+            // empty.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS face_observations (
+                    photo_id INTEGER NOT NULL REFERENCES photos(id) ON DELETE CASCADE,
+                    face_index INTEGER NOT NULL,
+                    appearance_hash INTEGER NOT NULL,
+                    source_mtime TEXT,
+                    PRIMARY KEY (photo_id, face_index)
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_face_observations_hash
+                    ON face_observations(appearance_hash);",
+            )
+            .map_err(db_err("create face observations"))?;
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -372,6 +457,14 @@ impl Db {
         } else {
             Ok(None)
         }
+    }
+
+    /// The session for the folder currently open in the desktop app. Long
+    /// running project work must capture this before it starts rather than
+    /// falling back to the entire catalog.
+    pub fn active_project_session_id(&self) -> AppResult<Option<i64>> {
+        let conn = self.lock()?;
+        self.active_session_id(&conn)
     }
 
     /// Quick status counters for the shell UI. When a project is open
@@ -921,23 +1014,25 @@ impl Db {
         Ok((decodable, analyzed))
     }
 
-    /// Photos still awaiting the EXIF/metadata pass, in stable order: never
-    /// read yet, or changed on disk since the last read (incremental rule:
-    /// `file_mtime > exif_at` — same idea as the analysis/similarity/faces
-    /// queues). An unchanged file never re-enters.
+    /// Photos still awaiting the EXIF/metadata pass for the open project, in
+    /// stable order: never read yet, or changed on disk since the last read
+    /// (incremental rule: `file_mtime > exif_at` — same idea as the
+    /// analysis/similarity/faces queues). An unchanged file never re-enters.
+    /// With no open project, Home retains the useful global queue.
     pub fn exif_queue(&self) -> AppResult<Vec<ExifWork>> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, path, extension, filename, width, height, orientation, file_mtime
-                 FROM photos
-                 WHERE exif_at IS NULL
-                    OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
-                 ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC",
-            )
-            .map_err(db_err("prepare exif_queue"))?;
+        let active_sid = self.active_session_id(&conn)?;
+        let sql = "SELECT id, path, extension, filename, width, height, orientation, file_mtime
+                   FROM photos
+                   WHERE (?1 IS NULL OR session_id = ?1)
+                     AND (
+                       exif_at IS NULL
+                       OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
+                     )
+                   ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC";
+        let mut stmt = conn.prepare(sql).map_err(db_err("prepare exif_queue"))?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map(params![active_sid], |r| {
                 Ok(ExifWork {
                     photo_id: r.get(0)?,
                     path: r.get(1)?,
@@ -1112,6 +1207,140 @@ pub fn upsert_exif(
     /// `list_photos` is the unfiltered page (kept as the default grid path).
     pub fn list_photos(&self, offset: i64, limit: i64) -> AppResult<(Vec<PhotoSummary>, i64)> {
         self.photos_where("", Vec::new(), offset, limit)
+    }
+
+    /// Distinct metadata values for select-style filters. The column name is
+    /// a fixed allowlist, never caller-provided SQL; blank EXIF values count
+    /// as unidentified alongside NULL values.
+    pub fn filter_value_options(
+        &self,
+        field: &str,
+        session_id: Option<i64>,
+    ) -> AppResult<FilterValueOptions> {
+        let column = match field {
+            "camera_make" => "camera_make",
+            "camera_model" => "camera_model",
+            "lens" => "lens",
+            _ => return Err(AppError::validation(format!("`{field}` has no selectable metadata values"))),
+        };
+        let conn = self.lock()?;
+        let scope = session_id.map(|_| " AND session_id = ?1").unwrap_or("");
+        let values_sql = format!(
+            "SELECT {column}, COUNT(*) FROM photos
+             WHERE {column} IS NOT NULL AND TRIM({column}) <> ''{scope}
+             GROUP BY {column} ORDER BY COUNT(*) DESC, {column} COLLATE NOCASE ASC"
+        );
+        let mut values_stmt = conn
+            .prepare(&values_sql)
+            .map_err(db_err("prepare metadata filter values"))?;
+        let values = if let Some(id) = session_id {
+            values_stmt
+                .query_map(params![id], |row| {
+                    Ok(FilterValueOption { value: row.get(0)?, count: row.get(1)? })
+                })
+                .map_err(db_err("query metadata filter values"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db_err("read metadata filter values"))?
+        } else {
+            values_stmt
+                .query_map([], |row| {
+                    Ok(FilterValueOption { value: row.get(0)?, count: row.get(1)? })
+                })
+                .map_err(db_err("query metadata filter values"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db_err("read metadata filter values"))?
+        };
+
+        let unknown_sql = format!(
+            "SELECT COUNT(*) FROM photos
+             WHERE ({column} IS NULL OR TRIM({column}) = ''){scope}"
+        );
+        let unidentified_count = if let Some(id) = session_id {
+            conn.query_row(&unknown_sql, params![id], |row| row.get(0))
+        } else {
+            conn.query_row(&unknown_sql, [], |row| row.get(0))
+        }
+        .map_err(db_err("count unidentified metadata values"))?;
+
+        Ok(FilterValueOptions { values, unidentified_count })
+    }
+
+    /// Session-first review data. This returns lightweight grid rows plus the
+    /// existing similarity/burst memberships in one local SQLite transaction;
+    /// pixel decoding remains on demand in the UI.
+    pub fn review_queue(&self, session_id: i64) -> AppResult<ReviewQueue> {
+        let conn = self.lock()?;
+        let mut photo_stmt = conn
+            .prepare(
+                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.capture_datetime, p.session_id,
+                        (a.photo_id IS NOT NULL) AS has_analysis,
+                        p.rating, p.flag, p.color_label
+                 FROM photos p LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE p.session_id = ?1
+                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
+            )
+            .map_err(db_err("prepare review photos"))?;
+        let photo_rows = photo_stmt
+            .query_map([session_id], |r| {
+                Ok(PhotoSummary {
+                    id: r.get(0)?,
+                    filename: r.get(1)?,
+                    extension: r.get(2)?,
+                    size_bytes: r.get(3)?,
+                    width: r.get(4)?,
+                    height: r.get(5)?,
+                    orientation: r.get(6)?,
+                    capture_datetime: r.get(7)?,
+                    session_id: r.get(8)?,
+                    has_analysis: r.get::<_, i64>(9)? != 0,
+                    rating: r.get(10)?,
+                    flag: r.get::<_, i64>(11)? != 0,
+                    color_label: r.get(12)?,
+                })
+            })
+            .map_err(db_err("query review photos"))?;
+        let mut photos = Vec::new();
+        for row in photo_rows {
+            photos.push(row.map_err(db_err("read review photo"))?);
+        }
+
+        let mut group_stmt = conn
+            .prepare(
+                "SELECT g.id, g.group_type, gp.photo_id
+                 FROM similarity_groups g
+                 JOIN similarity_group_photos gp ON gp.group_id = g.id
+                 JOIN photos p ON p.id = gp.photo_id
+                 WHERE p.session_id = ?1
+                 ORDER BY CASE g.group_type WHEN 'burst' THEN 0 ELSE 1 END,
+                          g.id,
+                          (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
+            )
+            .map_err(db_err("prepare review sequences"))?;
+        let group_rows = group_stmt
+            .query_map([session_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            })
+            .map_err(db_err("query review sequences"))?;
+        let mut sequences: Vec<ReviewSequence> = Vec::new();
+        let mut sequence_indices: HashMap<(i64, String), usize> = HashMap::new();
+        for row in group_rows {
+            let (id, group_type, photo_id) = row.map_err(db_err("read review sequence"))?;
+            let key = (id, group_type.clone());
+            if let Some(index) = sequence_indices.get(&key) {
+                sequences[*index].photo_ids.push(photo_id);
+            } else {
+                let index = sequences.len();
+                sequence_indices.insert(key, index);
+                sequences.push(ReviewSequence {
+                    id,
+                    group_type,
+                    photo_ids: vec![photo_id],
+                });
+            }
+        }
+        sequences.retain(|sequence| sequence.photo_ids.len() >= 2);
+        Ok(ReviewQueue { photos, sequences })
     }
 
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
@@ -1343,15 +1572,6 @@ pub fn set_marks(
         .map_err(db_err("set marks"))?;
     Ok(n)
 }
-    pub fn clear_similarity_groups(&self) -> AppResult<()> {
-        let conn = self.lock()?;
-        conn.execute("DELETE FROM similarity_group_photos", [])
-            .map_err(db_err("clear similarity_group_photos"))?;
-        conn.execute("DELETE FROM similarity_groups", [])
-            .map_err(db_err("clear similarity_groups"))?;
-        Ok(())
-    }
-
     pub fn clear_selections(&self, photo_ids: Vec<i64>) -> AppResult<usize> {
     if photo_ids.is_empty() {
         return Ok(0);
@@ -1735,6 +1955,9 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     pub fn list_similarity_groups(&self, limit: i64) -> AppResult<Vec<SimilarityGroup>> {
         let conn = self.lock()?;
         let limit = limit.clamp(1, 500);
+        let Some(session_id) = self.active_session_id(&conn)? else {
+            return Ok(Vec::new());
+        };
         let mut stmt = conn
             .prepare(
                 "SELECT g.id, g.hash, g.group_type, g.photo_count, g.created_at,
@@ -1743,12 +1966,13 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
                          JOIN photos p ON p.id = gp.photo_id
                          WHERE gp.group_id = g.id) AS session_count
                  FROM similarity_groups g
+                 WHERE g.session_id = ?1
                  ORDER BY (g.group_type = 'burst') DESC, g.photo_count DESC, g.id
-                 LIMIT ?1",
+                 LIMIT ?2",
             )
             .map_err(db_err("prepare similarity groups"))?;
         let rows = stmt
-            .query_map([limit], |r| {
+            .query_map(params![session_id, limit], |r| {
                 Ok(SimilarityGroup {
                     id: r.get(0)?,
                     hash: r.get(1)?,
@@ -1789,10 +2013,15 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         let conn = self.lock()?;
         let limit = limit.clamp(1, 500);
         let offset = offset.max(0);
+        let Some(session_id) = self.active_session_id(&conn)? else {
+            return Ok((Vec::new(), 0));
+        };
         let total: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM similarity_group_photos WHERE group_id = ?1",
-                [group_id],
+                "SELECT COUNT(*) FROM similarity_group_photos gp
+                 JOIN similarity_groups g ON g.id = gp.group_id
+                 WHERE gp.group_id = ?1 AND g.session_id = ?2",
+                params![group_id, session_id],
                 |r| r.get(0),
             )
             .map_err(db_err("count group photos"))?;
@@ -1808,13 +2037,14 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
                  FROM similarity_group_photos g
                  JOIN photos p ON p.id = g.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
-                 WHERE g.group_id = ?1
+                 JOIN similarity_groups sg ON sg.id = g.group_id
+                 WHERE g.group_id = ?1 AND sg.session_id = ?2
                  ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
-                 LIMIT ?2 OFFSET ?3",
+                 LIMIT ?3 OFFSET ?4",
             )
             .map_err(db_err("prepare group photos"))?;
         let rows = stmt
-            .query_map(params![group_id, limit, offset], Self::page_row_to_summary)
+            .query_map(params![group_id, session_id, limit, offset], Self::page_row_to_summary)
             .map_err(db_err("query group photos"))?;
         let mut out = Vec::new();
         for row in rows {
@@ -1823,27 +2053,32 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         Ok((out, total))
     }
 
-    /// Replace the whole similarity-group set atomically (the pass recomputes
-    /// all groups from the current hashes). Returns the number of groups.
-    pub fn replace_similarity_groups(
+    /// Replace one project's similarity-group set atomically. Groups for
+    /// every other project remain available when that project is reopened.
+    pub fn replace_similarity_groups_for_session(
         &self,
+        session_id: i64,
         groups: &[(String, String, Vec<i64>)],
     ) -> AppResult<usize> {
         let conn = self.lock()?;
         let now = crate::time::now_utc();
         let tx = conn.unchecked_transaction().map_err(db_err("similarity tx"))?;
-        tx.execute("DELETE FROM similarity_group_photos", [])
-            .map_err(db_err("clear group photos"))?;
-        tx.execute("DELETE FROM similarity_groups", [])
-            .map_err(db_err("clear groups"))?;
+        tx.execute(
+            "DELETE FROM similarity_group_photos
+             WHERE group_id IN (SELECT id FROM similarity_groups WHERE session_id = ?1)",
+            [session_id],
+        )
+        .map_err(db_err("clear project group photos"))?;
+        tx.execute("DELETE FROM similarity_groups WHERE session_id = ?1", [session_id])
+            .map_err(db_err("clear project groups"))?;
         for (hash, group_type, photo_ids) in groups {
             if photo_ids.is_empty() {
                 continue;
             }
             tx.execute(
-                "INSERT INTO similarity_groups (hash, group_type, photo_count, created_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![hash, group_type, photo_ids.len() as i64, now],
+                "INSERT INTO similarity_groups (hash, group_type, photo_count, created_at, session_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![hash, group_type, photo_ids.len() as i64, now, session_id],
             )
             .map_err(db_err("insert group"))?;
             let gid: i64 =
@@ -1862,18 +2097,19 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         Ok(groups.len())
     }
 
-    /// All currently hashed photos (id, hash, session, capture datetime) for
-    /// grouping. Groups are computed within a session (see SIMILARITY.md).
-    pub fn hashed_photos(
+    /// All currently hashed photos for one project/session. The similarity
+    /// pass must never read another project's cached rows.
+    pub fn hashed_photos_for_session(
         &self,
+        session_id: i64,
     ) -> AppResult<Vec<(i64, i64, Option<i64>, Option<String>)>> {
         let conn = self.lock()?;
         let mut stmt = conn
             .prepare("SELECT id, phash, session_id, capture_datetime
-                      FROM photos WHERE phash IS NOT NULL")
+                      FROM photos WHERE phash IS NOT NULL AND session_id = ?1")
             .map_err(db_err("prepare hashed photos"))?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map([session_id], |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, i64>(1)?,
@@ -2130,8 +2366,23 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
         face_count: i64,
         source_mtime: Option<&str>,
     ) -> AppResult<()> {
+        self.upsert_faces_with_observations(photo_id, face_count, &[], source_mtime)
+    }
+
+    /// Store a face count and compact local appearance signatures together.
+    /// A signature is a perceptual hash of one detected face crop, never an
+    /// image or a cloud-recognisable embedding. Replacing rows prevents stale
+    /// observations after a photo changes on disk.
+    pub fn upsert_faces_with_observations(
+        &self,
+        photo_id: i64,
+        face_count: i64,
+        appearance_hashes: &[u64],
+        source_mtime: Option<&str>,
+    ) -> AppResult<()> {
         let conn = self.lock()?;
-        conn.execute(
+        let tx = conn.unchecked_transaction().map_err(db_err("face observations tx"))?;
+        tx.execute(
             "INSERT INTO analysis (photo_id, face_count, faces_at, analyzed_at, algorithm_version)
              VALUES (?1, ?2, ?3, ?4, 1)
              ON CONFLICT(photo_id) DO UPDATE SET
@@ -2140,7 +2391,43 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
             params![photo_id, face_count, source_mtime, crate::time::now_utc()],
         )
         .map_err(db_err("upsert faces"))?;
+        tx.execute("DELETE FROM face_observations WHERE photo_id = ?1", [photo_id])
+            .map_err(db_err("clear face observations"))?;
+        for (face_index, hash) in appearance_hashes.iter().enumerate() {
+            tx.execute(
+                "INSERT INTO face_observations (photo_id, face_index, appearance_hash, source_mtime)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![photo_id, face_index as i64, *hash as i64, source_mtime],
+            )
+            .map_err(db_err("insert face observation"))?;
+        }
+        tx.commit().map_err(db_err("commit face observations"))?;
         Ok(())
+    }
+
+    /// Stored local face-appearance hashes for one project. Only photos in
+    /// the requested session are returned, so portrait candidates cannot
+    /// bridge into another project.
+    pub fn face_observations_for_session(&self, session_id: i64) -> AppResult<Vec<(i64, u64)>> {
+        let conn = self.lock()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT o.photo_id, o.appearance_hash
+                 FROM face_observations o
+                 JOIN photos p ON p.id = o.photo_id
+                 WHERE p.session_id = ?1",
+            )
+            .map_err(db_err("prepare project face observations"))?;
+        let rows = stmt
+            .query_map([session_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? as u64))
+            })
+            .map_err(db_err("query project face observations"))?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(db_err("read project face observation"))?);
+        }
+        Ok(out)
     }
 
     /// How many photos carry a face result (the Settings "N of M" line).
@@ -2293,7 +2580,7 @@ pub struct SelectionRow {
     pub updated_at: String,
 }
 
-const SELECTION_STATES: [&str; 2] = ["selected", "rejected"];
+const SELECTION_STATES: [&str; 3] = ["selected", "rejected", "needs_attention"];
 
 
 
@@ -2347,6 +2634,36 @@ pub struct PhotoSummary {
 pub struct PhotoPage {
     pub photos: Vec<PhotoSummary>,
     pub total: i64,
+}
+
+/// One concrete local metadata value and its in-scope photograph count.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilterValueOption {
+    pub value: String,
+    pub count: i64,
+}
+
+/// Values offered by metadata-backed filter fields for the active shoot.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilterValueOptions {
+    pub values: Vec<FilterValueOption>,
+    pub unidentified_count: i64,
+}
+
+/// One reusable similarity/burst decision unit for the session review UI.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewSequence {
+    pub id: i64,
+    pub group_type: String,
+    pub photo_ids: Vec<i64>,
+}
+
+/// Ordered session photos and the existing local grouping information. The UI
+/// decides presentation; this data object contains no aesthetic ranking.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewQueue {
+    pub photos: Vec<PhotoSummary>,
+    pub sequences: Vec<ReviewSequence>,
 }
 
 /// Full photo + its analysis row (NULLs when analysis hasn't run yet).
@@ -2494,6 +2811,77 @@ mod tests {
         db.migrate().unwrap();
         let v2 = db.migrate().unwrap();
         assert_eq!(v2, CURRENT_SCHEMA_VERSION);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn review_state_accepts_attention_without_redefining_existing_choices() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_review_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+
+        let id = db
+            .upsert_photo(&PhotoUpsert {
+                path: dir.join("review.jpg").display().to_string(),
+                filename: "review.jpg".to_string(),
+                extension: "jpg".to_string(),
+                size_bytes: Some(1),
+                width: Some(10),
+                height: Some(10),
+                orientation: None,
+                session_id: None,
+                file_mtime: None,
+            })
+            .unwrap();
+        db.set_selection(id, "needs_attention").unwrap();
+        assert_eq!(db.list_selections(10).unwrap()[0].state, "needs_attention");
+        assert!(db.set_selection(id, "unknown").is_err());
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn metadata_filter_values_are_scoped_and_include_unidentified() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_filter_values_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+        let first = db.upsert_session("First", Some("/first")).unwrap();
+        let second = db.upsert_session("Second", Some("/second")).unwrap();
+
+        for (name, session) in [("a.jpg", first), ("b.jpg", first), ("c.jpg", second)] {
+            db.upsert_photo(&PhotoUpsert {
+                path: dir.join(name).display().to_string(),
+                filename: name.to_string(),
+                extension: "jpg".to_string(),
+                size_bytes: Some(1),
+                width: Some(10),
+                height: Some(10),
+                orientation: None,
+                session_id: Some(session),
+                file_mtime: None,
+            }).unwrap();
+        }
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("UPDATE photos SET camera_make = 'Canon' WHERE filename = 'a.jpg'", []).unwrap();
+            conn.execute("UPDATE photos SET camera_make = 'Sony' WHERE filename = 'c.jpg'", []).unwrap();
+        }
+
+        let scoped = db.filter_value_options("camera_make", Some(first)).unwrap();
+        assert_eq!(scoped.values.len(), 1);
+        assert_eq!(scoped.values[0].value, "Canon");
+        assert_eq!(scoped.values[0].count, 1);
+        assert_eq!(scoped.unidentified_count, 1);
+        assert!(db.filter_value_options("filename", Some(first)).is_err());
+
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);
     }

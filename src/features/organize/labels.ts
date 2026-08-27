@@ -25,5 +25,8 @@ export function groupLabel(groupType: string, count: number): string {
   if (groupType === "burst") {
     return count === 1 ? "burst · 1" : `burst · ${count}`;
   }
+  if (groupType === "face") {
+    return count === 2 ? "2 matching face appearances" : `${count} matching face appearances`;
+  }
   return count === 2 ? "2 similar" : `${count} similar photographs`;
 }
