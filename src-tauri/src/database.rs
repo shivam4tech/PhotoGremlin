@@ -1014,23 +1014,25 @@ impl Db {
         Ok((decodable, analyzed))
     }
 
-    /// Photos still awaiting the EXIF/metadata pass, in stable order: never
-    /// read yet, or changed on disk since the last read (incremental rule:
-    /// `file_mtime > exif_at` — same idea as the analysis/similarity/faces
-    /// queues). An unchanged file never re-enters.
+    /// Photos still awaiting the EXIF/metadata pass for the open project, in
+    /// stable order: never read yet, or changed on disk since the last read
+    /// (incremental rule: `file_mtime > exif_at` — same idea as the
+    /// analysis/similarity/faces queues). An unchanged file never re-enters.
+    /// With no open project, Home retains the useful global queue.
     pub fn exif_queue(&self) -> AppResult<Vec<ExifWork>> {
         let conn = self.lock()?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, path, extension, filename, width, height, orientation, file_mtime
-                 FROM photos
-                 WHERE exif_at IS NULL
-                    OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
-                 ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC",
-            )
-            .map_err(db_err("prepare exif_queue"))?;
+        let active_sid = self.active_session_id(&conn)?;
+        let sql = "SELECT id, path, extension, filename, width, height, orientation, file_mtime
+                   FROM photos
+                   WHERE (?1 IS NULL OR session_id = ?1)
+                     AND (
+                       exif_at IS NULL
+                       OR (file_mtime IS NOT NULL AND exif_at IS NOT NULL AND file_mtime > exif_at)
+                     )
+                   ORDER BY (capture_datetime IS NULL) ASC, capture_datetime ASC, id ASC";
+        let mut stmt = conn.prepare(sql).map_err(db_err("prepare exif_queue"))?;
         let rows = stmt
-            .query_map([], |r| {
+            .query_map(params![active_sid], |r| {
                 Ok(ExifWork {
                     photo_id: r.get(0)?,
                     path: r.get(1)?,

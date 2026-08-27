@@ -238,6 +238,32 @@ fn missing_file_is_a_friendly_failure() {
 }
 
 #[test]
+fn metadata_pass_only_reads_the_open_project() {
+    let (_base, db_path, shoot) = setup("project_scope");
+    let other_shoot = shoot.parent().unwrap().join("Other_Shoot");
+    std::fs::create_dir_all(&other_shoot).unwrap();
+    let db = Arc::new(Db::open(&db_path).unwrap());
+    db.migrate().unwrap();
+
+    let first = shoot.join("FIRST.jpg");
+    let second = other_shoot.join("SECOND.jpg");
+    std::fs::write(&first, plain_jpeg(100, 100)).unwrap();
+    std::fs::write(&second, plain_jpeg(100, 100)).unwrap();
+    let mut progress = |_p: ProgressPayload| {};
+    let cancel = AtomicBool::new(false);
+    scanner::run_scan(&shoot, &db, &mut progress, &cancel).unwrap();
+    scanner::run_scan(&other_shoot, &db, &mut progress, &cancel).unwrap();
+
+    db.set_setting("active_folder", shoot.to_str().unwrap()).unwrap();
+    assert_eq!(db.exif_queue().unwrap().len(), 1, "only the open project queues work");
+    let summary = metadata::run_metadata(db.clone(), noop_progress(), Arc::new(AtomicBool::new(false)))
+        .unwrap();
+    assert_eq!(summary.processed, 1, "only the open project is read");
+    assert!(read_row(&db, "FIRST.jpg").7.is_some());
+    assert!(read_row(&db, "SECOND.jpg").7.is_none(), "other project remains pending");
+}
+
+#[test]
 fn cancel_before_start_stops_the_pass() {
     let (_base, db_path, shoot) = setup("cancel");
     let db = Arc::new(Db::open(&db_path).unwrap());

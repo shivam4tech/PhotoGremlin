@@ -91,7 +91,8 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   (`'none'` → `'exif'`; date estimation extends the order later). A readable
   image with no EXIF is an empty record (not an error); an unparseable file
   is a friendly error. `mod.rs` runs the pass, mirroring the analysis
-  pipeline: `exif_queue` → round-robin slices to `METADATA_WORKERS = 3` std
+  pipeline: automatic post-scan `exif_queue` for the active project →
+  round-robin slices to `METADATA_WORKERS = 3` std
   threads → `upsert_exif` (scanner dims win; EXIF-owned fields refreshed by
   the newest read, empty reads never erase; stamps `exif_at`) → per-item
   progress; cooperative cancel; a 256 MB per-file guard. The queue is

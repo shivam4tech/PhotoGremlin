@@ -199,16 +199,20 @@ export function LibraryView() {
 
   async function startMetadata() {
     setError(null);
+    // Set the visible pending state before invoking Rust. The task can emit
+    // its first real progress event before invoke() resolves; assigning 0/0
+    // afterwards would overwrite it and make a healthy pass look stuck.
+    store().setReadingMetadata(true);
     try {
       store().setMetadataSummary(null);
       store().setMetadataPaused(false);
-      await api.startMetadata();
-      store().setReadingMetadata(true);
       store().setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+      await api.startMetadata();
     } catch (e) {
       setError(toErrorMessage(e));
       store().setReadingMetadata(false);
       store().setMetadataPaused(false);
+      store().setProgress(null);
     }
   }
 
@@ -419,9 +423,9 @@ export function LibraryView() {
             className="btn btn-sm"
             onClick={startMetadata}
             disabled={scanning || analyzing || findingSimilar || busy || !libraryHasPhotos}
-            title={`Read camera metadata (EXIF) for ${metadataPending.toLocaleString()} photograph${metadataPending === 1 ? "" : "s"} — never-read files plus any changed on disk since their last read.`}
+            title={`Camera metadata is read automatically after each scan. Retry the ${metadataPending.toLocaleString()} pending photograph${metadataPending === 1 ? "" : "s"} only if a previous read was stopped or files changed on disk.`}
           >
-            Read metadata ({metadataPending.toLocaleString()})
+            Retry metadata ({metadataPending.toLocaleString()})
           </button>
         ) : null}
         {readingMetadata ? (

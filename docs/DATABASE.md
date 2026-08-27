@@ -73,7 +73,7 @@ A shoot or imported body of work.
 | name | TEXT | human name (e.g. folder name) |
 | root_path | TEXT | the scanned folder, if any |
 | start_time / end_time | TEXT | UTC RFC3339 — the shoot period, derived from the photos' `COALESCE(capture_datetime, indexed_at)` (NULLs while the session has no dated photos) |
-| photo_count | INTEGER | denormalized counter, refreshed by the scan (per session) and the metadata pass (all sessions) |
+| photo_count | INTEGER | denormalized counter, refreshed by the scan and metadata pass for the active session |
 | created_at | TEXT | |
 
 ### photos
@@ -121,8 +121,9 @@ refreshes its name; `refresh_session_counts` re-derives `photo_count` after
 each scan pass. Rows for files that vanished from disk are **not** deleted
 silently — they stay until a future reconcile step flags them to the user.
 
-**Metadata (EXIF) merge (Sprint 5, incremental since v11/Sprint 11):** the
-metadata pass (`exif_queue` → `upsert_exif`) reads each file, stamps
+**Metadata (EXIF) merge (Sprint 5, incremental since v11/Sprint 11):** after
+each scan, the metadata pass starts automatically. Its `exif_queue` is scoped
+to the active project (`Home` retains a global queue), reads each file, stamps
 `exif_at`, and re-reads any file whose mtime is newer than its last read
 (same incremental rule as analysis — a re-exported/edited file's metadata
 stays truthful). `status().metadata_pending` counts the same queue (never
@@ -275,8 +276,8 @@ post-scan face pass auto-run, it never forces inference).
   `photo_id`; updates only analysis-owned columns.
 - `analysis_progress_counts(extensions)` — (decodable photos, analyzed of
   them) for the status line.
-- `exif_queue()` — photos the metadata pass hasn't read yet
-  (`exif_at IS NULL`), in capture-time order, carrying current dimensions.
+- `exif_queue()` — pending photos in the active project (or the global Home
+  queue) in capture-time order, carrying current dimensions.
 - `upsert_exif(photo_id, record)` — merge one file's EXIF extraction
   (`COALESCE`, GPS 0→1 only, stamps `exif_at`); see the photos section.
 - `status()` — returns `metadata_pending` (count of `exif_at IS NULL`),
