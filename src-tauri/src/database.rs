@@ -5,6 +5,7 @@
 //!
 //! Schema is versioned via `schema_version` and applied incrementally.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -12,7 +13,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 14;
+pub const CURRENT_SCHEMA_VERSION: i64 = 15;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
@@ -324,6 +325,37 @@ impl Db {
             if !table_has_column(&conn, "analysis", "scene_at") {
                 conn.execute("ALTER TABLE analysis ADD COLUMN scene_at TEXT", [])
                     .map_err(db_err("add analysis.scene_at"))?;
+            }
+
+            // v15 (Review workflow): selection remains the one durable,
+            // non-destructive review state. Rebuild its small CHECK
+            // constraint to add `needs_attention`; existing keep/reject
+            // rows are copied verbatim. SQLite cannot alter CHECK clauses.
+            let selection_sql: Option<String> = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'selections'",
+                    [],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(db_err("read selections schema"))?;
+            if !selection_sql
+                .as_deref()
+                .unwrap_or_default()
+                .contains("needs_attention")
+            {
+                conn.execute_batch(
+                    "CREATE TABLE selections_v15 (
+                        photo_id INTEGER PRIMARY KEY REFERENCES photos(id) ON DELETE CASCADE,
+                        state TEXT NOT NULL CHECK (state IN ('selected', 'rejected', 'needs_attention')),
+                        updated_at TEXT
+                     );
+                     INSERT INTO selections_v15 (photo_id, state, updated_at)
+                        SELECT photo_id, state, updated_at FROM selections;
+                     DROP TABLE selections;
+                     ALTER TABLE selections_v15 RENAME TO selections;",
+                )
+                .map_err(db_err("upgrade selections review states"))?;
             }
 
             let current_version: i64 = conn
@@ -1112,6 +1144,84 @@ pub fn upsert_exif(
     /// `list_photos` is the unfiltered page (kept as the default grid path).
     pub fn list_photos(&self, offset: i64, limit: i64) -> AppResult<(Vec<PhotoSummary>, i64)> {
         self.photos_where("", Vec::new(), offset, limit)
+    }
+
+    /// Session-first review data. This returns lightweight grid rows plus the
+    /// existing similarity/burst memberships in one local SQLite transaction;
+    /// pixel decoding remains on demand in the UI.
+    pub fn review_queue(&self, session_id: i64) -> AppResult<ReviewQueue> {
+        let conn = self.lock()?;
+        let mut photo_stmt = conn
+            .prepare(
+                "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
+                        p.orientation, p.capture_datetime, p.session_id,
+                        (a.photo_id IS NOT NULL) AS has_analysis,
+                        p.rating, p.flag, p.color_label
+                 FROM photos p LEFT JOIN analysis a ON a.photo_id = p.id
+                 WHERE p.session_id = ?1
+                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
+            )
+            .map_err(db_err("prepare review photos"))?;
+        let photo_rows = photo_stmt
+            .query_map([session_id], |r| {
+                Ok(PhotoSummary {
+                    id: r.get(0)?,
+                    filename: r.get(1)?,
+                    extension: r.get(2)?,
+                    size_bytes: r.get(3)?,
+                    width: r.get(4)?,
+                    height: r.get(5)?,
+                    orientation: r.get(6)?,
+                    capture_datetime: r.get(7)?,
+                    session_id: r.get(8)?,
+                    has_analysis: r.get::<_, i64>(9)? != 0,
+                    rating: r.get(10)?,
+                    flag: r.get::<_, i64>(11)? != 0,
+                    color_label: r.get(12)?,
+                })
+            })
+            .map_err(db_err("query review photos"))?;
+        let mut photos = Vec::new();
+        for row in photo_rows {
+            photos.push(row.map_err(db_err("read review photo"))?);
+        }
+
+        let mut group_stmt = conn
+            .prepare(
+                "SELECT g.id, g.group_type, gp.photo_id
+                 FROM similarity_groups g
+                 JOIN similarity_group_photos gp ON gp.group_id = g.id
+                 JOIN photos p ON p.id = gp.photo_id
+                 WHERE p.session_id = ?1
+                 ORDER BY CASE g.group_type WHEN 'burst' THEN 0 ELSE 1 END,
+                          g.id,
+                          (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
+            )
+            .map_err(db_err("prepare review sequences"))?;
+        let group_rows = group_stmt
+            .query_map([session_id], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            })
+            .map_err(db_err("query review sequences"))?;
+        let mut sequences: Vec<ReviewSequence> = Vec::new();
+        let mut sequence_indices: HashMap<(i64, String), usize> = HashMap::new();
+        for row in group_rows {
+            let (id, group_type, photo_id) = row.map_err(db_err("read review sequence"))?;
+            let key = (id, group_type.clone());
+            if let Some(index) = sequence_indices.get(&key) {
+                sequences[*index].photo_ids.push(photo_id);
+            } else {
+                let index = sequences.len();
+                sequence_indices.insert(key, index);
+                sequences.push(ReviewSequence {
+                    id,
+                    group_type,
+                    photo_ids: vec![photo_id],
+                });
+            }
+        }
+        sequences.retain(|sequence| sequence.photo_ids.len() >= 2);
+        Ok(ReviewQueue { photos, sequences })
     }
 
     pub fn lock(&self) -> Result<std::sync::MutexGuard<'_, Connection>, AppError> {
@@ -2293,7 +2403,7 @@ pub struct SelectionRow {
     pub updated_at: String,
 }
 
-const SELECTION_STATES: [&str; 2] = ["selected", "rejected"];
+const SELECTION_STATES: [&str; 3] = ["selected", "rejected", "needs_attention"];
 
 
 
@@ -2347,6 +2457,22 @@ pub struct PhotoSummary {
 pub struct PhotoPage {
     pub photos: Vec<PhotoSummary>,
     pub total: i64,
+}
+
+/// One reusable similarity/burst decision unit for the session review UI.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewSequence {
+    pub id: i64,
+    pub group_type: String,
+    pub photo_ids: Vec<i64>,
+}
+
+/// Ordered session photos and the existing local grouping information. The UI
+/// decides presentation; this data object contains no aesthetic ranking.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewQueue {
+    pub photos: Vec<PhotoSummary>,
+    pub sequences: Vec<ReviewSequence>,
 }
 
 /// Full photo + its analysis row (NULLs when analysis hasn't run yet).
@@ -2494,6 +2620,36 @@ mod tests {
         db.migrate().unwrap();
         let v2 = db.migrate().unwrap();
         assert_eq!(v2, CURRENT_SCHEMA_VERSION);
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn review_state_accepts_attention_without_redefining_existing_choices() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_review_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+
+        let id = db
+            .upsert_photo(&PhotoUpsert {
+                path: dir.join("review.jpg").display().to_string(),
+                filename: "review.jpg".to_string(),
+                extension: "jpg".to_string(),
+                size_bytes: Some(1),
+                width: Some(10),
+                height: Some(10),
+                orientation: None,
+                session_id: None,
+                file_mtime: None,
+            })
+            .unwrap();
+        db.set_selection(id, "needs_attention").unwrap();
+        assert_eq!(db.list_selections(10).unwrap()[0].state, "needs_attention");
+        assert!(db.set_selection(id, "unknown").is_err());
+
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);
     }

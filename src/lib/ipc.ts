@@ -15,6 +15,7 @@ import type {
   PhotoPage,
   PeriodStats,
   SavedView,
+  ReviewQueue,
   SelectionRow,
   SessionMetrics,
   SessionSummary,
@@ -79,6 +80,8 @@ export const api = {
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>
     invoke("get_thumbnail", { photoId, kind }),
+  reviewQueue: (sessionId: number): Promise<ReviewQueue> =>
+    invoke("review_queue", { sessionId }),
   listSessions: (): Promise<SessionRow[]> => invoke("list_sessions"),
   // Statistics engine (Sprint 6). Synchronous, local aggregation.
   periodStats: (periodJson: string): Promise<PeriodStats> =>
@@ -123,11 +126,11 @@ export const api = {
   stopOperation: (): Promise<boolean> => invoke("stop_operation"),
 
   // Selection (culling) state.
-  setSelection: (photoId: number, selection: "selected" | "rejected"): Promise<void> =>
+  setSelection: (photoId: number, selection: "selected" | "rejected" | "needs_attention"): Promise<void> =>
     invoke("set_selection", { photoId, selection }),
   setSelections: (
     photoIds: number[],
-    selection: "selected" | "rejected",
+    selection: "selected" | "rejected" | "needs_attention",
   ): Promise<number> => invoke("set_selections", { photoIds, selection }),
   clearSelection: (photoId: number): Promise<void> =>
     invoke("clear_selection", { photoId }),

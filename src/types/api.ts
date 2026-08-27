@@ -118,7 +118,7 @@ export interface FaceCompletePayload {
 /** Culling state for one photograph. */
 export interface SelectionRow {
   photo_id: number;
-  state: "selected" | "rejected";
+  state: "selected" | "rejected" | "needs_attention";
   updated_at: string;
 }
 
@@ -270,6 +270,19 @@ export interface PhotoSummary {
 export interface PhotoPage {
   photos: PhotoSummary[];
   total: number;
+}
+
+/** Existing local similarity/burst membership, ordered for shoot review. */
+export interface ReviewSequence {
+  id: number;
+  group_type: string;
+  photo_ids: number[];
+}
+
+/** Lightweight session photos and decision units; pixels stay on demand. */
+export interface ReviewQueue {
+  photos: PhotoSummary[];
+  sequences: ReviewSequence[];
 }
 
 /** Full photo + analysis (analysis fields NULL until the analysis pass). */

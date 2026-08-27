@@ -40,6 +40,7 @@ field lives.
  | local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
 | scene (Sprint 18) | scene_group (`analysis.scene_coarse`, the MERGED product chip from the local scene model; NULL until the pass runs) | analysis |
 | marking (Sprint 13) | rating (int, null = unrated — `is-null`/`not-null` select unrated/rated), flagged (bool, `photos.flag = 1`), color_label (text, fixed enum) | photos (curatorial marks) |
+| review (Sprint 19) | review_state (`selected`, `rejected`, `needs_attention`; `is-null` = unreviewed) | correlated local `selections` row |
 
 The registry maps each field to (table, column, type, comparator) so
 conditions validate before hitting SQL, and unknown fields fail with a
@@ -79,6 +80,10 @@ friendly error instead of a SQL error.
    to one shoot (`= <id>`), to several (`in [..]`), or to unassigned photos
    (`is-null`). It is the engine-level backing for "Open in library" on a
    session (Sessions view) and for saved views that pin a session.
+- `review_state` intentionally uses a correlated `selections` lookup rather
+  than widening every grid query with another join. `is-null` means no
+  decision row exists yet — the useful **unreviewed** queue; all other values
+  are explicit photographer decisions and can be combined with session scope.
 - Execution: `commands/filters.rs::list_filtered_photos` = parse → build →
   `Db::photos_where(where_sql, params, offset, limit)`, which appends the
   stable `ORDER BY` and `LIMIT ? OFFSET ?` and returns a `PhotoPage` (same

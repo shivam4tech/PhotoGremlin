@@ -130,6 +130,7 @@ fn run_inner() -> Result<(), tauri::Error> {
             commands::compare_sessions,
             commands::list_sessions,
             commands::list_photos,
+            commands::review_queue,
             commands::get_photo_full,
             commands::get_thumbnail,
             commands::start_similarity,

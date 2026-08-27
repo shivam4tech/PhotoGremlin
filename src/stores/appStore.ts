@@ -27,7 +27,7 @@ import type {
   ViewId,
 } from "@/types/api";
 
-export type SelectionState = "selected" | "rejected";
+export type SelectionState = "selected" | "rejected" | "needs_attention";
 
 interface AppState {
   view: ViewId;

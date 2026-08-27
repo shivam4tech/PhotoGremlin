@@ -8,7 +8,7 @@ per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 11). Tests assert both expected-table presence and idempotency.
+(currently 15). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -40,6 +40,10 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   LOCAL_AI.md). Added via `ALTER TABLE`, guarded by the same
   `PRAGMA table_info` probe
 - v14 (Sprint 18): `analysis.scene_coarse` / `scene_fine` / `scene_conf` / `scene_at` — local scene-model results (NULL until the optional pass runs; incremental via mtime like `faces_at`).
+- v15 (Sprint 19 review workflow): rebuilds the small `selections` table to
+  allow its third, non-destructive state, `needs_attention`. Existing
+  `selected` and `rejected` rows are copied unchanged. An absent row remains
+  the canonical **unreviewed** state, so no bulk initialization is needed.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
