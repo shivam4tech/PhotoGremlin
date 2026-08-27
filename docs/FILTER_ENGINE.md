@@ -33,7 +33,7 @@ field lives.
  | technical | sharpness, brightness, contrast, saturation, highlight_clipping, shadow_clipping | analysis |
  | visual | monochrome, color (inverse of monochrome), dark, bright | analysis flags |
  | orientation | landscape, portrait, square | photos (w×h) |
- | camera | camera_model, camera_make, lens | photos (EXIF) |
+| camera | camera_model, camera_make, lens | photos (EXIF) |
  | exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
  | time | capture_datetime (point, range via `between`) | photos |
  | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
@@ -45,6 +45,15 @@ field lives.
 The registry maps each field to (table, column, type, comparator) so
 conditions validate before hitting SQL, and unknown fields fail with a
 friendly error instead of a SQL error.
+
+### Metadata value pickers
+
+When the Library is scoped to a shoot, the camera make, camera model, and
+lens fields load their distinct **local** EXIF values with counts. The picker
+also offers `Unidentified (n)`, which writes the normal `is-null` condition
+(blank EXIF strings count as unidentified). This is a convenience layer over
+the same filter wire format — no value is inferred, sent to a service, or
+embedded into SQL.
 
 ## Execution
 

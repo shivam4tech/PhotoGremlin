@@ -31,6 +31,7 @@ export function LibraryView() {
   const analyzing = useAppStore((s) => s.analyzing);
   const analysisSummary = useAppStore((s) => s.analysisSummary);
   const readingMetadata = useAppStore((s) => s.readingMetadata);
+  const metadataPaused = useAppStore((s) => s.metadataPaused);
   const metadataSummary = useAppStore((s) => s.metadataSummary);
   const operating = useAppStore((s) => s.operating);
   const selections = useAppStore((s) => s.selections);
@@ -200,18 +201,48 @@ export function LibraryView() {
     setError(null);
     try {
       store().setMetadataSummary(null);
+      store().setMetadataPaused(false);
       await api.startMetadata();
       store().setReadingMetadata(true);
       store().setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
     } catch (e) {
       setError(toErrorMessage(e));
       store().setReadingMetadata(false);
+      store().setMetadataPaused(false);
     }
   }
 
   async function stopMetadata() {
     try {
-      await api.stopMetadata();
+      const stopping = await api.stopMetadata();
+      if (stopping) {
+        store().setMetadataPaused(false);
+        const progress = useAppStore.getState().progress;
+        store().setProgress({
+          total: progress?.total ?? 0,
+          done: progress?.done ?? 0,
+          stage: "stopping metadata",
+          current: progress?.current ?? null,
+        });
+      }
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }
+
+  async function toggleMetadataPause() {
+    try {
+      const changed = metadataPaused ? await api.resumeMetadata() : await api.pauseMetadata();
+      if (!changed) return;
+      const nextPaused = !metadataPaused;
+      store().setMetadataPaused(nextPaused);
+      const progress = useAppStore.getState().progress;
+      store().setProgress({
+        total: progress?.total ?? 0,
+        done: progress?.done ?? 0,
+        stage: nextPaused ? "metadata paused" : "reading metadata",
+        current: progress?.current ?? null,
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -394,9 +425,14 @@ export function LibraryView() {
           </button>
         ) : null}
         {readingMetadata ? (
-          <button className="btn btn-sm btn-danger" onClick={stopMetadata}>
-            Stop reading
-          </button>
+          <>
+            <button className="btn btn-sm" onClick={() => void toggleMetadataPause()}>
+              {metadataPaused ? "Resume metadata" : "Pause metadata"}
+            </button>
+            <button className="btn btn-sm btn-danger" onClick={() => void stopMetadata()}>
+              Stop reading
+            </button>
+          </>
         ) : null}
         {!analyzing ? (
           <button
@@ -452,6 +488,7 @@ export function LibraryView() {
             draft={filterConditions}
             onChange={(c) => store().setFilterConditions(c)}
             disabled={anyPassRunning}
+            sessionId={sessionId}
           />
 
           {sessionId !== null && (

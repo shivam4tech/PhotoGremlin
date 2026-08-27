@@ -272,6 +272,16 @@ export interface PhotoPage {
   total: number;
 }
 
+export interface FilterValueOption {
+  value: string;
+  count: number;
+}
+
+export interface FilterValueOptions {
+  values: FilterValueOption[];
+  unidentified_count: number;
+}
+
 /** Existing local similarity/burst membership, ordered for shoot review. */
 export interface ReviewSequence {
   id: number;

@@ -28,7 +28,7 @@ pub use exif::ExifRecord;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use crate::database::{Db, ExifWork};
@@ -43,6 +43,59 @@ const MAX_METADATA_FILE_BYTES: u64 = 256 * 1024 * 1024;
 pub const METADATA_WORKERS: usize = 3;
 /// First few friendly per-file messages the summary carries (the log has all).
 const MAX_REPORTED_ERRORS: usize = 20;
+
+/// Cooperative pause gate for a metadata pass. It never holds a database
+/// lock while waiting, and cancellation wakes every paused worker promptly.
+#[derive(Clone)]
+pub struct PauseControl {
+    paused: Arc<AtomicBool>,
+    wake: Arc<(Mutex<()>, Condvar)>,
+}
+
+impl PauseControl {
+    pub fn new() -> Self {
+        Self {
+            paused: Arc::new(AtomicBool::new(false)),
+            wake: Arc::new((Mutex::new(()), Condvar::new())),
+        }
+    }
+
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+        self.wake.1.notify_all();
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+
+    /// Wait only between files, allowing an in-progress EXIF read to finish
+    /// safely. Returns false when cancellation was requested.
+    fn wait_if_paused(&self, cancel: &AtomicBool) -> bool {
+        if !self.is_paused() {
+            return !cancel.load(Ordering::Relaxed);
+        }
+        let (lock, signal) = &*self.wake;
+        let mut guard = lock.lock().expect("metadata pause lock poisoned");
+        while self.is_paused() && !cancel.load(Ordering::Relaxed) {
+            let (next_guard, _) = signal
+                .wait_timeout(guard, std::time::Duration::from_millis(200))
+                .expect("metadata pause wait poisoned");
+            guard = next_guard;
+        }
+        !cancel.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for PauseControl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Outcome of one metadata pass (carried in `metadata-complete`).
 #[derive(Debug, Clone, serde::Serialize)]
@@ -67,6 +120,18 @@ pub fn run_metadata(
     db: Arc<Db>,
     progress: Arc<dyn Fn(ProgressPayload) + Send + Sync>,
     cancel: Arc<AtomicBool>,
+) -> AppResult<MetadataSummary> {
+    run_metadata_controlled(db, progress, cancel, PauseControl::new())
+}
+
+/// The command layer supplies the shared pause control. The public
+/// `run_metadata` convenience entry remains pause-free for deterministic
+/// integration tests and other non-interactive callers.
+pub fn run_metadata_controlled(
+    db: Arc<Db>,
+    progress: Arc<dyn Fn(ProgressPayload) + Send + Sync>,
+    cancel: Arc<AtomicBool>,
+    pause: PauseControl,
 ) -> AppResult<MetadataSummary> {
     let queue = db.exif_queue()?;
     let total = queue.len();
@@ -101,12 +166,13 @@ pub fn run_metadata(
         let db = db.clone();
         let progress = progress.clone();
         let cancel = cancel.clone();
+        let pause = pause.clone();
         let done = done.clone();
         let failed = failed.clone();
         let errors = errors.clone();
         threads.push(std::thread::spawn(move || {
             for work in slice {
-                if cancel.load(Ordering::Relaxed) {
+                if !pause.wait_if_paused(&cancel) {
                     break; // cooperative stop; remaining items drop
                 }
                 let filename = work.filename.clone();
@@ -220,4 +286,27 @@ fn process_one(db: &Db, work: &ExifWork) -> Result<(), String> {
         tracing::error!(path = %work.path, error = %e, "exif upsert failed");
         format!("{} — could not store the result", work.filename)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pause_control_waits_and_resume_wakes_worker() {
+        let control = PauseControl::new();
+        control.pause();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_control = control.clone();
+        let worker_cancel = cancel.clone();
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            sent.send(worker_control.wait_if_paused(&worker_cancel)).unwrap();
+        });
+
+        assert!(received.recv_timeout(std::time::Duration::from_millis(20)).is_err());
+        control.resume();
+        assert_eq!(received.recv_timeout(std::time::Duration::from_secs(1)).unwrap(), true);
+        worker.join().unwrap();
+    }
 }

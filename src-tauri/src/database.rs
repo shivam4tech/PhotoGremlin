@@ -1146,6 +1146,62 @@ pub fn upsert_exif(
         self.photos_where("", Vec::new(), offset, limit)
     }
 
+    /// Distinct metadata values for select-style filters. The column name is
+    /// a fixed allowlist, never caller-provided SQL; blank EXIF values count
+    /// as unidentified alongside NULL values.
+    pub fn filter_value_options(
+        &self,
+        field: &str,
+        session_id: Option<i64>,
+    ) -> AppResult<FilterValueOptions> {
+        let column = match field {
+            "camera_make" => "camera_make",
+            "camera_model" => "camera_model",
+            "lens" => "lens",
+            _ => return Err(AppError::validation(format!("`{field}` has no selectable metadata values"))),
+        };
+        let conn = self.lock()?;
+        let scope = session_id.map(|_| " AND session_id = ?1").unwrap_or("");
+        let values_sql = format!(
+            "SELECT {column}, COUNT(*) FROM photos
+             WHERE {column} IS NOT NULL AND TRIM({column}) <> ''{scope}
+             GROUP BY {column} ORDER BY COUNT(*) DESC, {column} COLLATE NOCASE ASC"
+        );
+        let mut values_stmt = conn
+            .prepare(&values_sql)
+            .map_err(db_err("prepare metadata filter values"))?;
+        let values = if let Some(id) = session_id {
+            values_stmt
+                .query_map(params![id], |row| {
+                    Ok(FilterValueOption { value: row.get(0)?, count: row.get(1)? })
+                })
+                .map_err(db_err("query metadata filter values"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db_err("read metadata filter values"))?
+        } else {
+            values_stmt
+                .query_map([], |row| {
+                    Ok(FilterValueOption { value: row.get(0)?, count: row.get(1)? })
+                })
+                .map_err(db_err("query metadata filter values"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(db_err("read metadata filter values"))?
+        };
+
+        let unknown_sql = format!(
+            "SELECT COUNT(*) FROM photos
+             WHERE ({column} IS NULL OR TRIM({column}) = ''){scope}"
+        );
+        let unidentified_count = if let Some(id) = session_id {
+            conn.query_row(&unknown_sql, params![id], |row| row.get(0))
+        } else {
+            conn.query_row(&unknown_sql, [], |row| row.get(0))
+        }
+        .map_err(db_err("count unidentified metadata values"))?;
+
+        Ok(FilterValueOptions { values, unidentified_count })
+    }
+
     /// Session-first review data. This returns lightweight grid rows plus the
     /// existing similarity/burst memberships in one local SQLite transaction;
     /// pixel decoding remains on demand in the UI.
@@ -2459,6 +2515,20 @@ pub struct PhotoPage {
     pub total: i64,
 }
 
+/// One concrete local metadata value and its in-scope photograph count.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilterValueOption {
+    pub value: String,
+    pub count: i64,
+}
+
+/// Values offered by metadata-backed filter fields for the active shoot.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FilterValueOptions {
+    pub values: Vec<FilterValueOption>,
+    pub unidentified_count: i64,
+}
+
 /// One reusable similarity/burst decision unit for the session review UI.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ReviewSequence {
@@ -2649,6 +2719,47 @@ mod tests {
         db.set_selection(id, "needs_attention").unwrap();
         assert_eq!(db.list_selections(10).unwrap()[0].state, "needs_attention");
         assert!(db.set_selection(id, "unknown").is_err());
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn metadata_filter_values_are_scoped_and_include_unidentified() {
+        let dir = std::env::temp_dir().join(format!("pg_db_test_filter_values_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("test.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+        let first = db.upsert_session("First", Some("/first")).unwrap();
+        let second = db.upsert_session("Second", Some("/second")).unwrap();
+
+        for (name, session) in [("a.jpg", first), ("b.jpg", first), ("c.jpg", second)] {
+            db.upsert_photo(&PhotoUpsert {
+                path: dir.join(name).display().to_string(),
+                filename: name.to_string(),
+                extension: "jpg".to_string(),
+                size_bytes: Some(1),
+                width: Some(10),
+                height: Some(10),
+                orientation: None,
+                session_id: Some(session),
+                file_mtime: None,
+            }).unwrap();
+        }
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("UPDATE photos SET camera_make = 'Canon' WHERE filename = 'a.jpg'", []).unwrap();
+            conn.execute("UPDATE photos SET camera_make = 'Sony' WHERE filename = 'c.jpg'", []).unwrap();
+        }
+
+        let scoped = db.filter_value_options("camera_make", Some(first)).unwrap();
+        assert_eq!(scoped.values.len(), 1);
+        assert_eq!(scoped.values[0].value, "Canon");
+        assert_eq!(scoped.values[0].count, 1);
+        assert_eq!(scoped.unidentified_count, 1);
+        assert!(db.filter_value_options("filename", Some(first)).is_err());
 
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);

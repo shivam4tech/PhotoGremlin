@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { FilterCondition } from "@/types/api";
+import { api } from "@/lib/ipc";
+import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
   AREA_ORDER,
   FILTER_FIELDS,
@@ -13,6 +14,28 @@ interface FilterBarProps {
   draft: FilterCondition[];
   onChange: (conditions: FilterCondition[]) => void;
   disabled?: boolean;
+  /** Keep EXIF value suggestions relevant to the project/shoot on screen. */
+  sessionId?: number | null;
+}
+
+const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
+const UNIDENTIFIED = "__photogremlin_unidentified__";
+
+function CalendarInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const [input, setInput] = useState<HTMLInputElement | null>(null);
+  function openCalendar() {
+    try {
+      input?.showPicker();
+    } catch {
+      input?.focus();
+    }
+  }
+  return (
+    <span className="date-picker">
+      <input ref={setInput} className="input" type="date" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
+      <button className="date-picker-open" type="button" onClick={openCalendar} aria-label={`Open calendar for ${label}`} title="Open calendar">▣</button>
+    </span>
+  );
 }
 
 /**
@@ -21,7 +44,7 @@ interface FilterBarProps {
  * engine and (later) stored in saved views. Neutral technical language
  * throughout (FILTER_ENGINE.md).
  */
-export function FilterBar({ draft, onChange, disabled }: FilterBarProps) {
+export function FilterBar({ draft, onChange, disabled, sessionId = null }: FilterBarProps) {
   const [open, setOpen] = useState(draft.length > 0);
   const [field, setField] = useState(FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
@@ -29,6 +52,9 @@ export function FilterBar({ draft, onChange, disabled }: FilterBarProps) {
   const [op, setOp] = useState<FilterCondition["operator"]>(ops[0].op);
   const [raw, setRaw] = useState("");
   const [raw2, setRaw2] = useState("");
+  const [metadataOptions, setMetadataOptions] = useState<FilterValueOptions | null>(null);
+  const [metadataOptionsLoading, setMetadataOptionsLoading] = useState(false);
+  const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
 
   // Keep the operator valid when the field's kind changes.
   useEffect(() => {
@@ -36,10 +62,25 @@ export function FilterBar({ draft, onChange, disabled }: FilterBarProps) {
     if (!allowed.some((o) => o.op === op)) setOp(allowed[0].op);
   }, [field, op]);
 
+  useEffect(() => {
+    if (!hasMetadataOptions) {
+      setMetadataOptions(null);
+      return;
+    }
+    let cancelled = false;
+    setMetadataOptions(null);
+    setMetadataOptionsLoading(true);
+    api.filterValueOptions(field as "camera_make" | "camera_model" | "lens", sessionId)
+      .then((options) => { if (!cancelled) setMetadataOptions(options); })
+      .catch(() => { if (!cancelled) setMetadataOptions(null); })
+      .finally(() => { if (!cancelled) setMetadataOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [field, sessionId, hasMetadataOptions]);
+
   const needsTwoValues = op === "between" && def.kind !== "datetime";
   const needsValue = !["is-null", "not-null"].includes(op);
-  const candidate = needsValue
-    ? buildCondition(field, op, raw, raw2)
+  const candidate = raw === UNIDENTIFIED
+    ? { field, operator: "is-null" as const, value: null }
     : buildCondition(field, op, raw, raw2);
   const canAdd = candidate !== null;
 
@@ -77,6 +118,30 @@ export function FilterBar({ draft, onChange, disabled }: FilterBarProps) {
           </select>
         );
       case "text":
+        if (hasMetadataOptions) {
+          return (
+            <select
+              className="input"
+              value={raw}
+              onChange={(e) => {
+                const value = e.target.value;
+                setRaw(value);
+                if (value === UNIDENTIFIED) setOp("is-null");
+                else if (op === "is-null" || op === "not-null") setOp("=");
+              }}
+              disabled={metadataOptionsLoading}
+              aria-label={`${def.label} value`}
+            >
+              <option value="">{metadataOptionsLoading ? "Loading values…" : "— Select from this shoot —"}</option>
+              {metadataOptions?.values.map((option) => (
+                <option key={option.value} value={option.value}>{option.value} ({option.count.toLocaleString()})</option>
+              ))}
+              {(metadataOptions?.unidentified_count ?? 0) > 0 && (
+                <option value={UNIDENTIFIED}>Unidentified ({metadataOptions!.unidentified_count.toLocaleString()})</option>
+              )}
+            </select>
+          );
+        }
         if (def.values) {
           return (
             <select className="input" value={raw} onChange={(e) => setRaw(e.target.value)}>
@@ -102,31 +167,14 @@ export function FilterBar({ draft, onChange, disabled }: FilterBarProps) {
         if (op === "between") {
           return (
             <>
-              <input
-                className="input"
-                type="date"
-                aria-label="from date"
-                value={raw}
-                onChange={(e) => setRaw(e.target.value)}
-              />
+              <CalendarInput label="from date" value={raw} onChange={setRaw} />
               <span className="faint">→</span>
-              <input
-                className="input"
-                type="date"
-                aria-label="to date"
-                value={raw2}
-                onChange={(e) => setRaw2(e.target.value)}
-              />
+              <CalendarInput label="to date" value={raw2} onChange={setRaw2} />
             </>
           );
         }
         return (
-          <input
-            className="input"
-            type="date"
-            value={raw}
-            onChange={(e) => setRaw(e.target.value)}
-          />
+          <CalendarInput label="capture date" value={raw} onChange={setRaw} />
         );
       case "real":
       case "int":

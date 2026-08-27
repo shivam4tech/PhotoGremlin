@@ -101,6 +101,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `spawn_blocking`s the pass, returns immediately) / `stop_metadata`;
   `metadata-progress` + `metadata-complete` events carry the
   `MetadataSummary { processed, failed, cancelled, elapsed_ms, errors }`.
+  `pause_metadata` / `resume_metadata` use a condition-variable gate between
+  files, so pausing never interrupts an EXIF read or holds the SQLite lock;
+  stopping wakes a paused pass and cancels it. Progress events are throttled
+  to 10 Hz at the command boundary to keep a very large shoot from flooding
+  the WebView event queue.
   The auto-run: the UI fires `start_metadata` as soon as `scan-complete` has
   indexed new photos (the pass is a cheap no-op when nothing is new), and
   again ~1 s after app start, draining whatever backlog exists (re-reads of
@@ -116,6 +121,10 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   (injection-safe). `commands/filters.rs::list_filtered_photos` = parse →
   build → `Db::photos_where`. The grid, saved views, and statistics all share
    this one object.
+  `filter_value_options(field, sessionId)` is a separate fixed-allowlist
+  lookup for `camera_make`, `camera_model`, and `lens`: it returns local,
+  in-shoot distinct values and the number of unidentified files. It never
+  accepts a caller-provided SQL column and makes EXIF filters selectable.
 - `statistics/` (Sprint 6) — the statistics engine, a UI-independent service
   (see STATISTICS.md). One `Period` model (today / this-week (Monday-based) /
   this-month / this-year / custom / all) resolves against an injected `now`

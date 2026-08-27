@@ -7,6 +7,8 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use tauri::Emitter;
 use tauri::{AppHandle, State};
@@ -54,19 +56,39 @@ pub async fn start_metadata(
     // Arc clones: the task consumes its own; the originals stay for the
     // post-run slot ownership check (pointer comparison) and final emit.
     let cancel_task = cancel.clone();
+    let pause_task = job.pause.clone();
     let app_task = app.clone();
+    // Hundreds or thousands of per-file EXIF updates can otherwise queue in
+    // the webview faster than React can paint them. Keep the visible progress
+    // smooth (10 Hz) while the backend still processes every file.
+    let last_progress_emit = Arc::new(Mutex::new(None::<Instant>));
     // A second handle for the short post-run session-time refresh.
     let db_for_refresh = db.clone();
 
     tauri::async_runtime::spawn(async move {
         let result: AppResult<MetadataSummary> =
             match tauri::async_runtime::spawn_blocking(move || {
-                metadata::run_metadata(
+                metadata::run_metadata_controlled(
                     db,
                     Arc::new(move |p| {
-                        let _ = app_task.emit(events::METADATA_PROGRESS, &p);
+                        let should_emit = {
+                            let mut last = last_progress_emit
+                                .lock()
+                                .expect("metadata progress throttle poisoned");
+                            let is_boundary = p.done == 0 || p.done >= p.total;
+                            if is_boundary || last.map(|at| at.elapsed() >= Duration::from_millis(100)).unwrap_or(true) {
+                                *last = Some(Instant::now());
+                                true
+                            } else {
+                                false
+                            }
+                        };
+                        if should_emit {
+                            let _ = app_task.emit(events::METADATA_PROGRESS, &p);
+                        }
                     }),
                     cancel_task,
+                    pause_task,
                 )
             })
             .await
@@ -121,7 +143,43 @@ pub fn stop_metadata(state: State<'_, AppState>) -> AppResult<bool> {
     if let Some(job) = slot.as_ref() {
         if job.running.load(Ordering::Relaxed) {
             job.cancel.store(true, Ordering::Relaxed);
+            job.pause.resume();
             tracing::info!("metadata cancellation requested");
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Pause after the metadata reader completes its current file. The job keeps
+/// its slot, so a second read cannot start and contend for the same library.
+#[tauri::command]
+pub fn pause_metadata(state: State<'_, AppState>) -> AppResult<bool> {
+    let slot = state
+        .metadata
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    if let Some(job) = slot.as_ref() {
+        if job.running.load(Ordering::Relaxed) && !job.cancel.load(Ordering::Relaxed) {
+            job.pause.pause();
+            tracing::info!("metadata pause requested");
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Continue a paused metadata reader from its next queued file.
+#[tauri::command]
+pub fn resume_metadata(state: State<'_, AppState>) -> AppResult<bool> {
+    let slot = state
+        .metadata
+        .lock()
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    if let Some(job) = slot.as_ref() {
+        if job.running.load(Ordering::Relaxed) && !job.cancel.load(Ordering::Relaxed) {
+            job.pause.resume();
+            tracing::info!("metadata resume requested");
             return Ok(true);
         }
     }

@@ -140,12 +140,14 @@ export default function App() {
       const pending = s.dbStatus?.metadata_pending ?? 0;
       if (pending <= 0) return;
       s.setReadingMetadata(true);
+      s.setMetadataPaused(false);
       s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
       try {
         await api.startMetadata();
       } catch {
         const st = useAppStore.getState();
         st.setReadingMetadata(false);
+        st.setMetadataPaused(false);
         st.setProgress(null);
       }
     }, 1000);
@@ -176,6 +178,7 @@ export default function App() {
       const ucm = await onProgress<MetadataCompletePayload>("metadata-complete", (p) => {
         const s = state();
         s.setReadingMetadata(false);
+        s.setMetadataPaused(false);
         s.setProgress(null);
         if (p.summary) {
           s.setMetadataSummary(p.summary);
@@ -236,12 +239,14 @@ export default function App() {
         // camera metadata in the background (a no-op when nothing is new).
         if (p.summary && p.summary.indexed > 0) {
           s.setReadingMetadata(true);
+          s.setMetadataPaused(false);
           s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
           api
             .startMetadata()
             .catch(() => {
               const st = useAppStore.getState();
               st.setReadingMetadata(false);
+              st.setMetadataPaused(false);
               st.setProgress(null);
             });
           // …and, when the user turned local intelligence on, detect faces

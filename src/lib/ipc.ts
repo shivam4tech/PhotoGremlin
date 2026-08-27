@@ -11,6 +11,7 @@ import type {
   DbStatus,
   FileOpPlan,
   FileOpRow,
+  FilterValueOptions,
   PhotoFull,
   PhotoPage,
   PeriodStats,
@@ -68,6 +69,8 @@ export const api = {
   stopAnalysis: (): Promise<boolean> => invoke("stop_analysis"),
   startMetadata: (): Promise<void> => invoke("start_metadata"),
   stopMetadata: (): Promise<boolean> => invoke("stop_metadata"),
+  pauseMetadata: (): Promise<boolean> => invoke("pause_metadata"),
+  resumeMetadata: (): Promise<boolean> => invoke("resume_metadata"),
   listPhotos: (offset: number, limit: number): Promise<PhotoPage> =>
     invoke("list_photos", { offset, limit }),
   // `filterJson` is the exact structured-filter object ("" = no filter).
@@ -76,6 +79,8 @@ export const api = {
     offset: number,
     limit: number,
   ): Promise<PhotoPage> => invoke("list_filtered_photos", { filterJson, offset, limit }),
+  filterValueOptions: (field: "camera_make" | "camera_model" | "lens", sessionId: number | null): Promise<FilterValueOptions> =>
+    invoke("filter_value_options", { field, sessionId }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
     invoke("get_photo_full", { id }),
   getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>

@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use crate::database::Db;
 use crate::paths::AppPaths;
 use crate::thumbnailer::ThumbService;
+use crate::metadata::PauseControl;
 
 /// Live background job handle (scan, analysis). Commands use `running` as a
 /// claim and `cancel` as the cooperative stop flag checked between items by
@@ -13,6 +14,8 @@ use crate::thumbnailer::ThumbService;
 pub struct Job {
     pub running: Arc<std::sync::atomic::AtomicBool>,
     pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Metadata uses this gate between files; other jobs leave it idle.
+    pub pause: PauseControl,
 }
 
 impl Job {
@@ -20,6 +23,7 @@ impl Job {
         Self {
             running: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pause: PauseControl::new(),
         }
     }
 }

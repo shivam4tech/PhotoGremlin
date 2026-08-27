@@ -739,6 +739,31 @@ input[type="date"] {
   min-width: 130px;
 }
 
+.date-picker {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.date-picker .input {
+  min-width: 142px;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.date-picker-open {
+  min-width: 32px;
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.date-picker:focus-within .date-picker-open {
+  border-color: var(--border-focus);
+  color: var(--text);
+}
+
 .library-loading {
   flex: 1;
   display: flex;

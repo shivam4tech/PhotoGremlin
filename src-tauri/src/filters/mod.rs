@@ -111,9 +111,11 @@ const COLOR: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_monochrome", ne
 const DARK: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_dark", negate_bool: false };
 const BRIGHT: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_bright", negate_bool: false };
 const ORIENTATION: FieldDef = FieldDef { kind: Kind::Text, expr: "p.orientation", negate_bool: false };
-const CAMERA_MAKE: FieldDef = FieldDef { kind: Kind::Text, expr: "p.camera_make", negate_bool: false };
-const CAMERA_MODEL: FieldDef = FieldDef { kind: Kind::Text, expr: "p.camera_model", negate_bool: false };
-const LENS: FieldDef = FieldDef { kind: Kind::Text, expr: "p.lens", negate_bool: false };
+// Normal metadata writes already turn blank EXIF strings into NULL; `NULLIF`
+// also treats legacy/hand-edited blanks as unidentified for the picker.
+const CAMERA_MAKE: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.camera_make), '')", negate_bool: false };
+const CAMERA_MODEL: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.camera_model), '')", negate_bool: false };
+const LENS: FieldDef = FieldDef { kind: Kind::Text, expr: "NULLIF(TRIM(p.lens), '')", negate_bool: false };
 const ISO: FieldDef = FieldDef { kind: Kind::Int, expr: "p.iso", negate_bool: false };
 const APERTURE: FieldDef = FieldDef { kind: Kind::Real, expr: "p.aperture", negate_bool: false };
 const SHUTTER_SPEED: FieldDef = FieldDef { kind: Kind::Real, expr: "p.shutter_speed", negate_bool: false };
@@ -535,7 +537,7 @@ mod tests {
             "in",
             json!(["Gr-1", "Gr-33"]),
         )]);
-        assert_eq!(sql, "WHERE p.camera_model IN (?, ?)");
+        assert_eq!(sql, "WHERE NULLIF(TRIM(p.camera_model), '') IN (?, ?)");
         assert_eq!(
             params,
             vec![SqlParam::Text("Gr-1".into()), SqlParam::Text("Gr-33".into())]
@@ -558,7 +560,7 @@ mod tests {
     #[test]
     fn null_operators_need_no_value() {
         let (sql, params) = build_conds(vec![cond("lens", "is-null", json!(null))]);
-        assert_eq!(sql, "WHERE p.lens IS NULL");
+        assert_eq!(sql, "WHERE NULLIF(TRIM(p.lens), '') IS NULL");
         assert!(params.is_empty());
     }
 
