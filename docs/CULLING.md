@@ -1,8 +1,30 @@
-# Culling (Sprint 19–21 plan — Aftershoot-style scenario culling)
+# Culling and shoot review
 
-Status: **planned 2026-08-18, approved.** Research + frozen plan for the
-"select a scenario, get the best pictures ranked" workflow. Sprint 17–18
-(scene classification) ships first; this builds on it.
+Status: **Sprint 19 review workflow shipped.** The first V1 culling tool is a
+fast, local, photographer-led review flow — not an automatic aesthetic judge.
+For an indexed folder/session, **Review this shoot** builds capture-time order
+and reuses existing burst and similar-frame groups as decision context. Every
+photo appears once, even when similarity groups overlap; burst context wins an
+overlap because the nearby frames are usually the useful comparison.
+
+The reviewer offers three reversible local states:
+
+- `selected` — keep for the photographer's next step;
+- `rejected` — a deliberate non-destructive rejection; and
+- `needs_attention` — return later without pretending the image is wrong.
+
+No review decision moves, renames, exports, trashes, rates, or labels a file.
+The keyboard flow is `K` keep, `X` reject, `L` later, `Backspace` clear,
+`U` undo, and arrow keys (or `H`/`J`) to move between moments. A session's
+normal Library view now also has one-click `Unreviewed`, `Kept`, and `Needs
+attention` filters. `review_state is-null` is the stable unreviewed queue.
+
+## Deferred scoring research
+
+The following was explored as a future configurable assistance layer. It is
+not V1 behavior, and no score/bucket below is currently shown or written by
+the product. Any future implementation must retain the workflow above and
+explain measured signals without making an aesthetic verdict.
 
 ## What Aftershoot does (research summary)
 
@@ -84,14 +106,14 @@ CEW and RT-BENE are research-only (unusable commercially). Viable paths:
 - No aesthetic-judgment corpora (KonIQ/SPAQ etc.) — research licenses +
   violates "no verdicts".
 
-## Sprint map
+## Deferred sprint map
 
-- **19 — cull engine**: models (blur-type CNN, eye-state via A/B) + Rust core:
+- **Future cull engine**: models (blur-type CNN, eye-state via A/B) + Rust core:
   group → weighted score → rank → buckets → write ratings/labels (never
   delete). Genre profiles as config.
-- **20 — cull review UI**: genre picker, strictness sliders, survey mode,
+- **Future assisted review UI**: genre picker, strictness sliders, survey mode,
   side-by-side swap.
-- **21 (v2) — personalization**: tiny local model trained on the user's own
+- **Future (v2) personalization**: tiny local model trained on the user's own
   flags/ratings; no external corpus.
 
 ## Philosophy compliance

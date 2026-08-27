@@ -11,6 +11,7 @@ import { FilterBar } from "@/features/library/FilterBar";
 import { FileOpsPanel } from "@/features/fileops/FileOpsPanel";
 import { ExportSheetButton } from "@/features/library/ExportSheetButton";
 import { MarksPanel } from "@/features/library/MarksPanel";
+import { ReviewMode } from "@/features/review/ReviewMode";
 import { CoverThumb } from "@/features/similarity/CoverThumb";
 import { cleanName, groupLabel } from "@/features/organize/labels";
 import { draftToFilter } from "@/features/library/filterFields";
@@ -46,6 +47,7 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  const [reviewMode, setReviewMode] = useState(false);
 
   // Saving the current filter as a named view.
   const [saveViewOpen, setSaveViewOpen] = useState(false);
@@ -73,17 +75,19 @@ export function LibraryView() {
   }, [selectionMode, refreshKey]);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionPhotoCount, setSessionPhotoCount] = useState<number | null>(null);
+  const [sessionName, setSessionName] = useState("This shoot");
 
   // Resolve the current project's session so the grid shows only its photos.
   useEffect(() => {
-    if (!activeFolder) { setSessionId(null); setSessionPhotoCount(null); return; }
+    if (!activeFolder) { setSessionId(null); setSessionPhotoCount(null); setSessionName("This shoot"); return; }
     let cancelled = false;
     api.listSessions().then((rows) => {
       if (cancelled) return;
       const hit = rows.find((r) => r.root_path === activeFolder);
       setSessionId(hit ? hit.id : null);
       setSessionPhotoCount(hit ? hit.photo_count : null);
-    }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); } });
+      setSessionName(hit?.name ?? "This shoot");
+    }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); setSessionName("This shoot"); } });
     return () => { cancelled = true; };
   }, [activeFolder, scanSummary, dbStatus?.photo_count]);
 
@@ -330,6 +334,7 @@ export function LibraryView() {
   useEffect(() => {
     if (prevFolderRef.current !== activeFolder) {
       prevFolderRef.current = activeFolder;
+      setReviewMode(false);
       const vg = document.querySelector(".vg") as HTMLDivElement | null;
       if (vg) vg.scrollTop = 0;
     }
@@ -355,6 +360,10 @@ export function LibraryView() {
         </EmptyState>
       </>
     );
+  }
+
+  if (reviewMode && sessionId !== null) {
+    return <ReviewMode sessionId={sessionId} sessionName={sessionName} onClose={() => setReviewMode(false)} />;
   }
 
   return (
@@ -425,6 +434,16 @@ export function LibraryView() {
         >
           {selectionMode ? "Done culling" : "Cull"}
         </button>
+        {sessionId !== null && (
+          <button
+            className="btn btn-sm btn-primary"
+            onClick={() => setReviewMode(true)}
+            disabled={anyPassRunning || operating || findingSimilar || photos.total === 0}
+            title="Review this shoot in capture-time order, with burst and similar-frame context. No files are changed."
+          >
+            Review this shoot
+          </button>
+        )}
       </div>
 
       {group === null ? (
@@ -434,6 +453,15 @@ export function LibraryView() {
             onChange={(c) => store().setFilterConditions(c)}
             disabled={anyPassRunning}
           />
+
+          {sessionId !== null && (
+            <div className="review-presets" aria-label="Review views">
+              <span className="faint">Review views</span>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "is-null", value: null }])}>Unreviewed</button>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "selected" }])}>Kept</button>
+              <button className="btn btn-sm" onClick={() => store().setFilterConditions([{ field: "review_state", operator: "=", value: "needs_attention" }])}>Needs attention</button>
+            </div>
+          )}
 
           {filterConditions.length > 0 && (
             <div className="library-summaryline filter-saveline">

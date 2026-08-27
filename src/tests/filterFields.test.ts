@@ -39,6 +39,7 @@ describe("filter registry", () => {
     expectField("rating", "int", "Marking");
     expectField("flagged", "bool", "Marking");
     expectField("color_label", "text", "Marking");
+    expectField("review_state", "text", "Review");
   });
 
   it("exposes the right operators per kind", () => {

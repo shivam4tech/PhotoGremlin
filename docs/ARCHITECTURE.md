@@ -62,6 +62,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   capture-time-ordered photo rows together with existing local burst/similar
   group membership. It performs no pixel decode, score, or automatic choice;
   the review UI fetches thumbnails only for the decision currently in view.
+- `features/review/ReviewMode.tsx` — session-only, keyboard-first review
+  surface. `K`/`X`/`L` write a local selection state through the store and
+  advance through a burst/similar decision context; `U` restores the previous
+  state. The pure `reviewQueue.ts` resolves overlapping groups once and keeps
+  the capture order intact, so rendering stays predictable for large shoots.
 - `analysis/` (Sprint 4) — local image analysis. `metrics.rs` holds pure,
   Tauri/I-O-free math on an `RgbImage` (Rec.709 luma → one 256-bin histogram
   pass yields brightness/contrast/clipping/percentiles; per-pixel saturation;
