@@ -38,8 +38,10 @@ destructive (§51 of the product spec).
 
 ## Logs
 
-Logs contain diagnostics and file paths (local paths only), never pixel
-data, never photo contents, never coordinates.
+Logs contain diagnostics, local file paths, and bounded browser/Rust crash
+details (including a stack or backtrace when available). They never contain
+pixel data, photo contents, or coordinates. Crash reports are written beside
+the normal local logs as `photogremlin.crash.log`.
 
 ## Supply chain note
 

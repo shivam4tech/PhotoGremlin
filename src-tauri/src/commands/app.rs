@@ -65,6 +65,42 @@ pub fn db_status(state: State<AppState>) -> AppResult<DbStatus> {
     state.db.status()
 }
 
+/// Best-effort browser crash reporting. The payload is written only to the
+/// existing local tracing log; it is never transmitted or surfaced as a raw
+/// stack trace in the UI.
+#[tauri::command]
+pub fn log_client_error(source: String, message: String, stack: Option<String>) {
+    const MAX_LOG_FIELD: usize = 16_000;
+    let source = truncate_log_field(&source, MAX_LOG_FIELD);
+    let message = truncate_log_field(&message, MAX_LOG_FIELD);
+    let stack = stack
+        .as_deref()
+        .map(|value| truncate_log_field(value, MAX_LOG_FIELD));
+    tracing::error!(%source, %message, stack = ?stack, "unhandled frontend error");
+}
+
+fn truncate_log_field(value: &str, max_bytes: usize) -> String {
+    if value.len() <= max_bytes {
+        return value.to_string();
+    }
+    let mut end = max_bytes;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}… [truncated]", &value[..end])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_log_field;
+
+    #[test]
+    fn truncation_preserves_utf8_boundaries() {
+        assert_eq!(truncate_log_field("abcédef", 4), "abc… [truncated]");
+        assert_eq!(truncate_log_field("brief", 16), "brief");
+    }
+}
+
 /// Persist the active library folder (a scan root) and record it in recents.
 #[tauri::command]
 pub fn set_active_folder(state: State<AppState>, path: String) -> AppResult<()> {

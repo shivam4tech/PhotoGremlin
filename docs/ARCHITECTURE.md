@@ -371,6 +371,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 2. Command returns `Err(AppError)`.
 3. Tauri maps to `InvokeError` (string = friendly message).
 4. `ipc.ts` → `toErrorMessage` → UI error banner (never a stack trace).
+5. Browser `error` and `unhandledrejection` events are sent through the typed
+   `log_client_error` command, which records bounded message/stack details in
+   the local log only. A React error boundary keeps a failed view from blanking
+   the whole application shell.
+6. After local paths and tracing are ready, a Rust panic hook writes the panic
+   location and forced backtrace synchronously to
+   `photogremlin.crash.log`; the top-level unwind boundary then exits with a
+   non-zero status. The hook also runs in aborting release builds.
 
 ## Key decisions & why
 

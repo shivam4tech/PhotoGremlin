@@ -31,6 +31,9 @@ export const api = {
       "app_paths",
     ),
   dbStatus: (): Promise<DbStatus> => invoke("db_status"),
+  /** Records browser failures in the local application log. Best-effort only. */
+  logClientError: (source: string, message: string, stack: string | null): Promise<void> =>
+    invoke("log_client_error", { source, message, stack }),
   pickFolder: (): Promise<string | null> => invoke("pick_folder"),
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
