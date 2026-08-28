@@ -71,6 +71,20 @@ SQLite.
   (exports `PATH`, `PKG_CONFIG_PATH`, `LD_LIBRARY_PATH`, include paths).
 - Frontend toolchain: Node 22 + npm.
 
+## Agent resource guard (this machine)
+
+- `.codex/config.toml` compacts project sessions at 80,000 total tokens. Do
+  not raise or disable this guard on the 16 GB development workstation.
+- Broad searches and inventory commands must exclude ignored bulk paths:
+  `ml-corpus/`, `tools/train/.venv/`, `tools/train/runs/`, `src-tauri/target/`,
+  `node_modules/` and `dist/`. Inspect one only when the task directly concerns
+  it.
+- Keep shell/tool output targeted and capped at roughly 12,000 tokens. Do not
+  retain repeated full diffs, logs, screenshots or binary/image output in one
+  agent session.
+- Run test, Cargo and Tauri build stages sequentially. Do not overlap them
+  with corpus collection, training or another development server.
+
 ## Repository layout
 
 ```
