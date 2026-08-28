@@ -55,31 +55,36 @@ also offers `Unidentified (n)`, which writes the normal `is-null` condition
 the same filter wire format — no value is inferred, sent to a service, or
 embedded into SQL.
 
-### Quick measured controls (Sprints 22–23)
+### Quick measured controls (Sprints 22–23, revamped Sprint 25)
 
 The Library presents common numeric filters without requiring photographers
 to compose raw operators:
 
-- brightness: low `< 35`, mid-range `35–65`, high `> 65`;
-- sharpness: low `< 40`, mid-range `40–70`, high `> 70`;
-- contrast: low `< 35`, mid-range `35–65`, high `> 65`;
-- ISO and focal length: one compact threshold slider on familiar photographic
-  stops, paired with `Up to` (`<=`) and `From` (`>=`) direction buttons. The
-  slider applies immediately; it does not present a second handle or imply a
-  bounded range. Conditions remain ordinary filter wire values, so saved views
-  and the Rust engine need no special cases. Existing advanced `between`
-  conditions remain valid and are still editable through Advanced condition.
+- brightness, sharpness, and contrast use inclusive integer ranges from 0–100;
+- ISO and focal length use the existing increasing photographic stop lists;
+- leaving both handles at the full domain removes that field, moving only the
+  lower handle writes `>=`, moving only the upper handle writes `<=`, and
+  moving both writes `between`.
+
+The five controls are compact summary rows in the Library inspector. Selecting
+one row expands its dual-ended scrubber and closes the previously open row.
+Pointer drags update the local labels immediately and write the filter once on
+release; keyboard steps write immediately. This avoids issuing a stream of
+SQLite grid queries during a drag. The generic field/operator/value composer is
+available under the collapsed **More filters** disclosure.
 
 Every control reports locally recorded and missing counts from
-`numeric_filter_stats`. A measured band/threshold follows SQL NULL semantics
+`numeric_filter_stats`. A numeric range follows SQL NULL semantics
 and therefore excludes unmeasured photographs. `Unmeasured` (visual analysis)
-or `Not recorded` (EXIF thresholds) writes `is-null`; `Any` removes that field's
-quick/advanced conditions and includes both known and missing values. Missing
+or `Not recorded` (EXIF) writes `is-null`; `Reset to any` removes that field's
+quick/advanced condition and includes both known and missing values. Missing
 values are never guessed from filenames, pixels, or neighboring photographs.
-Sprint 23 presents these controls as five dense rows instead of nested cards:
-the three visual fields use compact segmented categories, while ISO and focal
-length use one slider each. A row-level clear button removes its condition and
-restores the `Any` behavior without adding a full action row.
+
+Saved views keep the ordinary filter wire format. Legacy strict `<`/`>` quick
+conditions and arbitrary advanced numeric conditions load without being
+rewritten. Moving a range handle converts that field to the scrubber's inclusive
+model. Conditions the scrubber cannot express remain visible and editable under
+**More filters**.
 
 Sprint 24 moves the complete filter surface into the Library's persistent
 right inspector. `FilterBar` inspector mode is always expanded there; active

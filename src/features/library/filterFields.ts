@@ -97,22 +97,19 @@ export interface OpDef {
   label: string;
 }
 
-export type VisualQuickField = "brightness" | "sharpness" | "contrast";
-export type VisualBandId = "low" | "mid" | "high";
+export type QuickRangeField =
+  | "brightness"
+  | "sharpness"
+  | "contrast"
+  | "iso"
+  | "focal_length";
 
-export interface VisualBandDefinition {
-  field: VisualQuickField;
-  label: string;
-  lowUpper: number;
-  highLower: number;
-}
-
-/** Product-level measured bands. They are deliberately explicit and stable:
- * changing a threshold changes saved-filter meaning and requires docs/tests. */
-export const VISUAL_BANDS: VisualBandDefinition[] = [
-  { field: "brightness", label: "Brightness", lowUpper: 35, highLower: 65 },
-  { field: "sharpness", label: "Sharpness", lowUpper: 40, highLower: 70 },
-  { field: "contrast", label: "Contrast", lowUpper: 35, highLower: 65 },
+export const QUICK_RANGE_FIELDS: readonly QuickRangeField[] = [
+  "brightness",
+  "sharpness",
+  "contrast",
+  "iso",
+  "focal_length",
 ];
 
 export const STANDARD_FILTER_STOPS = {
@@ -120,48 +117,64 @@ export const STANDARD_FILTER_STOPS = {
   focal_length: [8, 14, 16, 20, 24, 28, 35, 50, 70, 85, 105, 135, 200, 300, 400, 600, 800, 1200],
 } as const;
 
-export type ThresholdDirection = "up-to" | "from";
-
-export function standardThresholdCondition(
-  field: "iso" | "focal_length",
-  direction: ThresholdDirection,
-  value: number,
-): FilterCondition {
-  return { field, operator: direction === "up-to" ? "<=" : ">=", value };
+export interface QuickRangeBounds {
+  lower: number;
+  upper: number;
+  missingOnly: boolean;
+  editable: boolean;
 }
 
-export function activeStandardThreshold(
-  conditions: FilterCondition[],
-  field: "iso" | "focal_length",
-): { direction: ThresholdDirection; value: number } | null {
-  const condition = conditions.find((item) => item.field === field);
-  if (!condition || typeof condition.value !== "number") return null;
-  if (condition.operator === "<=") return { direction: "up-to", value: condition.value };
-  if (condition.operator === ">=") return { direction: "from", value: condition.value };
-  return null;
+/** Convert the inclusive range scrubber into the ordinary filter wire format. */
+export function quickRangeCondition(
+  field: QuickRangeField,
+  lower: number,
+  upper: number,
+  domainLower: number,
+  domainUpper: number,
+): FilterCondition | null {
+  const hasLower = lower > domainLower;
+  const hasUpper = upper < domainUpper;
+  if (!hasLower && !hasUpper) return null;
+  if (hasLower && hasUpper) return { field, operator: "between", value: [lower, upper] };
+  if (hasLower) return { field, operator: ">=", value: lower };
+  return { field, operator: "<=", value: upper };
 }
 
-export function visualBandCondition(field: VisualQuickField, band: VisualBandId): FilterCondition {
-  const definition = VISUAL_BANDS.find((item) => item.field === field)!;
-  if (band === "low") return { field, operator: "<", value: definition.lowUpper };
-  if (band === "high") return { field, operator: ">", value: definition.highLower };
-  return { field, operator: "between", value: [definition.lowUpper, definition.highLower] };
-}
-
-export function activeVisualBand(
-  conditions: FilterCondition[],
-  field: VisualQuickField,
-): VisualBandId | "unmeasured" | null {
-  const condition = conditions.find((item) => item.field === field);
-  if (!condition) return null;
-  if (condition.operator === "is-null") return "unmeasured";
-  for (const band of ["low", "mid", "high"] as const) {
-    const expected = visualBandCondition(field, band);
-    if (condition.operator === expected.operator && JSON.stringify(condition.value) === JSON.stringify(expected.value)) {
-      return band;
-    }
+/** Read both new range filters and legacy strict quick-filter conditions.
+ * Strictness is preserved in the condition itself until the photographer
+ * moves a handle, at which point the scrubber emits its inclusive model. */
+export function quickRangeBounds(
+  condition: FilterCondition | undefined,
+  domainLower: number,
+  domainUpper: number,
+): QuickRangeBounds {
+  const full = { lower: domainLower, upper: domainUpper, missingOnly: false, editable: true };
+  if (!condition) return full;
+  if (condition.operator === "is-null") return { ...full, missingOnly: true };
+  if (condition.operator === "not-null") return { ...full, editable: false };
+  if (condition.operator === "=" && typeof condition.value === "number") {
+    return { lower: condition.value, upper: condition.value, missingOnly: false, editable: true };
   }
-  return null;
+  if ([">", ">="].includes(condition.operator) && typeof condition.value === "number") {
+    return { ...full, lower: condition.value };
+  }
+  if (["<", "<="].includes(condition.operator) && typeof condition.value === "number") {
+    return { ...full, upper: condition.value };
+  }
+  if (
+    condition.operator === "between"
+    && Array.isArray(condition.value)
+    && condition.value.length === 2
+    && condition.value.every((value) => typeof value === "number")
+  ) {
+    return {
+      lower: condition.value[0] as number,
+      upper: condition.value[1] as number,
+      missingOnly: false,
+      editable: true,
+    };
+  }
+  return { ...full, editable: false };
 }
 
 /** A quick control owns its field. Replacing it removes advanced conditions
@@ -360,12 +373,6 @@ export function buildCondition(
 export function chipLabel(c: FilterCondition): string {
   const def = FIELD_BY_NAME[c.field];
   const label = def ? def.label : c.field;
-  if (["brightness", "sharpness", "contrast"].includes(c.field)) {
-    const band = activeVisualBand([c], c.field as VisualQuickField);
-    if (band === "low" || band === "mid" || band === "high") {
-      return `${label.toLowerCase()}: ${band === "mid" ? "mid-range" : band} measured range`;
-    }
-  }
   if (c.operator === "is-null") return `${label.toLowerCase()}: not recorded`;
   if (c.operator === "not-null") return `${label.toLowerCase()}: recorded`;
   if (c.operator === "in") {
