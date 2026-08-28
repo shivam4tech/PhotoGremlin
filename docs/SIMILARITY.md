@@ -106,10 +106,12 @@ helpers retained for old test coverage, not the active UI workflow.
 - **Commands** — `src-tauri/src/commands/similarity.rs`:
   `start_similarity` (background), `stop_similarity`, `list_similarity_groups`,
   `group_photos`.
-- **Frontend** — `src/features/similarity/CoverThumb.tsx` + the "Similar
-  groups" panel in LibraryView (cards with cover strips; click a card to open
-  the group's photographs in the same grid/viewer path). The language is kept
-  factual there.
+- **Frontend** — the dedicated Groups workspace uses
+  `src/features/similarity/CoverThumb.tsx` for cover strips and the existing
+  paged `group_photos` command for its virtual grid/viewer path. All/Similar/
+  Burst/Face appearance tabs keep matches reachable without placing completed
+  group cards above the main Library photographs. Face wording explicitly
+  describes local appearance matching rather than identity.
 
 ## Incremental re-hash rule
 

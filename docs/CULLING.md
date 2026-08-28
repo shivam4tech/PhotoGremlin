@@ -19,6 +19,22 @@ The keyboard flow is `K` keep, `X` reject, `L` later, `Backspace` clear,
 normal Library view now also has one-click `Unreviewed`, `Kept`, and `Needs
 attention` filters. `review_state is-null` is the stable unreviewed queue.
 
+## Cull workspace (Sprint 26)
+
+The filterable grid is the bulk workspace. It begins with photographs rather
+than completed-operation reports or group cards. A single compact tray shows
+kept/rejected/later counts and exposes cumulative bulk ratings, Collection
+membership, exports and preview-first file actions. Contact sheets are an
+export format (printable PNG reference pages), not a Collection or original
+file handoff.
+
+Rating/flag/label writes increment a shared `marksVersion`. Library queries,
+Collection and Group grids and the open viewer refresh from that version, so
+every photo surface reflects a successful mark mutation without reopening the
+view. Similar, burst and local face-appearance cards live in the dedicated
+Groups workspace; removing them from above the Library grid does not make the
+grouping result unreachable.
+
 ## Deferred scoring research
 
 The following was explored as a future configurable assistance layer. It is

@@ -49,6 +49,8 @@ interface AppState {
   recentOps: FileOpRow[];
   /// Bumped whenever files on disk change via operations, so the grid refetches.
   libraryVersion: number;
+  /** Bumped after a successful rating, flag, or label mutation. */
+  marksVersion: number;
   scanSummary: ScanSummary | null;
   analysisSummary: AnalysisSummary | null;
   metadataSummary: MetadataSummary | null;
@@ -112,6 +114,12 @@ interface AppState {
   setMetadataSummary: (s: MetadataSummary | null) => void;
   setSelectionMode: (b: boolean) => void;
   bumpLibraryVersion: () => void;
+  updateMarks: (
+    photoIds: number[],
+    rating: number | null,
+    flag: boolean | null,
+    color: string | null,
+  ) => Promise<number>;
   setNotice: (n: string | null) => void;
   setError: (e: string | null) => void;
 
@@ -185,6 +193,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   recentProjects: [],
   dashboardLayout: null,
   libraryVersion: 0,
+  marksVersion: 0,
   selections: {},
   selectionMode: false,
   scanSummary: null,
@@ -233,6 +242,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setRecentOps: (recentOps) => set({ recentOps }),
   setSelectionMode: (selectionMode) => set({ selectionMode }),
   bumpLibraryVersion: () => set((s) => ({ libraryVersion: s.libraryVersion + 1 })),
+  updateMarks: async (photoIds, rating, flag, color) => {
+    const updated = await api.updateMarks(photoIds, rating, flag, color);
+    set((state) => ({ marksVersion: state.marksVersion + 1 }));
+    return updated;
+  },
   setProgress: (progress) => set({ progress }),
   setScanSummary: (scanSummary) => set({ scanSummary }),
   setAnalysisSummary: (analysisSummary) => set({ analysisSummary }),
@@ -395,7 +409,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   loadSimilarityGroups: async () => {
     try {
-      set({ similarityGroups: await api.listSimilarityGroups(50) });
+      set({ similarityGroups: await api.listSimilarityGroups(500) });
     } catch {
       // Non-critical.
     }
@@ -446,6 +460,10 @@ export const VIEW_META: Record<ViewId, { label: string; description: string }> =
     collections: {
       label: "Collections",
       description: "Manually curated sets of your photographs.",
+    },
+    groups: {
+      label: "Groups",
+      description: "Review similar frames, bursts and local face-appearance matches.",
     },
     "saved-views": {
       label: "Saved Views",

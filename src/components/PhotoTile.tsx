@@ -39,6 +39,7 @@ export function PhotoTile({
   onKeep,
   onReject,
   onClear,
+  marksMode = "contextual",
 }: {
   photo: PhotoSummary;
   onOpen: (id: number) => void;
@@ -49,6 +50,7 @@ export function PhotoTile({
   onKeep?: (id: number) => void;
   onReject?: (id: number) => void;
   onClear?: (id: number) => void;
+  marksMode?: "contextual" | "always";
 }) {
   const [state, setState] = useState<TileState>({ kind: "loading" });
 
@@ -81,7 +83,7 @@ export function PhotoTile({
     (selection === "rejected" ? " tile-rejected" : "");
 
   return (
-    <div className={tileClass}>
+    <div className={`${tileClass} tile-marks-${marksMode}`}>
       <button
         className="tile-open"
         onClick={() => {

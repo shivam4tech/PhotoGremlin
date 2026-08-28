@@ -9,6 +9,7 @@ export type ViewId =
   | "dashboard"
   | "sessions"
   | "collections"
+  | "groups"
   | "saved-views"
   | "settings";
 

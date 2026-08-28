@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { MARK_COLORS } from "@/features/library/marks";
+import { useAppStore } from "@/stores/appStore";
 import type { PhotoFull, PhotoSummary } from "@/types/api";
 
 type ImageState =
@@ -83,13 +84,14 @@ export function Viewer({
   const [full, setFull] = useState<PhotoFull | null>(null);
   const [image, setImage] = useState<ImageState>({ kind: "loading" });
   const [metaError, setMetaError] = useState<string | null>(null);
+  const updateMarks = useAppStore((state) => state.updateMarks);
 
   // Apply a mark change (Sprint 13): only the given fields change; then
   // refresh the panel so the UI reflects the new row.
   const applyMark = (rating: number | null, flag: boolean | null, color: string | null) => {
-    void api.updateMarks([photoId], rating, flag, color).then(() => {
+    void updateMarks([photoId], rating, flag, color).then(() => {
       api.getPhotoFull(photoId).then(setFull).catch(() => {});
-    });
+    }).catch((error) => setMetaError(toErrorMessage(error)));
   };
 
   useEffect(() => {

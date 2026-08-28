@@ -57,6 +57,29 @@ vertical scroll; it must never make the virtual grid measure its contents.
 This is a structural convention, not an Adobe visual clone: PhotoGremlin keeps
 its own tokens, green accent, language, and local-first controls.
 
+### Photo-first culling (Sprint 26)
+
+- Completed scan, metadata, analysis and grouping statistics belong in the
+  developer console and local logs, not above the photographs. Running work
+  and actionable failures remain visible; successful passes use short notices.
+- Cull uses one compact action tray. Bulk marks, Collections, export and file
+  actions do not become separate full-width panels; detailed file operations
+  open only when requested and retain preview-first safety.
+- Normal Library tiles reveal marks on hover, focus or selection. Cull and
+  Collections keep marks visible because they are active decision surfaces.
+- Rating stars are cumulative: a rating of four illuminates stars one through
+  four. The inspector rating control is a minimum threshold (`1+` through
+  `5+`), plus Any and Unrated.
+- Brightness, sharpness, contrast, ISO and focal length are always-visible
+  dual-range controls in the scrollable inspector. Tracks stay neutral and the
+  accent marks only the selected interval; there are no quality colors,
+  gradients or low/medium/high verdicts.
+- Those five ranges are not offered again by the advanced composer. Legacy
+  saved conditions remain visible and removable without silent rewriting.
+- Similar, burst and local face-appearance results live in Groups, not above
+  the Library grid. Group cards use neutral factual descriptions and open into
+  the same virtual photo grid and viewer used by other photo surfaces.
+
 ## 3. Typography
 
 - Headings and stat labels may set `text-wrap: balance`; body text

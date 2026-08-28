@@ -13,8 +13,17 @@ import {
   toggleExactFieldCondition,
   STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
+import { ADVANCED_FILTER_FIELDS } from "@/features/library/FilterBar";
 
 describe("filter registry", () => {
+  it("keeps measured quick ranges out of the advanced composer", () => {
+    const advanced = new Set(ADVANCED_FILTER_FIELDS.map((field) => field.field));
+    for (const field of ["brightness", "sharpness", "contrast", "iso", "focal_length"]) {
+      expect(advanced.has(field)).toBe(false);
+    }
+    expect(advanced.has("rating")).toBe(true);
+    expect(advanced.has("camera_model")).toBe(true);
+  });
   it("mirrors the Rust field registry (names + kinds)", () => {
     const expectField = (field: string, kind: string, area: string) => {
       const def = FIELD_BY_NAME[field];

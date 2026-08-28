@@ -8,19 +8,11 @@ import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
-import { FileOpsPanel } from "@/features/fileops/FileOpsPanel";
-import { ExportSheetButton } from "@/features/library/ExportSheetButton";
-import { MarksPanel } from "@/features/library/MarksPanel";
+import { CullActionTray } from "@/features/library/CullActionTray";
 import { ReviewMode } from "@/features/review/ReviewMode";
-import { CoverThumb } from "@/features/similarity/CoverThumb";
-import { cleanName, groupLabel } from "@/features/organize/labels";
+import { cleanName } from "@/features/organize/labels";
 import { draftToFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
-import type { PhotoSummary, SimilarityGroup } from "@/types/api";
-
-const GROUPS_PAGE = 12;
-/** A group grid loads up to this many photos at once (groups are small). */
-const GROUP_PAGE = 500;
 
 export function LibraryView() {
   const activeFolder = useAppStore((s) => s.activeFolder);
@@ -29,10 +21,8 @@ export function LibraryView() {
   const progress = useAppStore((s) => s.progress);
   const scanSummary = useAppStore((s) => s.scanSummary);
   const analyzing = useAppStore((s) => s.analyzing);
-  const analysisSummary = useAppStore((s) => s.analysisSummary);
   const readingMetadata = useAppStore((s) => s.readingMetadata);
   const metadataPaused = useAppStore((s) => s.metadataPaused);
-  const metadataSummary = useAppStore((s) => s.metadataSummary);
   const operating = useAppStore((s) => s.operating);
   const selections = useAppStore((s) => s.selections);
   const selectionMode = useAppStore((s) => s.selectionMode);
@@ -41,8 +31,7 @@ export function LibraryView() {
   const collections = useAppStore((s) => s.collections);
   const findingSimilar = useAppStore((s) => s.findingSimilar);
   const similarityProgress = useAppStore((s) => s.similarityProgress);
-  const similaritySummary = useAppStore((s) => s.similaritySummary);
-  const similarityGroups = useAppStore((s) => s.similarityGroups);
+  const marksVersion = useAppStore((s) => s.marksVersion);
   const store = useAppStore.getState;
 
   const [error, setError] = useState<string | null>(null);
@@ -54,20 +43,12 @@ export function LibraryView() {
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [viewName, setViewName] = useState("");
 
-  // Similar groups: the currently opened group (null = normal library grid).
-  const [group, setGroup] = useState<SimilarityGroup | null>(null);
-  const [groupPhotos, setGroupPhotos] = useState<PhotoSummary[]>([]);
-  const [groupLoading, setGroupLoading] = useState(false);
-  const [groupTab, setGroupTab] = useState<"all" | "similar" | "face" | "burst">("all");
-  const [groupsVisible, setGroupsVisible] = useState(GROUPS_PAGE);
-  useEffect(() => { setGroupsVisible(GROUPS_PAGE); }, [similarityGroups, groupTab]);
-
   // Re-fetch the index when a scan completes, a file operation changed the
   // files on disk, or the folder changed. Include activeFolder so switching
   // projects immediately shows the new project's photos.
   const refreshKey = useMemo(
-    () => `${activeFolder ?? "none"}:${scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"}:${libraryVersion}`,
-    [activeFolder, scanSummary, libraryVersion],
+    () => `${activeFolder ?? "none"}:${scanSummary && scanSummary.session_name ? scanSummary.session_name : "none"}:${libraryVersion}:${marksVersion}`,
+    [activeFolder, scanSummary, libraryVersion, marksVersion],
   );
 
   // Load persisted culling state once per library so tiles render their marks.
@@ -109,7 +90,7 @@ export function LibraryView() {
     return JSON.stringify({ ...obj, conditions: [...obj.conditions, sessionCond] });
   }, [filterConditions, sessionId, activeFolder]);
   const photos = useFilteredPhotos(
-    libraryHasPhotos && group === null,
+    libraryHasPhotos,
     filterJson,
     refreshKey,
   );
@@ -118,8 +99,7 @@ export function LibraryView() {
   // Group view is handled separately (its own count in the statusbar).
   const setCurrentViewCount = useAppStore((s) => s.setCurrentViewCount);
   useEffect(() => {
-    if (!activeFolder || group !== null) {
-      // Group view owns the statusbar; TopBar falls back to global.
+    if (!activeFolder) {
       setCurrentViewCount(null, null);
       return;
     }
@@ -128,15 +108,7 @@ export function LibraryView() {
     // to filtered total so the badge never shows 0 while loading).
     setCurrentViewCount(photos.total, sessionPhotoCount ?? photos.total);
     return () => { setCurrentViewCount(null, null); };
-  }, [activeFolder, group, photos.total, sessionPhotoCount, setCurrentViewCount]);
-
-  // Load the similarity group set once when it isn't known yet (so returning
-  // to the Library shows the cards without re-running the pass).
-  useEffect(() => {
-    if (libraryHasPhotos && similarityGroups === null) {
-      void store().loadSimilarityGroups();
-    }
-  }, [libraryHasPhotos, similarityGroups]);
+  }, [activeFolder, photos.total, sessionPhotoCount, setCurrentViewCount]);
 
   const anyPassRunning = scanning || analyzing || readingMetadata;
   const metadataPending = dbStatus?.metadata_pending ?? 0;
@@ -295,23 +267,7 @@ export function LibraryView() {
     }
   }
 
-  async function openGroup(g: SimilarityGroup) {
-    setGroup(g);
-    setViewerId(null);
-    setGroupLoading(true);
-    setError(null);
-    try {
-      const res = await api.groupPhotos(g.id, 0, GROUP_PAGE);
-      setGroupPhotos(res.photos);
-    } catch (e) {
-      setError(toErrorMessage(e));
-      setGroupPhotos([]);
-    } finally {
-      setGroupLoading(false);
-    }
-  }
-
-  const hasPhotos = group !== null ? groupPhotos.length > 0 : photos.total > 0;
+  const hasPhotos = photos.total > 0;
 
   // Culling: ids marked "selected" drive the file-operations panel.
   const selectedIds = useMemo(
@@ -322,7 +278,11 @@ export function LibraryView() {
     () => Object.values(selections).filter((s) => s === "rejected").length,
     [selections],
   );
-  const pagePhotos = group !== null ? groupPhotos : photos.photos;
+  const laterCount = useMemo(
+    () => Object.values(selections).filter((s) => s === "needs_attention").length,
+    [selections],
+  );
+  const pagePhotos = photos.photos;
   const pageIds = useMemo(() => pagePhotos.map((p) => p.id), [pagePhotos]);
 
   async function addToCollection(collectionId: number) {
@@ -488,22 +448,6 @@ export function LibraryView() {
 
       <div className="library-workspace">
         <section className="library-stage" aria-label="Photograph workspace">
-          {group !== null && (
-            <div className="library-summaryline groupbackbar">
-              <button className="btn btn-sm" onClick={() => { setGroup(null); setViewerId(null); }}>
-                ← Back to library
-              </button>
-              <span style={{ fontWeight: 600 }}>{groupLabel(group.group_type, group.photo_count)}</span>
-              <span className="faint" style={{ fontSize: 12 }}>
-                {group.group_type === "burst"
-                  ? "photographs captured within seconds of each other"
-                  : group.group_type === "face"
-                    ? "photographs with similar locally measured face appearance"
-                    : "photographs with near-identical structure"}
-              </span>
-            </div>
-          )}
-
       {scanning && progress && (
         <div className="library-scanline">
           <ProgressBar
@@ -520,27 +464,6 @@ export function LibraryView() {
               {progress.current}
             </div>
           )}
-        </div>
-      )}
-
-      {scanSummary && !scanning && (
-        <div className="library-summaryline mono">
-          Last scan “{scanSummary.session_name}”: {scanSummary.indexed.toLocaleString()} indexed · {scanSummary.ignored.toLocaleString()} ignored
-          {scanSummary.cancelled ? " (stopped)" : ""} · {(scanSummary.elapsed_ms / 1000).toFixed(1)}s
-          {scanSummary.errors.length > 0 && (
-            <span style={{ color: "var(--warning)" }}> · {scanSummary.errors.length} error{scanSummary.errors.length > 1 ? "s" : ""} in log</span>
-          )}
-        </div>
-      )}
-
-      {analysisSummary && !analyzing && (
-        <div className="library-summaryline mono">
-          Last analysis: {analysisSummary.analyzed.toLocaleString()} measured
-          {analysisSummary.failed > 0 && (
-            <span style={{ color: "var(--warning)" }}> · {analysisSummary.failed.toLocaleString()} failed</span>
-          )}
-          · {(analysisSummary.elapsed_ms / 1000).toFixed(1)}s
-          {analysisSummary.cancelled ? " (stopped)" : ""}
         </div>
       )}
 
@@ -582,19 +505,6 @@ export function LibraryView() {
         </div>
       )}
 
-      {metadataSummary && !readingMetadata ? (
-        <div className="library-summaryline mono">
-          Last metadata read: {metadataSummary.processed.toLocaleString()} photographs
-          {metadataSummary.failed > 0 && (
-            <span style={{ color: "var(--warning)" }}>
-              {" "}· {metadataSummary.failed.toLocaleString()} unreadable
-            </span>
-          )}
-          {" "}· {(metadataSummary.elapsed_ms / 1000).toFixed(1)}s
-          {metadataSummary.cancelled ? " (stopped)" : ""}
-        </div>
-      ) : null}
-
       {findingSimilar && similarityProgress && (
         <div className="library-scanline">
           <ProgressBar
@@ -614,152 +524,21 @@ export function LibraryView() {
         </div>
       )}
 
-      {!findingSimilar && similaritySummary && group === null && (
-        <div className="library-summaryline mono">
-          Similarity: {similaritySummary.similar_groups.toLocaleString()} similar group{similaritySummary.similar_groups === 1 ? "" : "s"} ·{" "}
-          {similaritySummary.face_groups > 0 && <>{similaritySummary.face_groups.toLocaleString()} face-appearance group{similaritySummary.face_groups === 1 ? "" : "s"} ·{" "}</>}
-          {similaritySummary.burst_groups.toLocaleString()} burst{similaritySummary.burst_groups === 1 ? "" : "s"}
-          {similaritySummary.hashed > 0 ? ` · ${similaritySummary.hashed.toLocaleString()} hashed in this run` : ""}
-          {similaritySummary.failed > 0 && (
-            <span style={{ color: "var(--warning)" }}> · {similaritySummary.failed.toLocaleString()} unreadable</span>
-          )}
-          {" "}· {(similaritySummary.elapsed_ms / 1000).toFixed(1)}s
-          {similaritySummary.cancelled ? " (stopped)" : ""}
-        </div>
-      )}
-
-      {group === null && !findingSimilar && (similarityGroups?.length ?? 0) > 0 && (() => {
-        const similarOnly = similarityGroups!.filter((g) => g.group_type === "similar");
-        const faceOnly = similarityGroups!.filter((g) => g.group_type === "face");
-        const burstOnly = similarityGroups!.filter((g) => g.group_type === "burst");
-        const filtered = groupTab === "similar" ? similarOnly : groupTab === "face" ? faceOnly : groupTab === "burst" ? burstOnly : similarityGroups!;
-        const visible = filtered.slice(0, groupsVisible);
-        return (
-        <div className="similars">
-          <div className="similars-head">
-            <span style={{ fontWeight: 600 }}>
-              {groupTab === "all" ? `Groups — ${similarOnly.length} similar · ${faceOnly.length} face appearance · ${burstOnly.length} bursts` :
-               groupTab === "similar" ? `Similar — ${similarOnly.length} groups` :
-               groupTab === "face" ? `Face appearance — ${faceOnly.length} groups` :
-               `Bursts — ${burstOnly.length} groups`}
-            </span>
-            <span className="faint" style={{ fontSize: 12 }}>
-              {groupTab === "burst"
-                ? "Runs captured within seconds — time, not look"
-                : groupTab === "similar"
-                ? "Near-identical structure (same moment, tight threshold)"
-                : groupTab === "face"
-                ? "Repeat face appearance candidates from optional local face detection — review, not identity labels"
-                : "Near-duplicates, face-appearance candidates and same-moment runs, found on this machine"}
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 6, margin: "8px 0" }}>
-            {(["all", "similar", "face", "burst"] as const).map((t) => (
-              <button key={t} className={`btn btn-sm${groupTab === t ? " btn-primary" : ""}`} onClick={() => setGroupTab(t)}>
-                {t === "all" ? "All" : t === "similar" ? `Similar (${similarOnly.length})` : t === "face" ? `Faces (${faceOnly.length})` : `Bursts (${burstOnly.length})`}
-              </button>
-            ))}
-          </div>
-          <div className="similars-cards">
-            {visible.map((g) => (
-              <button
-                key={g.id}
-                className="group-card"
-                onClick={() => void openGroup(g)}
-                title={
-                  g.group_type === "burst"
-                    ? "A run of photographs captured within seconds of each other."
-                    : g.group_type === "face"
-                    ? "Candidate photographs with similar locally measured face appearance. This is not an identity label."
-                    : "Photographs with near-identical structure (likely the same moment)."
-                }
-              >
-                <span className="group-label">
-                  {groupLabel(g.group_type, g.photo_count)}
-                  {g.session_count >= 2 && (
-                    <span className="chip" title={`Matches across ${g.session_count} imported sessions/shoots`}>
-                      {g.session_count} sessions
-                    </span>
-                  )}
-                </span>
-                <span className="cover-strip">
-                  {g.cover_photos.slice(0, 3).map((id) => (
-                    <CoverThumb key={id} photoId={id} alt={`${g.group_type} group cover`} />
-                  ))}
-                  {g.photo_count > g.cover_photos.length && (
-                    <span className="cover-more">+{g.photo_count - g.cover_photos.length}</span>
-                  )}
-                </span>
-              </button>
-            ))}
-            {filtered.length > groupsVisible && (
-              <button className="btn btn-sm" onClick={() => setGroupsVisible((v) => v + GROUPS_PAGE)}>
-                Load {Math.min(GROUPS_PAGE, filtered.length - groupsVisible)} more — {filtered.length - groupsVisible} remaining
-              </button>
-            )}
-          </div>
-        </div>
-        ); })()}
-
       {selectionMode && hasPhotos && (
-        <div className="cullbar">
-          <span className="faint" style={{ fontSize: 12 }}>
-            Cull helpers — filters are the science; selection is the decision.
-          </span>
-          <button
-            className="btn btn-sm"
-            onClick={() => store().setFilterConditions([...filterConditions, { field: "sharpness", operator: ">=", value: 60 }])}
-            title="Show sharp photographs (measured sharpness ≥ 60)"
-          >
-            Sharp
-          </button>
-          <button
-            className="btn btn-sm"
-            onClick={() => store().setFilterConditions([...filterConditions, { field: "scene_group", operator: "=", value: "nature" }])}
-            title="Filter by the trained scene tag"
-          >
-            Nature
-          </button>
-          <span>
-            {selectedIds.length.toLocaleString()} keep{selectedIds.length === 1 ? "" : "s"} · {rejectedCount.toLocaleString()} reject{rejectedCount === 1 ? "" : "ed"}
-          </span>
-          {selectedIds.length > 0 && (collections?.length ?? 0) > 0 && (
-            <AddToCollection collections={collections!} onAdd={addToCollection} />
-          )}
-          <span className="spacer" />
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => store().setSelectionsBulk(pageIds, "selected")}
-            disabled={operating || pageIds.length === 0}
-            title="Mark every photograph on this page to keep"
-          >
-            Keep all shown
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => store().setSelectionsBulk(pageIds, null)}
-            disabled={operating || pageIds.length === 0}
-          >
-            Clear shown
-          </button>
-        </div>
+        <CullActionTray
+          selectedIds={selectedIds}
+          rejectedCount={rejectedCount}
+          laterCount={laterCount}
+          shownCount={pageIds.length}
+          operating={operating}
+          collections={collections ?? []}
+          onAddToCollection={addToCollection}
+          onKeepAllShown={() => store().setSelectionsBulk(pageIds, "selected")}
+          onClearShown={() => store().setSelectionsBulk(pageIds, null)}
+        />
       )}
 
-      {selectionMode && selectedIds.length > 0 && (
-        <MarksPanel photoIds={selectedIds} onApplied={() => photos.reload()} />
-      )}
-
-      {selectionMode && selectedIds.length > 0 && (
-        <div className="cullbar">
-          <ExportSheetButton photoIds={selectedIds} />
-        </div>
-      )}
-
-      {selectionMode && selectedIds.length > 0 && (
-        <FileOpsPanel photoIds={selectedIds} />
-      )}
-
-      <ErrorBanner message={error ?? (group === null ? photos.error : null)} />
+      <ErrorBanner message={error ?? photos.error} />
 
       {!libraryHasPhotos ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -782,7 +561,7 @@ export function LibraryView() {
             )}
           </EmptyState>
         </div>
-      ) : !hasPhotos && group === null && filterConditions.length > 0 ? (
+      ) : !hasPhotos && filterConditions.length > 0 ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <EmptyState glyph="◫" title="No photographs match these filters">
             <p>
@@ -794,22 +573,15 @@ export function LibraryView() {
             </button>
           </EmptyState>
         </div>
-      ) : !hasPhotos && group !== null && !groupLoading ? (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <EmptyState glyph="◫" title="This group is empty">
-            <p>Its photographs may have been trashed or moved. Go back and re-run the pass.</p>
-            <button className="btn btn-sm" onClick={() => setGroup(null)}>Back to library</button>
-          </EmptyState>
-        </div>
       ) : (
         <>
-          {photos.loading && photos.photos.length === 0 && group === null ? (
+          {photos.loading && photos.photos.length === 0 ? (
             <div className="library-loading">Loading library…</div>
           ) : (
             <div className="library-grid-area">
               <VirtualGrid
                 itemCount={pagePhotos.length}
-                onReachEnd={() => { if (group === null && photos.hasMore && !photos.loading) photos.loadMore(); }}
+                onReachEnd={() => { if (photos.hasMore && !photos.loading) photos.loadMore(); }}
                 render={(i) => (
                   <PhotoTile
                     photo={pagePhotos[i]}
@@ -819,6 +591,7 @@ export function LibraryView() {
                     onKeep={keep}
                     onReject={reject}
                     onClear={clearSel}
+                    marksMode={selectionMode ? "always" : "contextual"}
                   />
                 )}
               />
@@ -826,12 +599,7 @@ export function LibraryView() {
           )}
 
           <div className="library-statusbar">
-            {group !== null ? (
-              <span>
-                {groupLabel(group.group_type, group.photo_count)} · showing{" "}
-                {groupPhotos.length.toLocaleString()} of {group.photo_count.toLocaleString()}
-              </span>
-            ) : filterConditions.length > 0 ? (
+            {filterConditions.length > 0 ? (
               <span>
                 Showing {pagePhotos.length.toLocaleString()} of {photos.total.toLocaleString()} filtered
                 {photos.hasMore ? " — scroll for more" : ""} · {filterConditions.length} filter{filterConditions.length > 1 ? "s" : ""}
@@ -842,20 +610,16 @@ export function LibraryView() {
                 {photos.hasMore ? " — scroll for more" : ""}
               </span>
             )}
-            {group === null && <span className="faint">Page {photos.page + 1}</span>}
+            <span className="faint">Page {photos.page + 1}</span>
             {dbStatus && dbStatus.analyzed_count > 0 && (
               <span className="faint">{dbStatus.analyzed_count.toLocaleString()} analyzed</span>
             )}
-            {group === null && metadataPending > 0 && (
+            {metadataPending > 0 && (
               <span className="faint">{metadataPending.toLocaleString()} awaiting metadata</span>
             )}
             <span className="spacer" />
             <span className="faint">Local-only index · thumbnails &amp; analysis on this machine</span>
-            {group === null && (
-              <button className="btn btn-ghost btn-sm" onClick={photos.reload} disabled={photos.loading}>
-                Refresh
-              </button>
-            )}
+            <button className="btn btn-ghost btn-sm" onClick={photos.reload} disabled={photos.loading}>Refresh</button>
           </div>
         </>
       )}
@@ -878,8 +642,7 @@ export function LibraryView() {
             )}
           </div>
 
-          {group === null ? (
-            <>
+          <>
               <FilterBar
                 mode="inspector"
                 draft={filterConditions}
@@ -926,12 +689,7 @@ export function LibraryView() {
                   )}
                 </div>
               )}
-            </>
-          ) : (
-            <div className="library-inspector-empty">
-              Filters apply to the Library grid. Return from this group to refine the project.
-            </div>
-          )}
+          </>
         </aside>
       </div>
 
@@ -944,47 +702,6 @@ export function LibraryView() {
         />
       )}
     </div>
-  );
-}
-
-/** Culling-bar widget: add the marked photographs to a chosen collection. */
-function AddToCollection({
-  collections,
-  onAdd,
-}: {
-  collections: { id: number; name: string }[];
-  onAdd: (collectionId: number) => void;
-}) {
-  const [chosen, setChosen] = useState<number | null>(null);
-  return (
-    <span className="addcol" style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-      <select
-        className="input"
-        style={{ width: 170 }}
-        value={chosen ?? ""}
-        onChange={(e) => setChosen(e.target.value === "" ? null : Number(e.target.value))}
-        aria-label="Collection"
-      >
-        <option value="" disabled>
-          Add to collection…
-        </option>
-        {collections.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      <button
-        className="btn btn-sm"
-        disabled={chosen === null}
-        onClick={() => {
-          if (chosen !== null) onAdd(chosen);
-        }}
-        title="Add every marked photograph to the collection (files are not touched)"
-      >
-        Add
-      </button>
-    </span>
   );
 }
 

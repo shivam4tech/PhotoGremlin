@@ -5,7 +5,8 @@
  * changes on every selected photo — others are untouched).
  */
 import { useState } from "react";
-import { api, toErrorMessage } from "@/lib/ipc";
+import { toErrorMessage } from "@/lib/ipc";
+import { useAppStore } from "@/stores/appStore";
 import { MARK_COLORS } from "./marks";
 
 export function MarksPanel({
@@ -18,6 +19,7 @@ export function MarksPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [label, setLabel] = useState<{ rating: number | null; flag: boolean | null; color: string | null } | null>(null);
+  const updateMarks = useAppStore((state) => state.updateMarks);
 
   const apply = async (rating: number | null, flag: boolean | null, color: string | null) => {
     if (busy) return;
@@ -25,7 +27,7 @@ export function MarksPanel({
     setError(null);
     setLabel(null);
     try {
-      await api.updateMarks(photoIds, rating, flag, color);
+      await updateMarks(photoIds, rating, flag, color);
       setLabel({ rating, flag, color });
       onApplied();
     } catch (e) {
@@ -46,7 +48,7 @@ export function MarksPanel({
         {[1, 2, 3, 4, 5].map((s) => (
           <button
             key={s}
-            className={`marks-star${(hide && label!.rating === s) ? " is-on" : ""}`}
+            className={`marks-star${(hide && (label!.rating ?? 0) >= s) ? " is-on" : ""}`}
             title={`Rate ${s} star${s === 1 ? "" : "s"}`}
             aria-label={`Rate ${s} star${s === 1 ? "" : "s"}`}
             disabled={busy}

@@ -24,6 +24,7 @@ interface FilterBarProps {
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
 const QUICK_RANGE_FIELD_SET = new Set<string>(QUICK_RANGE_FIELDS);
+export const ADVANCED_FILTER_FIELDS = FILTER_FIELDS.filter((definition) => !QUICK_RANGE_FIELD_SET.has(definition.field));
 const UNIDENTIFIED = "__photogremlin_unidentified__";
 
 function monthFromDate(value: string): Date {
@@ -119,7 +120,7 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
 export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
   const [open, setOpen] = useState(draft.length > 0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [field, setField] = useState(FILTER_FIELDS[0].field);
+  const [field, setField] = useState(ADVANCED_FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
   const ops = OPS_BY_KIND[def.kind];
   const [op, setOp] = useState<FilterCondition["operator"]>(ops[0].op);
@@ -160,6 +161,16 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const otherConditions = draft
     .map((condition, index) => ({ condition, index }))
     .filter(({ condition }) => !QUICK_RANGE_FIELD_SET.has(condition.field));
+  const rating = draft.find((condition) => condition.field === "rating");
+  const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
+  const unratedOnly = rating?.operator === "=" && rating.value === 0;
+
+  function setRatingFilter(value: "any" | "unrated" | number) {
+    const withoutRating = draft.filter((condition) => condition.field !== "rating");
+    if (value === "any") onChange(withoutRating);
+    else if (value === "unrated") onChange([...withoutRating, { field: "rating", operator: "=", value: 0 }]);
+    else onChange([...withoutRating, { field: "rating", operator: ">=", value }]);
+  }
 
   function selectField(f: string) {
     setField(f);
@@ -344,6 +355,27 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             sessionId={sessionId}
           />
 
+          <section className="rating-filter" aria-labelledby="rating-filter-heading">
+            <div className="rating-filter-head">
+              <strong id="rating-filter-heading">Rating</strong>
+              <button type="button" className={!rating ? "is-active" : ""} onClick={() => setRatingFilter("any")}>Any</button>
+              <button type="button" className={unratedOnly ? "is-active" : ""} onClick={() => setRatingFilter("unrated")}>Unrated</button>
+            </div>
+            <div className="rating-filter-stars" aria-label="Minimum rating">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  className={`marks-star${ratingThreshold !== null && ratingThreshold >= star ? " is-on" : ""}`}
+                  aria-pressed={ratingThreshold === star}
+                  aria-label={`${star} stars or more`}
+                  onClick={() => setRatingFilter(ratingThreshold === star ? "any" : star)}
+                >★</button>
+              ))}
+              <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
+            </div>
+          </section>
+
           <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
             <button
               type="button"
@@ -365,7 +397,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                   <select className="input" value={field} onChange={(e) => selectField(e.target.value)}>
                     {AREA_ORDER.map((area) => (
                       <optgroup key={area} label={area}>
-                        {FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
+                        {ADVANCED_FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
                           <option key={f.field} value={f.field}>
                             {f.label}
                           </option>

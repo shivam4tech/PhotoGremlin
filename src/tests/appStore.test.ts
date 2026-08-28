@@ -17,6 +17,7 @@ vi.mock("@/lib/ipc", () => ({
     getActiveFolder: vi.fn(async () => null),
     pickFolder: vi.fn(),
     setActiveFolder: vi.fn(async () => {}),
+    updateMarks: vi.fn(async () => 1),
   },
   toErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   onProgress: vi.fn(async () => () => {}),
@@ -41,6 +42,7 @@ describe("appStore", () => {
       notice: null,
       error: null,
       theme: "dark",
+      marksVersion: 0,
     });
   });
 
@@ -82,6 +84,12 @@ describe("appStore", () => {
     const picked = await useAppStore.getState().openFolder();
     expect(picked).toBeNull();
     expect(api.setActiveFolder).not.toHaveBeenCalled();
+  });
+
+  it("invalidates every photo surface after marks are stored", async () => {
+    await useAppStore.getState().updateMarks([42], 4, null, null);
+    expect(api.updateMarks).toHaveBeenCalledWith([42], 4, null, null);
+    expect(useAppStore.getState().marksVersion).toBe(1);
   });
 });
 

@@ -149,9 +149,19 @@ in the core code is platform-branching.
 - Lockfiles are committed (`package-lock.json`, `Cargo.lock`).
 - `src/` (UI) and `src-tauri/` (core) stay the two halves; `docs/` tracks
   reality; `RESUME.md` is transient (never committed long-term).
+
 ## Build resource guard
 
 The repository includes `.cargo/config.toml` with `build.jobs = 2`. This
 keeps Tauri/image/ONNX compilation from consuming all workstation RAM while
 the desktop app and browser are open. It applies automatically to Cargo,
 Tauri CLI builds, and IDE builds; do not override it for routine development.
+
+Codex sessions in this repository use the project-local `.codex/config.toml`
+to compact at 80,000 total tokens. The guard was added after a 135k-token
+session containing repeated large command outputs and screenshots reached a
+10.6 GB terminal-cgroup peak and was killed by `systemd-oomd`; PhotoGremlin's
+recorded app peak in the same boot was below 0.7 GB. Agent work must keep broad
+commands away from the 200k-file ignored corpora, cap retained output, and run
+the npm, Cargo and Tauri stages sequentially. The corpora remain in place and
+ignored; this guard changes development tooling only, never app runtime.
