@@ -155,11 +155,15 @@ Per-sprint coverage (✓ = in place today):
     orientation value set, auto-extends a datetime `between` upper bound to
     end-of-day); `chipLabel` uses neutral technical language (no verdicts);
     `draftToFilter` emits the exact wire object the Rust engine parses
-    (round-trip JSON asserted). Sprint 23 also pins the compact one-slider
-    mapping: `Up to` emits `<=`, `From` emits `>=`, and existing `between`
-    conditions are not misidentified as quick thresholds. Sprint 24 pins the
-    left-rail Review view toggles: changing review state retains unrelated
-    conditions, and selecting the active shortcut clears only `review_state`.
+    (round-trip JSON asserted). Sprint 26 pins the five always-visible dual
+    ranges, excludes those fields from the advanced composer, and preserves
+    legacy conditions without rewriting them. Sprint 24 pins the left-rail
+    Review view toggles: changing review state retains unrelated conditions,
+    and selecting the active shortcut clears only `review_state`.
+  - Groups workspace (`src/tests/groups.test.ts`) ✓: All/Similar/Burst/Face
+    tabs keep deterministic order, paged photo results replace or append
+    without duplicates, and the visible descriptions remain factual. Global
+    shortcut tests retain keys 1–7 and add Groups on 8.
   - Statistics formatting (Sprint 6, `src/tests/statsFormat.test.ts`) ✓: the
     honest-data rendering — every formatter returns "unavailable" (never
     "0"/"0%") for `null`; metrics to one decimal; shares as undecimaled

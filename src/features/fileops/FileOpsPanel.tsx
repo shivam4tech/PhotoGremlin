@@ -11,7 +11,7 @@ import {
   resultHeadline,
 } from "@/features/fileops/format";
 
-type Tab = "rename" | "move" | "copy" | "trash";
+export type FileOpsTab = "rename" | "move" | "copy" | "trash";
 
 const TEMPLATES = [
   { label: "date_name_seq", value: "{date}_{name}_{sequence}" },
@@ -26,13 +26,13 @@ const TEMPLATES = [
  * a plan the backend returns, the user inspects it, confirms, and only then
  * does anything touch disk. Destructive (trash) gets a native confirmation.
  */
-export function FileOpsPanel({ photoIds }: { photoIds: number[] }) {
+export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: number[]; initialTab?: FileOpsTab }) {
   const operating = useAppStore((s) => s.operating);
   const opProgress = useAppStore((s) => s.opProgress);
   const opSummary = useAppStore((s) => s.opSummary);
   const store = useAppStore.getState;
 
-  const [tab, setTab] = useState<Tab>("rename");
+  const [tab, setTab] = useState<FileOpsTab>(initialTab);
   const [template, setTemplate] = useState(TEMPLATES[0].value);
   const [groupName, setGroupName] = useState("");
   const [destDir, setDestDir] = useState<string | null>(null);
@@ -134,7 +134,7 @@ export function FileOpsPanel({ photoIds }: { photoIds: number[] }) {
       </div>
 
       <div className="fileops-tabs">
-        {(["rename", "move", "copy", "trash"] as Tab[]).map((t) => (
+        {(["rename", "move", "copy", "trash"] as FileOpsTab[]).map((t) => (
           <button
             key={t}
             className={`fileops-tab${tab === t ? " is-on" : ""}${t === "trash" ? " is-danger" : ""}`}

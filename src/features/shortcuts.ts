@@ -28,6 +28,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: "view-collections", keys: "5", action: "Go to Collections", scope: "global" },
   { id: "view-saved-views", keys: "6", action: "Go to Saved Views", scope: "global" },
   { id: "view-settings", keys: "7", action: "Go to Settings", scope: "global" },
+  { id: "view-groups", keys: "8", action: "Go to Groups", scope: "global" },
   { id: "viewer-close", keys: "Esc", action: "Close the photo viewer", scope: "viewer" },
   { id: "viewer-prev", keys: "←", action: "Previous photograph", scope: "viewer" },
   { id: "viewer-next", keys: "→", action: "Next photograph", scope: "viewer" },
@@ -41,6 +42,7 @@ const VIEW_BY_DIGIT: Record<string, ViewId> = {
   "5": "collections",
   "6": "saved-views",
   "7": "settings",
+  "8": "groups",
 };
 
 interface KeyEventLike {
@@ -55,7 +57,7 @@ interface KeyEventLike {
  * Map a key event to a global shortcut action, or null. Deliberately
  * conservative: never fires while a modifier combination is in use for
  * browser/app defaults the user may expect (e.g. ⌘/Ctrl+S) — we only claim
- * ⌘/Ctrl+O and bare digits 1–6 (no other modifiers).
+ * ⌘/Ctrl+O and the documented bare view digits (no other modifiers).
  */
 export function shortcutFor(e: KeyEventLike): ShortcutAction | null {
   const mod = e.ctrlKey || e.metaKey;

@@ -21,6 +21,7 @@ import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
 import { CollectionsView } from "@/views/CollectionsView";
+import { GroupsView } from "@/views/GroupsView";
 import { SavedViewsView } from "@/views/SavedViewsView";
 import { SettingsView } from "@/views/SettingsView";
 import { HomeView } from "@/views/HomeView";
@@ -32,6 +33,10 @@ function reportClientError(source: string, value: unknown) {
   // Logging must never become another unhandled error if the app is already
   // shutting down or IPC is unavailable.
   void api.logClientError(report.source, report.message, report.stack).catch(() => {});
+}
+
+function debugCompletion(kind: string, payload: unknown) {
+  console.debug(`[PhotoGremlin] ${kind} complete`, payload);
 }
 
 function useClientErrorLogging() {
@@ -181,12 +186,10 @@ export default function App() {
         s.setMetadataPaused(false);
         s.setProgress(null);
         if (p.summary) {
+          debugCompletion("metadata", p.summary);
           s.setMetadataSummary(p.summary);
           if (p.summary.failed > 0 || (p.summary.processed > 0 && !p.summary.cancelled)) {
-            s.setNotice(
-              `Read metadata from ${p.summary.processed.toLocaleString()} photograph` +
-                `${p.summary.processed === 1 ? "" : "s"}${p.summary.failed > 0 ? `, ${p.summary.failed.toLocaleString()} unreadable` : ""}.`,
-            );
+            s.setNotice(p.summary.cancelled ? "Metadata reading stopped." : "Metadata ready.");
             s.setError(null);
           }
         } else {
@@ -201,17 +204,9 @@ export default function App() {
         s.setProgress(null);
         if (p.summary) {
           const sum = p.summary;
-          const bits: string[] = [
-            `${sum.analyzed.toLocaleString()} photograph${sum.analyzed === 1 ? "" : "s"} measured`,
-            sum.failed > 0 ? `${sum.failed.toLocaleString()} failed` : null,
-            `${(sum.elapsed_ms / 1000).toFixed(1)}s`,
-          ].filter(Boolean) as string[];
+          debugCompletion("analysis", sum);
           s.setAnalysisSummary(sum);
-          s.setNotice(
-            sum.cancelled
-              ? `Analysis stopped — ${bits.join(", ")}.`
-              : `Analysis complete — ${bits.join(", ")}.`,
-          );
+          s.setNotice(sum.cancelled ? "Analysis stopped." : "Analysis complete.");
           s.setError(null);
         } else {
           s.setAnalysisSummary(null);
@@ -224,9 +219,8 @@ export default function App() {
         s.setScanning(false);
         s.setProgress(null);
         if (p.summary) {
-          const msg = p.summary.cancelled
-            ? `Scan stopped — indexed ${p.summary.indexed.toLocaleString()} of ${p.summary.total_files.toLocaleString()} files.`
-            : `Scan complete — ${p.summary.indexed.toLocaleString()} photographs indexed into session “${p.summary.session_name}” in ${(p.summary.elapsed_ms / 1000).toFixed(1)}s${p.summary.ignored ? `, ${p.summary.ignored.toLocaleString()} non-photo files ignored` : ""}.`;
+          debugCompletion("scan", p.summary);
+          const msg = p.summary.cancelled ? "Scan stopped." : "Scan complete.";
           s.setScanSummary(p.summary);
           s.setNotice(msg);
           s.setError(null);
@@ -309,20 +303,9 @@ export default function App() {
          s.setSimilarityProgress(null);
          if (p.summary) {
            const sum = p.summary;
-           const bits: string[] = [
-             `${sum.similar_groups.toLocaleString()} similar group${sum.similar_groups === 1 ? "" : "s"}`,
-             ...(sum.face_groups > 0 ? [`${sum.face_groups.toLocaleString()} face-appearance group${sum.face_groups === 1 ? "" : "s"}`] : []),
-             `${sum.burst_groups.toLocaleString()} burst group${sum.burst_groups === 1 ? "" : "s"}`,
-           ];
-           if (sum.hashed > 0) bits.unshift(`${sum.hashed.toLocaleString()} hashed`);
-           if (sum.failed > 0) bits.push(`${sum.failed.toLocaleString()} unreadable`);
-           bits.push(`${(sum.elapsed_ms / 1000).toFixed(1)}s`);
+           debugCompletion("similarity", sum);
            s.setSimilaritySummary(sum);
-           s.setNotice(
-             (sum.cancelled ? "Similarity pass stopped — " : "Similarity complete — ") +
-               bits.join(", ") +
-               ".",
-           );
+           s.setNotice(sum.cancelled ? "Group discovery stopped." : "Groups updated.");
            s.setError(null);
          } else {
            s.setSimilaritySummary(null);
@@ -399,6 +382,8 @@ export default function App() {
         return <SessionsView />;
       case "collections":
         return <CollectionsView />;
+      case "groups":
+        return <GroupsView />;
       case "saved-views":
         return <SavedViewsView />;
       case "settings":
@@ -421,7 +406,7 @@ export default function App() {
             </button>
           ) : null}
         </TopBar>
-        <div className={view === "library" ? "view-scroll library-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>
+        <div className={view === "library" ? "view-scroll library-scroll" : view === "groups" ? "view-scroll groups-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>
           <ErrorBoundary
             key={view}
             onError={(viewError: Error, info: ErrorInfo) =>

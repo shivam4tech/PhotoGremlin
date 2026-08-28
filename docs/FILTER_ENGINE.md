@@ -55,7 +55,7 @@ also offers `Unidentified (n)`, which writes the normal `is-null` condition
 the same filter wire format — no value is inferred, sent to a service, or
 embedded into SQL.
 
-### Quick measured controls (Sprints 22–23, revamped Sprint 25)
+### Quick measured controls (Sprints 22–23, revamped Sprints 25–26)
 
 The Library presents common numeric filters without requiring photographers
 to compose raw operators:
@@ -66,12 +66,13 @@ to compose raw operators:
   lower handle writes `>=`, moving only the upper handle writes `<=`, and
   moving both writes `between`.
 
-The five controls are compact summary rows in the Library inspector. Selecting
-one row expands its dual-ended scrubber and closes the previously open row.
-Pointer drags update the local labels immediately and write the filter once on
-release; keyboard steps write immediately. This avoids issuing a stream of
-SQLite grid queries during a drag. The generic field/operator/value composer is
-available under the collapsed **More filters** disclosure.
+The five dual-ended scrubbers remain visible in the Library inspector, so the
+photographer can compare and refine measured ranges without opening rows one at
+a time. Pointer drags update the local labels immediately and write the filter
+once on release; keyboard steps write immediately. This avoids issuing a stream
+of SQLite grid queries during a drag. The accent marks only an active selected
+interval; neutral tracks never imply quality. The generic composer remains
+under **More filters**, but does not duplicate these five fields.
 
 Every control reports locally recorded and missing counts from
 `numeric_filter_stats`. A numeric range follows SQL NULL semantics
@@ -83,8 +84,8 @@ values are never guessed from filenames, pixels, or neighboring photographs.
 Saved views keep the ordinary filter wire format. Legacy strict `<`/`>` quick
 conditions and arbitrary advanced numeric conditions load without being
 rewritten. Moving a range handle converts that field to the scrubber's inclusive
-model. Conditions the scrubber cannot express remain visible and editable under
-**More filters**.
+model. Conditions the scrubber cannot express remain visible and removable
+without being silently rewritten.
 
 Sprint 24 moves the complete filter surface into the Library's persistent
 right inspector. `FilterBar` inspector mode is always expanded there; active

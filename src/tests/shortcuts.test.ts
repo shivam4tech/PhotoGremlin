@@ -9,7 +9,7 @@ describe("shortcutFor", () => {
     expect(shortcutFor({ ...base, key: "O", metaKey: true })).toEqual({ kind: "open-folder" });
   });
 
-  it("maps bare digits 1–7 to the fixed view order", () => {
+  it("keeps the existing 1–7 view shortcuts and adds Groups on 8", () => {
     const expected = [
       "home",
       "library",
@@ -18,6 +18,7 @@ describe("shortcutFor", () => {
       "collections",
       "saved-views",
       "settings",
+      "groups",
     ] as const;
     for (let i = 0; i < expected.length; i++) {
       expect(shortcutFor({ ...base, key: String(i + 1) })).toEqual({
@@ -30,7 +31,7 @@ describe("shortcutFor", () => {
   it("does not claim anything it does not mean", () => {
     expect(shortcutFor({ ...base, key: "o" })).toBeNull();
     expect(shortcutFor({ ...base, key: "0" })).toBeNull();
-    expect(shortcutFor({ ...base, key: "8" })).toBeNull();
+    expect(shortcutFor({ ...base, key: "9" })).toBeNull();
     expect(shortcutFor({ ...base, key: "o", ctrlKey: true, shiftKey: true })).toBeNull();
     expect(shortcutFor({ ...base, key: "1", altKey: true })).toBeNull();
     expect(shortcutFor({ ...base, key: "Escape" })).toBeNull();
@@ -49,6 +50,7 @@ describe("catalog", () => {
       "view-collections",
       "view-saved-views",
       "view-settings",
+      "view-groups",
     ]) {
       expect(globalIds).toContain(id);
     }

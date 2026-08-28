@@ -79,6 +79,17 @@ export const CollectionsIcon = ({ size = 18 }: IconProps) =>
     </>,
   );
 
+export const GroupsIcon = ({ size = 18 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <rect x="3" y="4" width="8" height="8" rx="1.5" />
+      <rect x="13" y="4" width="8" height="8" rx="1.5" />
+      <rect x="8" y="13" width="8" height="8" rx="1.5" />
+      <path d="M7 12v2h3M17 12v2h-3" />
+    </>,
+  );
+
 export const SavedViewsIcon = ({ size = 18 }: IconProps) =>
   svg(
     size,

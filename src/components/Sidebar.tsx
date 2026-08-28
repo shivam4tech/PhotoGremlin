@@ -7,6 +7,7 @@ import {
   CollectionsIcon,
   DashboardIcon,
   FolderIcon,
+  GroupsIcon,
   HomeIcon,
   LibraryIcon,
   LogoMark,
@@ -20,6 +21,7 @@ const MANAGEMENT_NAV: { id: ViewId; icon: (p: { size?: number }) => JSX.Element 
   { id: "dashboard", icon: DashboardIcon },
   { id: "sessions", icon: SessionsIcon },
   { id: "collections", icon: CollectionsIcon },
+  { id: "groups", icon: GroupsIcon },
   { id: "saved-views", icon: SavedViewsIcon },
 ];
 

@@ -77,10 +77,8 @@ interface RangeFilterRowProps {
   condition?: FilterCondition;
   stats?: NumericFilterStats;
   statsReady: boolean;
-  expanded: boolean;
   disabled?: boolean;
   draft: FilterCondition[];
-  onToggle: () => void;
   onChange: (conditions: FilterCondition[]) => void;
 }
 
@@ -89,10 +87,8 @@ function RangeFilterRow({
   condition,
   stats,
   statsReady,
-  expanded,
   disabled,
   draft,
-  onToggle,
   onChange,
 }: RangeFilterRowProps) {
   const domainLower = spec.values[0];
@@ -149,23 +145,15 @@ function RangeFilterRow({
   const maximum = stats?.maximum == null ? null : formatValue(Math.round(stats.maximum * 10) / 10, spec.unit);
 
   return (
-    <div className={`range-filter-row${expanded ? " is-expanded" : ""}${condition ? " has-filter" : ""}`}>
-      <button
-        type="button"
-        className="range-filter-trigger"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-controls={`range-filter-${spec.field}`}
-      >
+    <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
+      <div className="range-filter-heading">
         <span>{spec.label}</span>
         <span className={`range-filter-summary mono${condition ? " is-active" : ""}`}>
           {conditionSummary(condition, spec.unit, spec.missingNoun)}
         </span>
-        <span className="range-filter-chevron" aria-hidden="true">⌄</span>
-      </button>
+      </div>
 
-      {expanded && (
-        <div className="range-filter-detail" id={`range-filter-${spec.field}`}>
+      <div className="range-filter-detail" id={`range-filter-${spec.field}`}>
           <div className="range-filter-availability">
             <span>{availability}</span>
             {minimum !== null && maximum !== null && <span className="mono">{minimum}–{maximum}</span>}
@@ -237,8 +225,7 @@ function RangeFilterRow({
               Reset to any
             </button>
           </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -246,7 +233,6 @@ function RangeFilterRow({
 export function QuickFilterControls({ draft, onChange, disabled, sessionId }: QuickFilterControlsProps) {
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
-  const [expandedField, setExpandedField] = useState<QuickRangeField | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -271,7 +257,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
     <section className="quick-filters" aria-labelledby="measured-filter-heading">
       <div className="quick-filter-intro">
         <strong id="measured-filter-heading">Measured filters</strong>
-        <span>Choose a parameter to set its range</span>
+        <span>Drag either edge to refine the visible photographs</span>
       </div>
       {measurementsUnavailable && (
         <div className="quick-filter-note">
@@ -288,10 +274,8 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
               condition={condition}
               stats={stats[spec.field]}
               statsReady={statsReady}
-              expanded={expandedField === spec.field}
               disabled={disabled}
               draft={draft}
-              onToggle={() => setExpandedField((current) => current === spec.field ? null : spec.field)}
               onChange={onChange}
             />
           );

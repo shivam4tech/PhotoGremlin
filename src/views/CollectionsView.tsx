@@ -39,10 +39,11 @@ function CollectionGrid({ col }: { col: Collection }) {
   // (Re)load when the collection changes or a file operation changed the
   // library on disk (a member may have been trashed/moved).
   const libraryVersion = useAppStore((s) => s.libraryVersion);
+  const marksVersion = useAppStore((s) => s.marksVersion);
   useEffect(() => {
     load(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [col.id, libraryVersion]);
+  }, [col.id, libraryVersion, marksVersion]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -75,7 +76,7 @@ function CollectionGrid({ col }: { col: Collection }) {
           <VirtualGrid
             itemCount={photos.length}
             render={(i) => (
-              <PhotoTile photo={photos[i]} onOpen={setViewerId} />
+              <PhotoTile photo={photos[i]} onOpen={setViewerId} marksMode="always" />
             )}
           />
         </div>
