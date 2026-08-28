@@ -6,6 +6,7 @@ import {
   FILTER_FIELDS,
   FIELD_BY_NAME,
   OPS_BY_KIND,
+  QUICK_RANGE_FIELDS,
   buildCondition,
   chipLabel,
 } from "./filterFields";
@@ -22,6 +23,7 @@ interface FilterBarProps {
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
+const QUICK_RANGE_FIELD_SET = new Set<string>(QUICK_RANGE_FIELDS);
 const UNIDENTIFIED = "__photogremlin_unidentified__";
 
 function monthFromDate(value: string): Date {
@@ -116,6 +118,7 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
  */
 export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
   const [open, setOpen] = useState(draft.length > 0);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [field, setField] = useState(FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
   const ops = OPS_BY_KIND[def.kind];
@@ -154,6 +157,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
     : buildCondition(field, op, raw, raw2);
   const canAdd = candidate !== null;
   const expanded = mode === "inspector" || open;
+  const otherConditions = draft
+    .map((condition, index) => ({ condition, index }))
+    .filter(({ condition }) => !QUICK_RANGE_FIELD_SET.has(condition.field));
 
   function selectField(f: string) {
     setField(f);
@@ -313,23 +319,21 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
       {expanded && (
         <div className="filterbar-panel">
-          {draft.length > 0 && (
+          {otherConditions.length > 0 && (
             <div className="filterbar-chips">
-              {draft.map((c, i) => (
-                <span key={`${c.field}-${i}`} className="chip">
-                  {chipLabel(c)}
+              <span className="filterbar-chips-label">Other filters</span>
+              {otherConditions.map(({ condition, index }) => (
+                <span key={`${condition.field}-${index}`} className="chip">
+                  {chipLabel(condition)}
                   <button
                     className="chip-x"
-                    onClick={() => remove(i)}
-                    aria-label={`remove filter ${chipLabel(c)}`}
+                    onClick={() => remove(index)}
+                    aria-label={`remove filter ${chipLabel(condition)}`}
                   >
                     ×
                   </button>
                 </span>
               ))}
-              <button className="btn btn-ghost btn-sm" onClick={() => onChange([])}>
-                Clear all
-              </button>
             </div>
           )}
 
@@ -340,44 +344,59 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             sessionId={sessionId}
           />
 
-          <div className="advanced-filter-heading">
-            <strong>Advanced condition</strong>
-            <span className="faint">Combine fields with AND</span>
-          </div>
-
-          <div className="filterbar-compose">
-            <select className="input" value={field} onChange={(e) => selectField(e.target.value)}>
-              {AREA_ORDER.map((area) => (
-                <optgroup key={area} label={area}>
-                  {FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
-                    <option key={f.field} value={f.field}>
-                      {f.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <select
-              className="input"
-              value={op}
-              onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+          <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
+            <button
+              type="button"
+              className="more-filters-trigger"
+              onClick={() => setAdvancedOpen((current) => !current)}
+              aria-expanded={advancedOpen}
+              aria-controls="advanced-filter-composer"
             >
-              {ops.map((o) => (
-                <option key={o.op} value={o.op}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            {valueInput()}
-            <button className="btn btn-sm" onClick={add} disabled={!canAdd || disabled}>
-              Add
+              <span>
+                <strong>More filters</strong>
+                <small>Camera, lens, date and other fields</small>
+              </span>
+              <span className="more-filters-chevron" aria-hidden="true">⌄</span>
             </button>
+
+            {advancedOpen && (
+              <div className="more-filters-panel" id="advanced-filter-composer">
+                <div className="filterbar-compose">
+                  <select className="input" value={field} onChange={(e) => selectField(e.target.value)}>
+                    {AREA_ORDER.map((area) => (
+                      <optgroup key={area} label={area}>
+                        {FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
+                          <option key={f.field} value={f.field}>
+                            {f.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <select
+                    className="input"
+                    value={op}
+                    onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+                  >
+                    {ops.map((o) => (
+                      <option key={o.op} value={o.op}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {valueInput()}
+                  <button className="btn btn-sm" onClick={add} disabled={!canAdd || disabled}>
+                    Add filter
+                  </button>
+                </div>
+                {needsTwoValues && (
+                  <div className="faint mono more-filters-hint">
+                    between: two values, min → max
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          {needsTwoValues && (
-            <div className="faint mono" style={{ fontSize: 11 }}>
-              between: two values, min → max
-            </div>
-          )}
         </div>
       )}
     </div>

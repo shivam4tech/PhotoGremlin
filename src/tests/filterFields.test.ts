@@ -7,12 +7,10 @@ import {
   chipLabel,
   draftToFilter,
   endOfDay,
-  activeVisualBand,
-  activeStandardThreshold,
+  quickRangeBounds,
+  quickRangeCondition,
   replaceFieldConditions,
-  standardThresholdCondition,
   toggleExactFieldCondition,
-  visualBandCondition,
   STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
 
@@ -175,12 +173,12 @@ describe("chipLabel", () => {
     expect(chipLabel({ field: "iso", operator: "<", value: 1600 })).toBe("iso < 1600");
   });
 
-  it("labels the quick measured bands without aesthetic verdicts", () => {
-    expect(chipLabel(visualBandCondition("brightness", "low"))).toBe(
-      "brightness: low measured range",
+  it("labels measured ranges with their exact numeric bounds", () => {
+    expect(chipLabel({ field: "brightness", operator: "<=", value: 35 })).toBe(
+      "brightness ≤ 35",
     );
-    expect(chipLabel(visualBandCondition("sharpness", "mid"))).toBe(
-      "sharpness: mid-range measured range",
+    expect(chipLabel({ field: "sharpness", operator: "between", value: [40, 70] })).toBe(
+      "sharpness 40 → 70",
     );
   });
 
@@ -213,31 +211,44 @@ describe("chipLabel", () => {
 });
 
 describe("quick filter controls", () => {
-  it("maps stable visual bands onto ordinary filter conditions", () => {
-    expect(visualBandCondition("brightness", "low")).toEqual({
-      field: "brightness", operator: "<", value: 35,
+  it("maps range bounds onto ordinary inclusive filter conditions", () => {
+    expect(quickRangeCondition("brightness", 0, 100, 0, 100)).toBeNull();
+    expect(quickRangeCondition("brightness", 35, 100, 0, 100)).toEqual({
+      field: "brightness", operator: ">=", value: 35,
     });
-    expect(visualBandCondition("sharpness", "mid")).toEqual({
+    expect(quickRangeCondition("sharpness", 40, 70, 0, 100)).toEqual({
       field: "sharpness", operator: "between", value: [40, 70],
     });
-    expect(visualBandCondition("contrast", "high")).toEqual({
-      field: "contrast", operator: ">", value: 65,
+    expect(quickRangeCondition("iso", 25, 1600, 25, 102400)).toEqual({
+      field: "iso", operator: "<=", value: 1600,
     });
   });
 
-  it("detects quick bands and owns only the selected field", () => {
+  it("reads current and legacy bounds without rewriting their condition", () => {
+    expect(quickRangeBounds({ field: "brightness", operator: "<", value: 35 }, 0, 100))
+      .toEqual({ lower: 0, upper: 35, missingOnly: false, editable: true });
+    expect(quickRangeBounds({ field: "sharpness", operator: "between", value: [40, 70] }, 0, 100))
+      .toEqual({ lower: 40, upper: 70, missingOnly: false, editable: true });
+    expect(quickRangeBounds({ field: "contrast", operator: "is-null", value: null }, 0, 100))
+      .toEqual({ lower: 0, upper: 100, missingOnly: true, editable: true });
+    expect(quickRangeBounds({ field: "iso", operator: "in", value: [100, 400] }, 25, 102400).editable)
+      .toBe(false);
+  });
+
+  it("owns only the selected field", () => {
     const initial = [
       { field: "brightness", operator: ">=" as const, value: 20 },
       { field: "iso", operator: "<" as const, value: 1600 },
     ];
-    const next = replaceFieldConditions(initial, "brightness", visualBandCondition("brightness", "high"));
+    const next = replaceFieldConditions(
+      initial,
+      "brightness",
+      quickRangeCondition("brightness", 65, 100, 0, 100),
+    );
     expect(next).toEqual([
       { field: "iso", operator: "<", value: 1600 },
-      { field: "brightness", operator: ">", value: 65 },
+      { field: "brightness", operator: ">=", value: 65 },
     ]);
-    expect(activeVisualBand(next, "brightness")).toBe("high");
-    expect(activeVisualBand([{ field: "brightness", operator: "is-null", value: null }], "brightness"))
-      .toBe("unmeasured");
   });
 
   it("uses familiar, increasing ISO and focal-length stops", () => {
@@ -246,19 +257,10 @@ describe("quick filter controls", () => {
     expect([...STANDARD_FILTER_STOPS.iso]).toEqual([...STANDARD_FILTER_STOPS.iso].sort((a, b) => a - b));
   });
 
-  it("maps one-slider directions onto inclusive threshold conditions", () => {
-    expect(standardThresholdCondition("iso", "up-to", 1600)).toEqual({
-      field: "iso", operator: "<=", value: 1600,
+  it("supports an exact inclusive range when both handles meet", () => {
+    expect(quickRangeCondition("focal_length", 85, 85, 8, 1200)).toEqual({
+      field: "focal_length", operator: "between", value: [85, 85],
     });
-    expect(standardThresholdCondition("focal_length", "from", 85)).toEqual({
-      field: "focal_length", operator: ">=", value: 85,
-    });
-    expect(activeStandardThreshold([
-      { field: "iso", operator: ">=", value: 3200 },
-    ], "iso")).toEqual({ direction: "from", value: 3200 });
-    expect(activeStandardThreshold([
-      { field: "iso", operator: "between", value: [100, 800] },
-    ], "iso")).toBeNull();
   });
 
   it("toggles a review shortcut without discarding unrelated filters", () => {
