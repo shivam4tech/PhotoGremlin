@@ -1,14 +1,18 @@
 # Database
 
-SQLite, single file: `<data_dir>/database.sqlite` (see DEVELOPMENT.md for
-per-OS locations). WAL mode, `PRAGMA foreign_keys=ON`, one
-`Mutex<Connection>` in `src-tauri/src/database.rs`.
+SQLite, one active project catalog at a time. New projects use
+`<data_dir>/catalogs/<folder>-<stable-path-hash>.sqlite`; the original
+`<data_dir>/database.sqlite` remains the global preference/catalog registry
+and is retained as the catalog for the project that was active during a
+legacy upgrade. See `CATALOG_RECOVERY.md`. Every file uses WAL mode,
+`PRAGMA foreign_keys=ON`, and one `Mutex<Connection>` in
+`src-tauri/src/database.rs`.
 
 ## Migration policy
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 15). Tests assert both expected-table presence and idempotency.
+(currently 18). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -51,6 +55,10 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
 - v17: `face_observations(photo_id, face_index, appearance_hash,
   source_mtime)` stores compact local detected-face crop hashes for optional
   face-appearance candidates; it never stores face pixels or identity data.
+- v18 (Sprint 27): `review_progress(session_id, unit_index,
+  focused_photo_id, updated_at)` resumes a shoot at its last review context.
+  The row is project-local and cascades with its session; the focused photo is
+  validated as belonging to that session before each write.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
@@ -62,7 +70,7 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   the v6 analysis rule. Added via `ALTER TABLE`, guarded by the same
   `PRAGMA table_info` probe as v6/v7
 
-## Tables (schema v1–v10)
+## Principal tables (schema v18)
 
 ### sessions
 A shoot or imported body of work.

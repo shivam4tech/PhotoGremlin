@@ -8,6 +8,8 @@ import type {
   AiStatus,
   AppInfo,
   Collection,
+  CacheStatus,
+  CatalogHealth,
   DbStatus,
   FileOpPlan,
   FileOpRow,
@@ -19,7 +21,8 @@ import type {
   SavedView,
   ReviewQueue,
   QuickNumericFilterField,
-  SelectionRow,
+  SelectionPage,
+  ReviewProgress,
   SessionMetrics,
   SessionSummary,
   SessionRow,
@@ -35,6 +38,15 @@ export const api = {
       "app_paths",
     ),
   dbStatus: (): Promise<DbStatus> => invoke("db_status"),
+  cacheStatus: (): Promise<CacheStatus> => invoke("cache_status"),
+  setCacheQuota: (quotaBytes: number): Promise<CacheStatus> =>
+    invoke("set_cache_quota", { quotaBytes }),
+  clearCache: (): Promise<CacheStatus> => invoke("clear_cache"),
+  catalogHealth: (): Promise<CatalogHealth> => invoke("catalog_health"),
+  backupCatalog: (): Promise<string> => invoke("backup_catalog"),
+  listCatalogBackups: (): Promise<string[]> => invoke("list_catalog_backups"),
+  restoreCatalog: (backupPath: string): Promise<void> =>
+    invoke("restore_catalog", { backupPath }),
   /** Records browser failures in the local application log. Best-effort only. */
   logClientError: (source: string, message: string, stack: string | null): Promise<void> =>
     invoke("log_client_error", { source, message, stack }),
@@ -91,6 +103,10 @@ export const api = {
     invoke("get_thumbnail", { photoId, kind }),
   reviewQueue: (sessionId: number): Promise<ReviewQueue> =>
     invoke("review_queue", { sessionId }),
+  getReviewProgress: (sessionId: number): Promise<ReviewProgress | null> =>
+    invoke("get_review_progress", { sessionId }),
+  setReviewProgress: (sessionId: number, unitIndex: number, focusedPhotoId: number | null): Promise<void> =>
+    invoke("set_review_progress", { sessionId, unitIndex, focusedPhotoId }),
   listSessions: (): Promise<SessionRow[]> => invoke("list_sessions"),
   // Statistics engine (Sprint 6). Synchronous, local aggregation.
   periodStats: (periodJson: string): Promise<PeriodStats> =>
@@ -145,7 +161,11 @@ export const api = {
     invoke("clear_selection", { photoId }),
   clearSelections: (photoIds: number[]): Promise<number> =>
     invoke("clear_selections", { photoIds }),
-  listSelections: (): Promise<SelectionRow[]> => invoke("list_selections"),
+  listSelections: (
+    sessionId: number | null,
+    afterPhotoId: number | null,
+    limit = 2_000,
+  ): Promise<SelectionPage> => invoke("list_selections", { sessionId, afterPhotoId, limit }),
   recentFileOps: (limit: number): Promise<FileOpRow[]> =>
     invoke("recent_file_ops", { limit }),
 

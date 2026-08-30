@@ -15,7 +15,7 @@ use crate::state::AppState;
 /// All saved views, alphabetical.
 #[tauri::command]
 pub fn list_saved_views(state: State<'_, AppState>) -> AppResult<Vec<SavedView>> {
-    state.db.list_saved_views()
+    state.db()?.list_saved_views()
 }
 
 /// Create or overwrite a saved view by name. The filter is validated before
@@ -35,7 +35,7 @@ pub fn save_view(
     // the grid uses, so a saved view is always evaluable by the grid).
     let filter = filters::parse_filter(&filter_json)?;
     let _ = filters::build_where(&filter)?;
-    state.db.upsert_saved_view(&name, &filter_json, description.as_deref())
+    state.db()?.upsert_saved_view(&name, &filter_json, description.as_deref())
 }
 
 #[tauri::command]
@@ -44,12 +44,12 @@ pub fn rename_saved_view(
     id: i64,
     name: String,
 ) -> AppResult<()> {
-    state.db.rename_saved_view(id, &name)
+    state.db()?.rename_saved_view(id, &name)
 }
 
 #[tauri::command]
 pub fn delete_saved_view(state: State<'_, AppState>, id: i64) -> AppResult<()> {
-    state.db.delete_saved_view(id)
+    state.db()?.delete_saved_view(id)
 }
 
 /// How many photographs a saved view matches right now (dynamic — recomputes
@@ -57,13 +57,13 @@ pub fn delete_saved_view(state: State<'_, AppState>, id: i64) -> AppResult<()> {
 #[tauri::command]
 pub fn saved_view_count(state: State<'_, AppState>, id: i64) -> AppResult<i64> {
     let view = state
-        .db
+        .db()?
         .list_saved_views()?
         .into_iter()
         .find(|v| v.id == id)
         .ok_or_else(|| AppError::validation(format!("Saved view {id} not found")))?;
     let filter = filters::parse_filter(&view.filter_json)?;
     let (where_sql, params) = filters::build_where(&filter)?;
-    let (_, total) = state.db.photos_where(&where_sql, params, 0, 1)?;
+    let (_, total) = state.db()?.photos_where(&where_sql, params, 0, 1)?;
     Ok(total)
 }

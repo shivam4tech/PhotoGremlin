@@ -56,7 +56,7 @@ pub async fn start_scan(
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let scan_slot = state.scan.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();
@@ -125,5 +125,5 @@ pub fn stop_scan(state: State<'_, AppState>) -> AppResult<bool> {
 
 #[tauri::command]
 pub fn list_sessions(state: State<'_, AppState>) -> AppResult<Vec<SessionRow>> {
-    state.db.list_sessions()
+    state.db()?.list_sessions()
 }

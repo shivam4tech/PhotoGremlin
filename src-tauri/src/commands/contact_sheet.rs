@@ -60,7 +60,7 @@ pub fn export_contact_sheet(
     let _ = std::fs::remove_file(&probe);
 
     let job = claim_export_slot(&state)?;
-    let db = state.db.clone();
+    let db = state.db()?;
     let thumb = state.thumb.clone();
     let slot = state.export.clone();
     let cancel = job.cancel.clone();

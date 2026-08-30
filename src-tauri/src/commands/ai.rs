@@ -44,7 +44,7 @@ pub struct AiStatus {
 #[tauri::command]
 pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
     let enabled: bool = state
-        .db
+        .settings_db
         .get_setting("ai_enabled")
         .ok()
         .flatten()
@@ -53,7 +53,7 @@ pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
     let runtime = ml::runtime_status();
     let runtime_available = runtime.is_ok();
     let runtime_note = runtime.err();
-    let status: DbStatus = state.db.status()?;
+    let status: DbStatus = state.db()?.status()?;
     Ok(AiStatus {
         enabled,
         runtime_available,
@@ -73,7 +73,9 @@ pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
 /// progress; the preference alone only gates future auto-runs.
 #[tauri::command]
 pub fn set_ai_enabled(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
-    state.db.set_setting("ai_enabled", if enabled { "true" } else { "false" })
+    state
+        .settings_db
+        .set_setting("ai_enabled", if enabled { "true" } else { "false" })
 }
 
 /// Payload for the `faces-complete` event: exactly one is set.
@@ -102,7 +104,7 @@ pub async fn start_faces(app: AppHandle, state: State<'_, AppState>) -> AppResul
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let slot = state.faces.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();
@@ -200,7 +202,7 @@ pub async fn start_scene_classification(
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let slot = state.scenes.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();

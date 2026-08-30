@@ -8,6 +8,11 @@ flaky timing.
 Per-sprint coverage (✓ = in place today):
 
 - Database: schema migration creates expected tables; migration idempotent ✓
+- Catalog/review integrity (Sprint 27): a consistent `VACUUM INTO` backup
+  opens independently, passes `PRAGMA integrity_check`, never overwrites an
+  existing destination, and mutations in the source do not alter the backup;
+  20,050 selection rows traverse cursor pages with no legacy 20k truncation,
+  session scoping, and validated review-position persistence ✓
 - Photo upserts: idempotent by path; dimensions never blanked on rescan;
   mtime refreshed; session upsert keyed on root_path ✓
 - Scanner (Sprint 2): extension classification (all §12 formats) ✓;
@@ -21,7 +26,8 @@ Per-sprint coverage (✓ = in place today):
   valid decodable JPEG at the expected aspect (landscape 640×480→256×192,
   portrait 480×640→256×341); full `get()` lifecycle — miss→generate→hit with
   identical bytes, unknown id → friendly "no longer in the library" error;
-  missing file → friendly error.
+  missing file → friendly error. Sprint 27 adds deterministic LRU eviction,
+  quota accounting, and safe clear coverage proving unrelated files survive.
 - Analysis metrics (Sprint 4): each metric on **synthetic images** built
   in-memory with the `image` crate (never shipping real photos in the repo)
   ✓:
@@ -141,6 +147,8 @@ Per-sprint coverage (✓ = in place today):
 ## Frontend tests (`npm test`, Vitest)
 
 - Store behavior (view switching, progress payloads) ✓
+- Preview routing (Sprint 27): mixed-case RAW extensions reach the Rust
+  provider while HEIC/HEIF remain on the explicit placeholder path ✓
 - Error reporting (`src/tests/errorReporting.test.ts`) ✓: arbitrary browser
   rejections become bounded local-log records, and all GTK/Pango markup
   metacharacters are escaped before notices or errors are rendered.

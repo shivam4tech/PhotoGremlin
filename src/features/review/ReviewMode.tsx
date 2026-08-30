@@ -75,9 +75,22 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
     setLoadError(null);
     setUnitIndex(0);
     setFocusedId(null);
-    void store().loadSelections();
-    api.reviewQueue(sessionId).then((nextQueue) => {
-      if (!cancelled) setQueue(nextQueue);
+    Promise.all([
+      store().loadSelections(sessionId),
+      api.reviewQueue(sessionId),
+      api.getReviewProgress(sessionId),
+    ]).then(([, nextQueue, progress]) => {
+      if (cancelled) return;
+      const nextUnits = buildReviewUnits(nextQueue.photos, nextQueue.sequences);
+      const restoredIndex = Math.max(0, Math.min(nextUnits.length - 1, progress?.unit_index ?? 0));
+      const restoredUnit = nextUnits[restoredIndex];
+      setQueue(nextQueue);
+      setUnitIndex(restoredIndex);
+      setFocusedId(
+        progress?.focused_photo_id != null && restoredUnit?.photoIds.includes(progress.focused_photo_id)
+          ? progress.focused_photo_id
+          : null,
+      );
     }).catch((error) => { if (!cancelled) setLoadError(toErrorMessage(error)); });
     return () => { cancelled = true; };
   }, [sessionId]);
@@ -103,6 +116,16 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
     api.getPhotoFull(focusedId).then((photo) => { if (!cancelled) setFull(photo); }).catch(() => {});
     return () => { cancelled = true; };
   }, [focusedId]);
+
+  useEffect(() => {
+    if (queue === null || currentUnit === null) return;
+    const timer = window.setTimeout(() => {
+      void api.setReviewProgress(sessionId, unitIndex, focusedId).catch(() => {
+        // Progress persistence is best-effort; review decisions are stored separately.
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [sessionId, queue, currentUnit, unitIndex, focusedId]);
 
   function moveToUnit(nextIndex: number) {
     const bounded = Math.max(0, Math.min(units.length - 1, nextIndex));

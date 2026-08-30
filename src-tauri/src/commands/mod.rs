@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod analysis;
 pub mod app;
+pub mod cache;
 pub mod collections;
 pub mod contact_sheet;
 pub mod fileops;
@@ -18,6 +19,7 @@ pub mod views;
 pub use ai::*;
 pub use analysis::*;
 pub use app::*;
+pub use cache::*;
 pub use collections::*;
 pub use contact_sheet::*;
 pub use fileops::*;

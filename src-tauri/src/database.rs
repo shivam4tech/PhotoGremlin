@@ -6,20 +6,21 @@
 //! Schema is versioned via `schema_version` and applied incrementally.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 17;
+pub const CURRENT_SCHEMA_VERSION: i64 = 18;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
 
 pub struct Db {
     conn: Mutex<Connection>,
+    path: PathBuf,
 }
 
 impl Db {
@@ -36,6 +37,7 @@ impl Db {
         tracing::info!(path = %path.display(), "database opened");
         Ok(Self {
             conn: Mutex::new(conn),
+            path: path.to_path_buf(),
         })
     }
 
@@ -411,6 +413,21 @@ impl Db {
             )
             .map_err(db_err("create face observations"))?;
 
+            // v18 (Sprint 27): resume review exactly where the photographer
+            // stopped, while keeping selection reads cursor-paged and scoped
+            // to the active session.
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS review_progress (
+                    session_id INTEGER PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                    unit_index INTEGER NOT NULL DEFAULT 0,
+                    focused_photo_id INTEGER REFERENCES photos(id) ON DELETE SET NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE INDEX IF NOT EXISTS idx_selections_updated
+                    ON selections(updated_at, photo_id);",
+            )
+            .map_err(db_err("create review progress"))?;
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -433,6 +450,64 @@ impl Db {
             target
         };
         Ok(version)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn schema_version(&self) -> AppResult<i64> {
+        let conn = self.lock()?;
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_version'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(db_err("inspect schema version"))?;
+        if exists == 0 {
+            return Ok(0);
+        }
+        conn.query_row(
+            "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(db_err("read schema version"))
+    }
+
+    /// SQLite's full integrity check. Kept explicit so catalog switches and
+    /// recovery screens never mistake a file that merely opens for a healthy
+    /// catalog.
+    pub fn integrity_check(&self) -> AppResult<()> {
+        let conn = self.lock()?;
+        let result: String = conn
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .map_err(db_err("check catalog integrity"))?;
+        if result == "ok" {
+            Ok(())
+        } else {
+            Err(AppError::Database(format!("catalog integrity check failed: {result}")))
+        }
+    }
+
+    /// Create a consistent SQLite backup without copying a live WAL file.
+    /// VACUUM INTO refuses to overwrite the destination by design.
+    pub fn backup_to(&self, destination: &Path) -> AppResult<()> {
+        if destination.exists() {
+            return Err(AppError::validation(format!(
+                "Backup already exists: {}",
+                destination.display()
+            )));
+        }
+        if let Some(parent) = destination.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppError::io(e, parent.display().to_string()))?;
+        }
+        let conn = self.lock()?;
+        conn.execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()])
+            .map_err(db_err("backup catalog"))?;
+        Ok(())
     }
 
     fn active_session_id(&self, conn: &Connection) -> Result<Option<i64>, AppError> {
@@ -1655,6 +1730,107 @@ pub fn list_selections(&self, limit: i64) -> AppResult<Vec<SelectionRow>> {
     Ok(out)
 }
 
+/// Cursor-paged culling state for one session. This replaces the old IPC
+/// path that silently truncated every catalog at 20,000 decisions.
+pub fn list_selections_page(
+    &self,
+    session_id: Option<i64>,
+    after_photo_id: i64,
+    limit: i64,
+) -> AppResult<SelectionPage> {
+    let limit = limit.clamp(1, 5_000);
+    let conn = self.lock()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT s.photo_id, s.state, s.updated_at
+               FROM selections s
+               JOIN photos p ON p.id = s.photo_id
+              WHERE (?1 IS NULL OR p.session_id = ?1)
+                AND s.photo_id > ?2
+              ORDER BY s.photo_id
+              LIMIT ?3",
+        )
+        .map_err(db_err("prepare selection page"))?;
+    let rows = stmt
+        .query_map(params![session_id, after_photo_id.max(0), limit], |r| {
+            Ok(SelectionRow {
+                photo_id: r.get(0)?,
+                state: r.get(1)?,
+                updated_at: r.get(2)?,
+            })
+        })
+        .map_err(db_err("query selection page"))?;
+    let mut selections = Vec::new();
+    for row in rows {
+        selections.push(row.map_err(db_err("read selection page row"))?);
+    }
+    let next_after_photo_id = if selections.len() == limit as usize {
+        selections.last().map(|row| row.photo_id)
+    } else {
+        None
+    };
+    Ok(SelectionPage {
+        selections,
+        next_after_photo_id,
+    })
+}
+
+pub fn get_review_progress(&self, session_id: i64) -> AppResult<Option<ReviewProgress>> {
+    let conn = self.lock()?;
+    conn.query_row(
+        "SELECT session_id, unit_index, focused_photo_id, updated_at
+           FROM review_progress WHERE session_id = ?1",
+        [session_id],
+        |r| {
+            Ok(ReviewProgress {
+                session_id: r.get(0)?,
+                unit_index: r.get(1)?,
+                focused_photo_id: r.get(2)?,
+                updated_at: r.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(db_err("read review progress"))
+}
+
+pub fn set_review_progress(
+    &self,
+    session_id: i64,
+    unit_index: i64,
+    focused_photo_id: Option<i64>,
+) -> AppResult<()> {
+    if unit_index < 0 {
+        return Err(AppError::validation("Review position cannot be negative."));
+    }
+    let conn = self.lock()?;
+    if let Some(photo_id) = focused_photo_id {
+        let belongs: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM photos WHERE id = ?1 AND session_id = ?2)",
+                params![photo_id, session_id],
+                |r| r.get(0),
+            )
+            .map_err(db_err("validate review photo"))?;
+        if !belongs {
+            return Err(AppError::validation(
+                "The review position does not belong to this project.",
+            ));
+        }
+    }
+    conn.execute(
+        "INSERT INTO review_progress (session_id, unit_index, focused_photo_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(session_id) DO UPDATE SET
+            unit_index = excluded.unit_index,
+            focused_photo_id = excluded.focused_photo_id,
+            updated_at = excluded.updated_at",
+        params![session_id, unit_index, focused_photo_id, crate::time::now_utc()],
+    )
+    .map_err(db_err("save review progress"))?;
+    Ok(())
+}
+
     // -----------------------------------------------------------------
     // Saved views (Sprint 8) — a saved view is a name + a structured filter.
     // -----------------------------------------------------------------
@@ -2618,6 +2794,20 @@ pub struct SelectionRow {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SelectionPage {
+    pub selections: Vec<SelectionRow>,
+    pub next_after_photo_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ReviewProgress {
+    pub session_id: i64,
+    pub unit_index: i64,
+    pub focused_photo_id: Option<i64>,
+    pub updated_at: String,
+}
+
 const SELECTION_STATES: [&str; 3] = ["selected", "rejected", "needs_attention"];
 
 
@@ -2890,6 +3080,83 @@ mod tests {
 
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);
+    }
+
+    #[test]
+    fn selection_pages_cover_more_than_legacy_twenty_thousand_cap() {
+        let dir = std::env::temp_dir().join(format!("pg_db_scale_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db_path = dir.join("scale.sqlite");
+        let _ = std::fs::remove_file(&db_path);
+        let db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+        let session = db.upsert_session("Large shoot", Some("/scale")).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute(
+                "WITH RECURSIVE numbers(value) AS (
+                   SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 20050
+                 )
+                 INSERT INTO photos(path, filename, extension, session_id, indexed_at)
+                 SELECT '/scale/' || value || '.jpg', value || '.jpg', 'jpg', ?1, '2026-01-01T00:00:00Z'
+                   FROM numbers",
+                [session],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO selections(photo_id, state, updated_at)
+                 SELECT id, 'selected', '2026-01-01T00:00:00Z' FROM photos WHERE session_id = ?1",
+                [session],
+            ).unwrap();
+        }
+
+        let mut cursor = 0;
+        let mut count = 0usize;
+        loop {
+            let page = db.list_selections_page(Some(session), cursor, 2_000).unwrap();
+            count += page.selections.len();
+            match page.next_after_photo_id {
+                Some(next) => cursor = next,
+                None => break,
+            }
+        }
+        assert_eq!(count, 20_050);
+
+        let focused = db.list_selections_page(Some(session), 0, 1).unwrap().selections[0].photo_id;
+        db.set_review_progress(session, 321, Some(focused)).unwrap();
+        let progress = db.get_review_progress(session).unwrap().unwrap();
+        assert_eq!(progress.unit_index, 321);
+        assert_eq!(progress.focused_photo_id, Some(focused));
+
+        let _ = std::fs::remove_file(&db_path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn catalog_backup_is_consistent_and_does_not_overwrite() {
+        let dir = std::env::temp_dir().join(format!("pg_db_backup_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let source_path = dir.join("source.sqlite");
+        let backup_path = dir.join("backup.sqlite");
+        let source = Db::open(&source_path).unwrap();
+        source.migrate().unwrap();
+        source.upsert_session("Only in source", Some("/one")).unwrap();
+        source.backup_to(&backup_path).unwrap();
+        assert!(source.backup_to(&backup_path).is_err());
+
+        let backup = Db::open(&backup_path).unwrap();
+        backup.integrity_check().unwrap();
+        assert_eq!(backup.list_sessions().unwrap().len(), 1);
+
+        let isolated_path = dir.join("isolated.sqlite");
+        let isolated = Db::open(&isolated_path).unwrap();
+        isolated.migrate().unwrap();
+        assert!(isolated.list_sessions().unwrap().is_empty());
+        assert_eq!(source.list_sessions().unwrap().len(), 1);
+
+        drop(backup);
+        drop(isolated);
+        drop(source);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

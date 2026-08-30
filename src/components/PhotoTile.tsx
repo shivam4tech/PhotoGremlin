@@ -5,13 +5,11 @@ import type { PhotoSummary } from "@/types/api";
 import type { SelectionState } from "@/stores/appStore";
 
 /**
- * Formats for which the Rust core deliberately does not generate previews
- * in v0.1 (no local pixel provider): RAW sensors + HEIC. The tile shows a
- * labelled placeholder instead of an error — the file is still indexed and
- * fully usable for everything else.
+ * Formats for which the Rust core deliberately does not generate previews.
+ * RAW files are handled locally by embedded/paired previews and a bounded
+ * decode fallback; HEIC remains indexed with a labelled placeholder.
  */
 const NO_PREVIEW_EXTENSIONS = new Set([
-  "cr2", "cr3", "nef", "arw", "raf", "dng", "orf", "rw2",
   "heic", "heif",
 ]);
 

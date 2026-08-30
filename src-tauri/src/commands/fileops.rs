@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tauri::{AppHandle, State};
 
-use crate::database::{FileOpRow, SelectionRow};
+use crate::database::{FileOpRow, SelectionPage};
 use crate::error::{AppError, AppResult};
 use crate::events;
 use crate::filesystem::{
@@ -50,7 +50,7 @@ fn spawn_operation(
 ) -> AppResult<()> {
     let job = claim_operation_slot(state)?;
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let op_slot = state.operation.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();
@@ -109,7 +109,8 @@ pub fn plan_group_rename(
     group_name: String,
     state: State<AppState>,
 ) -> AppResult<FileOpPlan> {
-    filesystem::plan_rename(&state.db, &photo_ids, &template, &group_name)
+    let db = state.db()?;
+    filesystem::plan_rename(&db, &photo_ids, &template, &group_name)
 }
 
 #[tauri::command]
@@ -122,12 +123,14 @@ pub fn plan_move_copy(
 ) -> AppResult<FileOpPlan> {
     let kind = OpKind::parse(&op)?;
     let policy = CollisionPolicy::parse(&on_collision)?;
-    filesystem::plan_move_copy(&state.db, &photo_ids, Path::new(&dest_dir), kind, policy)
+    let db = state.db()?;
+    filesystem::plan_move_copy(&db, &photo_ids, Path::new(&dest_dir), kind, policy)
 }
 
 #[tauri::command]
 pub fn plan_trash(photo_ids: Vec<i64>, state: State<AppState>) -> AppResult<FileOpPlan> {
-    filesystem::plan_trash(&state.db, &photo_ids)
+    let db = state.db()?;
+    filesystem::plan_trash(&db, &photo_ids)
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +145,8 @@ pub fn start_group_rename(
     template: String,
     group_name: String,
 ) -> AppResult<()> {
-    let plan = filesystem::plan_rename(&state.db, &photo_ids, &template, &group_name)?;
+    let db = state.db()?;
+    let plan = filesystem::plan_rename(&db, &photo_ids, &template, &group_name)?;
     if plan.aborted {
         return Err(AppError::validation(
             "Rename plan aborted: two or more photographs map to the same name".to_string(),
@@ -165,7 +169,8 @@ pub fn start_move_copy(
 ) -> AppResult<()> {
     let kind = OpKind::parse(&op)?;
     let policy = CollisionPolicy::parse(&on_collision)?;
-    let plan = filesystem::plan_move_copy(&state.db, &photo_ids, Path::new(&dest_dir), kind, policy)?;
+    let db = state.db()?;
+    let plan = filesystem::plan_move_copy(&db, &photo_ids, Path::new(&dest_dir), kind, policy)?;
     if plan.items.iter().all(|i| !i.ok) {
         return Err(AppError::validation(
             "No photographs can be moved or copied (destination collisions or missing files)"
@@ -177,7 +182,8 @@ pub fn start_move_copy(
 
 #[tauri::command]
 pub fn start_trash(app: AppHandle, state: State<'_, AppState>, photo_ids: Vec<i64>) -> AppResult<()> {
-    let plan = filesystem::plan_trash(&state.db, &photo_ids)?;
+    let db = state.db()?;
+    let plan = filesystem::plan_trash(&db, &photo_ids)?;
     if plan.items.iter().all(|i| !i.ok) {
         return Err(AppError::validation("No photographs can be trashed (files no longer exist)".to_string()));
     }
@@ -208,7 +214,7 @@ pub fn stop_operation(state: State<AppState>) -> AppResult<bool> {
 
 #[tauri::command]
 pub fn set_selection(photo_id: i64, state: State<AppState>, selection: String) -> AppResult<()> {
-    state.db.set_selection(photo_id, &selection)
+    state.db()?.set_selection(photo_id, &selection)
 }
 
 #[tauri::command]
@@ -217,22 +223,31 @@ pub fn set_selections(
     state: State<AppState>,
     selection: String,
 ) -> AppResult<usize> {
-    state.db.set_selections(photo_ids, &selection)
+    state.db()?.set_selections(photo_ids, &selection)
 }
 
 #[tauri::command]
 pub fn clear_selection(photo_id: i64, state: State<AppState>) -> AppResult<()> {
-    state.db.clear_selection(photo_id)
+    state.db()?.clear_selection(photo_id)
 }
 
 #[tauri::command]
 pub fn clear_selections(photo_ids: Vec<i64>, state: State<AppState>) -> AppResult<usize> {
-    state.db.clear_selections(photo_ids)
+    state.db()?.clear_selections(photo_ids)
 }
 
 #[tauri::command]
-pub fn list_selections(state: State<AppState>) -> AppResult<Vec<SelectionRow>> {
-    state.db.list_selections(20_000)
+pub fn list_selections(
+    state: State<AppState>,
+    session_id: Option<i64>,
+    after_photo_id: Option<i64>,
+    limit: Option<i64>,
+) -> AppResult<SelectionPage> {
+    state.db()?.list_selections_page(
+        session_id,
+        after_photo_id.unwrap_or(0),
+        limit.unwrap_or(2_000),
+    )
 }
 
 /// Apply curatorial marks (rating / flag / color label) to a batch of
@@ -247,11 +262,11 @@ pub fn update_marks(
     color: Option<String>,
 ) -> AppResult<usize> {
     state
-        .db
+        .db()?
         .set_marks(&photo_ids, rating, flag, color.as_deref())
 }
 
 #[tauri::command]
 pub fn recent_file_ops(state: State<AppState>, limit: i64) -> AppResult<Vec<FileOpRow>> {
-    state.db.recent_file_ops(limit)
+    state.db()?.recent_file_ops(limit)
 }

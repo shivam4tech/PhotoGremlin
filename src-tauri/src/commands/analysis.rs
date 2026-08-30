@@ -47,7 +47,7 @@ pub async fn start_analysis(
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let slot = state.analysis.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();

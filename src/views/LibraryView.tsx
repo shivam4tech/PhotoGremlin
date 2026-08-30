@@ -51,10 +51,6 @@ export function LibraryView() {
     [activeFolder, scanSummary, libraryVersion, marksVersion],
   );
 
-  // Load persisted culling state once per library so tiles render their marks.
-  useEffect(() => {
-    if (selectionMode) void store().loadSelections();
-  }, [selectionMode, refreshKey]);
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [sessionPhotoCount, setSessionPhotoCount] = useState<number | null>(null);
   const [sessionName, setSessionName] = useState("This shoot");
@@ -72,6 +68,14 @@ export function LibraryView() {
     }).catch(() => { if (!cancelled) { setSessionId(null); setSessionPhotoCount(null); setSessionName("This shoot"); } });
     return () => { cancelled = true; };
   }, [activeFolder, scanSummary, dbStatus?.photo_count]);
+
+  // Cursor-paged and session-scoped: a large catalog is never silently
+  // truncated and another project's decisions cannot enter this view.
+  useEffect(() => {
+    if (selectionMode && (!activeFolder || sessionId !== null)) {
+      void store().loadSelections(sessionId);
+    }
+  }, [selectionMode, refreshKey, sessionId, activeFolder]);
 
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
   const filterJson = useMemo(() => {
