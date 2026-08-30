@@ -9,7 +9,7 @@ rust-version = "1.77"
 
 [lib]
 name = "photogremlin_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -58,3 +58,11 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
+codegen-units = 8
+
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+codegen-units = 8
+incremental = false
