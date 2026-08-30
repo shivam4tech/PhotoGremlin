@@ -3,7 +3,7 @@
 Strategy: fast, offline, deterministic. No network, no real photo sets, no
 flaky timing.
 
-## Rust unit tests (`cargo test` in src-tauri)
+## Rust unit tests (`npm run test:rust` from the repository root)
 
 Per-sprint coverage (✓ = in place today):
 
@@ -228,8 +228,8 @@ write synthetic folder (N images + EXIF via a tiny writer or sidecar JPEG)
      storage/queue invariants above still run)   (Sprint 9)
  ```
 
-Run with `cargo test` (same command, `tests/` dir) so one command validates
-the pipeline.
+Run with `npm run test:rust` (the guarded root command includes the `tests/`
+directory) so one command validates the pipeline.
 
 ## What we do NOT test here
 

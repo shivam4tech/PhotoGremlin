@@ -61,7 +61,7 @@ itself unavailable from Settings.
 |---|---|
 | dev UI (hot reload) | `npm run dev` |
 | dev full app | `npm run tauri dev` |
-| Rust unit/integration tests | `cd src-tauri && cargo test` |
+| Rust unit/integration tests | `npm run test:rust` |
 | Frontend tests | `npm test` |
 | TypeScript check | `npm run typecheck` |
 | Frontend build | `npm run build` |
@@ -152,16 +152,37 @@ in the core code is platform-branching.
 
 ## Build resource guard
 
-The repository includes `.cargo/config.toml` with `build.jobs = 2`. This
-keeps Tauri/image/ONNX compilation from consuming all workstation RAM while
-the desktop app and browser are open. It applies automatically to Cargo,
-Tauri CLI builds, and IDE builds; do not override it for routine development.
+The memory spikes diagnosed on the 16 GB development workstation came from
+Rust debug compilation and linking, not the running PhotoGremlin application.
+On 2026-08-30 a Tauri debug build emitted a 1.24 GB static library, a 448 MB
+shared library, a 330 MB Rust library and a roughly 490 MB executable. Seconds
+later the Codex/terminal cgroup reached 7.3 GB and `systemd-oomd` killed it while
+Firefox and Chromium already occupied several more gigabytes.
 
-Codex sessions in this repository use the project-local `.codex/config.toml`
-to compact at 80,000 total tokens. The guard was added after a 135k-token
-session containing repeated large command outputs and screenshots reached a
-10.6 GB terminal-cgroup peak and was killed by `systemd-oomd`; PhotoGremlin's
-recorded app peak in the same boot was below 0.7 GB. Agent work must keep broad
-commands away from the 200k-file ignored corpora, cap retained output, and run
-the npm, Cargo and Tauri stages sequentially. The corpora remain in place and
-ignored; this guard changes development tooling only, never app runtime.
+The repository now constrains that workload at three layers:
+
+- `.cargo/config.toml` uses one Cargo job. The development and test profiles
+  retain source line tables while limiting code generation to eight units;
+  tests do not retain incremental state. The desktop build emits only an
+  `rlib`, rather than the mobile-oriented static and shared libraries.
+- `npm run test:rust`, `npm run build:app`, and `npm run build:app:release`
+  use `tools/run-resource-guarded.mjs`. A build will not start with less than
+  6 GiB available. On Linux with a user systemd manager it runs in a separate
+  scope with `MemoryHigh=3G`, `MemoryMax=4G`, and `MemorySwapMax=1G`; exceeding
+  the limit stops the build scope instead of the Codex terminal and unrelated
+  desktop applications. Windows, macOS, and Linux systems without a compatible
+  user manager retain the Cargo/profile guards and run without a cgroup limit.
+- `.codex/config.toml` compacts project sessions at 60,000 total tokens. This
+  lowers the agent's baseline memory, but it is independent of linker memory.
+
+If a deliberately scheduled build must run below the 6 GiB preflight threshold,
+set `PHOTOGREMLIN_ALLOW_LOW_MEMORY=1` for that command. This bypasses only the
+preflight refusal; on compatible Linux systems the 4 GiB hard ceiling remains.
+Do not use the override for routine work. Source `~/pg-env.sh` first on this
+machine, keep npm/Cargo/Tauri stages sequential, and do not run builds beside
+training or corpus collection.
+
+The ignored corpora stay in place: their disk and indexing footprint is large,
+but they were not resident in the build cgroup during the observed linker OOM.
+Broad agent or editor scans must continue to exclude them. No part of this
+guard changes application runtime behavior or adds network access.

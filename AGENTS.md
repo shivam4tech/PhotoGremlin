@@ -42,7 +42,7 @@ SQLite.
 11. **Cross-platform.** Windows, macOS, Linux. One codebase via Tauri. No
     platform-specific branching unless unavoidable, and never at the
     architecture level.
-12. **Run tests after every modification** (`cargo test` in `src-tauri`,
+12. **Run tests after every modification** (`npm run test:rust` and
     `npm test` at the root). **Build before finishing a sprint**
     (`npm run build:app` — debug bundle; release build at the final sprint).
 13. **Update documentation** in `docs/` when you change architecture, schema,
@@ -73,7 +73,7 @@ SQLite.
 
 ## Agent resource guard (this machine)
 
-- `.codex/config.toml` compacts project sessions at 80,000 total tokens. Do
+- `.codex/config.toml` compacts project sessions at 60,000 total tokens. Do
   not raise or disable this guard on the 16 GB development workstation.
 - Broad searches and inventory commands must exclude ignored bulk paths:
   `ml-corpus/`, `tools/train/.venv/`, `tools/train/runs/`, `src-tauri/target/`,
@@ -138,7 +138,7 @@ git push origin develop
 1. Read this file and the relevant `docs/` pages.
 2. Inspect existing code before modifying it.
 3. Implement the sprint's scope only.
-4. `cargo test` (in `src-tauri`) and `npm test` (root).
+4. `npm run test:rust` and `npm test` (root).
 5. `npm run typecheck` and `npm run build` (frontend).
 6. `npm run build:app` (full Tauri bundle — verify it produces an app).
 7. Fix failures; do not move on with a red build.
