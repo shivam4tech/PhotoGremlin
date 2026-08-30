@@ -71,9 +71,14 @@ its own tokens, green accent, language, and local-first controls.
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
 - Brightness, sharpness, contrast, ISO and focal length are always-visible
-  dual-range controls in the scrollable inspector. Tracks stay neutral and the
-  accent marks only the selected interval; there are no quality colors,
-  gradients or low/medium/high verdicts.
+  dual-range controls in the scrollable inspector. Their tracks encode the
+  measured scale with restrained, field-specific color: dark-to-light for
+  brightness, low-to-high intensity for sharpness, cool magnitude for
+  contrast, cool-to-warm for ISO, and violet magnitude for focal length. This
+  is measurement context, never a red/green quality verdict. Exact values are
+  hidden at rest and appear in the thumb bubble while the control is being
+  adjusted; screen readers receive the same value through the native range
+  input and `aria-valuetext`.
 - Those five ranges are not offered again by the advanced composer. Legacy
   saved conditions remain visible and removable without silent rewriting.
 - Similar, burst and local face-appearance results live in Groups, not above
@@ -100,8 +105,9 @@ its own tokens, green accent, language, and local-first controls.
   instant, looping spinners become static states.
 - Blur/backdrop-filter never animates on large surfaces (photo grid!);
   `will-change` only during an active animation, then removed.
-- No gradients, no glow-as-affordance, no decorative motion. The accent-glow
-  token exists for focus rings, nothing else.
+- No decorative gradients, no glow-as-affordance, no decorative motion. The
+  five measured range tracks are the sole data-encoding gradient exception.
+  The accent-glow token exists for focus rings, nothing else.
 
 ## 5. Accessibility (non-negotiable)
 

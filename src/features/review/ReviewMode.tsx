@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore, type SelectionState } from "@/stores/appStore";
-import { buildReviewUnits, firstUnreviewedId, reviewCounts } from "@/features/review/reviewQueue";
+import { ReviewCompareDialog } from "@/features/review/ReviewCompareDialog";
+import {
+  buildReviewUnits,
+  comparisonPhotoIds,
+  firstUnreviewedId,
+  reviewCounts,
+} from "@/features/review/reviewQueue";
 import type { EditorConfig, PhotoFull, PhotoSummary, ReviewQueue } from "@/types/api";
 
 type ImageState = { kind: "loading" } | { kind: "ready"; url: string } | { kind: "unavailable"; message: string };
@@ -73,6 +79,7 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
   const [handoffFailed, setHandoffFailed] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,6 +208,7 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (compareOpen) return;
       const key = event.key.toLowerCase();
       if (key === "escape") { event.preventDefault(); onClose(); }
       else if (key === "arrowleft" || key === "h") { event.preventDefault(); moveToUnit(unitIndex - 1); }
@@ -210,10 +218,14 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
       else if (key === "l") { event.preventDefault(); decide("needs_attention"); }
       else if (key === "u") { event.preventDefault(); undo(); }
       else if (key === "backspace") { event.preventDefault(); clearDecision(); }
+      else if (key === "c" && currentUnit && currentUnit.photoIds.length > 1) {
+        event.preventDefault();
+        setCompareOpen(true);
+      }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [unitIndex, currentUnit, focusedId, selections, lastAction, units]);
+  }, [unitIndex, currentUnit, focusedId, selections, lastAction, units, compareOpen]);
 
   if (loadError) return <section className="review-shell"><p role="alert">Could not load this shoot: {loadError}</p><button className="btn" onClick={onClose}>Back to library</button></section>;
   if (queue === null) return <section className="review-shell"><div className="review-image-placeholder">Preparing local review queue…</div></section>;
@@ -221,6 +233,9 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
 
   const unitPhotos = currentUnit.photoIds.map((id) => photosById.get(id)).filter((photo): photo is PhotoSummary => photo !== undefined);
   const context = currentUnit.kind === "burst" ? `Burst · ${unitPhotos.length} frames` : currentUnit.kind === "similar" ? `Similar frames · ${unitPhotos.length}` : "Single frame";
+  const comparePhotos = comparisonPhotoIds(currentUnit.photoIds, currentPhoto.id)
+    .map((id) => photosById.get(id))
+    .filter((photo): photo is PhotoSummary => photo !== undefined);
   const measurement = measurementLabel(full);
   const activeSelection = focusedId === null ? null : selections[focusedId] ?? null;
   const finished = allPhotoIds.length > 0 && counts.reviewed === allPhotoIds.length;
@@ -289,8 +304,13 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
             <button className="btn" onClick={() => decide("needs_attention")}><kbd>L</kbd> Later</button>
             <button className="btn btn-ghost" onClick={clearDecision} disabled={!activeSelection}><kbd>⌫</kbd> Clear</button>
           </div>
+          {unitPhotos.length > 1 && (
+            <button className="btn btn-sm review-compare-trigger" onClick={() => setCompareOpen(true)}>
+              <kbd>C</kbd> Compare up to {Math.min(4, unitPhotos.length)} frames
+            </button>
+          )}
           <button className="btn btn-sm review-undo" onClick={undo} disabled={!lastAction}><kbd>U</kbd> Undo last decision</button>
-          <p className="review-help">←/→ or H/J moves between moments. Decisions remain local and can be changed at any time.</p>
+          <p className="review-help">←/→ or H/J moves between moments. C compares a sequence. Decisions remain local and can be changed at any time.</p>
         </aside>
       </main>
 
@@ -304,6 +324,16 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
         <button className="btn btn-sm" onClick={() => moveToUnit(unitIndex + 1)} disabled={unitIndex >= units.length - 1}>Next moment →</button>
         <span className="faint">No file is moved, renamed, or deleted while reviewing.</span>
       </footer>
+
+      {compareOpen && comparePhotos.length > 1 && (
+        <ReviewCompareDialog
+          photos={comparePhotos}
+          focusedId={currentPhoto.id}
+          selections={selections}
+          onFocus={setFocusedId}
+          onClose={() => setCompareOpen(false)}
+        />
+      )}
     </section>
   );
 }

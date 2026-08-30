@@ -84,6 +84,7 @@ Release artifacts are written to `src-tauri/target/release/` (executable) and `s
 - `docs/LOCAL_AI.md` — the on-device model pipeline (faces)
 - `docs/DEVELOPMENT.md` — build instructions, toolchain, release packaging
 - `docs/TESTING.md` — test strategy and how to run everything
+- `docs/BETA_TESTING.md` — beta scope, photographer smoke pass, and known limits
 - `AGENTS.md` — contribution rules and repository conventions
 
 ## License

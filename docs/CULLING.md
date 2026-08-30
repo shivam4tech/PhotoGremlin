@@ -63,6 +63,20 @@ applications and operating-system argument limits vary. Larger kept sets stay
 available through **Export originals**, which uses the existing preview-first
 copy workflow. See `EDITOR_HANDOFF.md` for the safety boundary.
 
+## Sequence comparison (Sprint 29)
+
+Grouped review moments expose **Compare sequence** and the `C` shortcut. The
+dialog shows a capture-order window of at most four photographs around the
+focused frame. It fetches the same bounded local thumbnails as Review rather
+than decoding originals, and one zoom control plus normalized scroll position
+keeps every pane synchronized. A photographer can focus any frame back into
+the review moment without changing its decision.
+
+Comparison captions show only the filename and current reversible decision.
+There is no automatic winner, score, or aesthetic language. Limiting the
+surface to four thumbnails keeps memory use predictable on large shoots while
+still covering the adjacent frames needed for a burst or similarity decision.
+
 ## Deferred scoring research
 
 The following was explored as a future configurable assistance layer. It is
