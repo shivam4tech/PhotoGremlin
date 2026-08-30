@@ -28,6 +28,10 @@ membership, exports and preview-first file actions. Contact sheets are an
 export format (printable PNG reference pages), not a Collection or original
 file handoff.
 
+The tray's Export and More menus use the shared popover layer above the photo
+grid, so tile controls never paint through their opaque surfaces. Both menus
+use the same two-line option rows and close as soon as an action is chosen.
+
 Rating/flag/label writes increment a shared `marksVersion`. Library queries,
 Collection and Group grids and the open viewer refresh from that version, so
 every photo surface reflects a successful mark mutation without reopening the

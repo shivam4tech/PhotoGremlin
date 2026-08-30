@@ -64,12 +64,18 @@ export function ExportSheetButton({ photoIds, presentation = "button" }: { photo
 
   if (presentation === "menu") {
     return busy ? (
-      <button onClick={() => void api.stopExport()}>
+      <button className="action-menu-item" onClick={(event) => {
+        event.currentTarget.closest("details")?.removeAttribute("open");
+        void api.stopExport();
+      }}>
         <strong>Cancel contact sheet</strong>
         <span>{progress && progress.total > 0 ? `${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} pages` : "Preparing printable pages…"}</span>
       </button>
     ) : (
-      <button onClick={onExport} disabled={photoIds.length === 0}>
+      <button className="action-menu-item" onClick={(event) => {
+        event.currentTarget.closest("details")?.removeAttribute("open");
+        void onExport();
+      }} disabled={photoIds.length === 0}>
         <strong>Contact sheet (PNG)…</strong><span>12 photographs per printable page</span>
       </button>
     );
