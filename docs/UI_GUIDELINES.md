@@ -15,8 +15,9 @@ with a concrete fix, like the skills prescribe.
 
 - Every color, radius, shadow, font comes from `--*` tokens in
   `theme.css`; raw hex values in components are violations.
-- One accent per view. `--accent` (green) is the single affordance color;
-  `--warning/--danger/--info` exist for state, not decoration.
+- One accent per view. Muted champagne `--accent` is the single affordance
+  color. `--positive` is reserved for kept/complete state, while
+  `--warning/--danger/--info` communicate their named states, not decoration.
 - Both themes must always be checked: if you touch a color, verify dark AND
   light (`data-theme="light"`) contrast.
 - New UI needs new tokens only when existing ones genuinely cannot express
@@ -55,7 +56,7 @@ At the supported 1024 px minimum window width, the rails remain visible and
 the center grid stays the only photograph scroller. The inspector has its own
 vertical scroll; it must never make the virtual grid measure its contents.
 This is a structural convention, not an Adobe visual clone: PhotoGremlin keeps
-its own tokens, green accent, language, and local-first controls.
+its own graphite/champagne tokens, language, and local-first controls.
 
 ### Photo-first culling (Sprint 26)
 
@@ -107,7 +108,8 @@ its own tokens, green accent, language, and local-first controls.
   `will-change` only during an active animation, then removed.
 - No decorative gradients, no glow-as-affordance, no decorative motion. The
   five measured range tracks are the sole data-encoding gradient exception.
-  The accent-glow token exists for focus rings, nothing else.
+  Large translucent surfaces must not use backdrop blur; an opaque semantic
+  overlay is clearer over photographs and cheaper to render.
 
 ## 5. Accessibility (non-negotiable)
 
