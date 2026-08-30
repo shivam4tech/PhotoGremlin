@@ -11,6 +11,8 @@ import type {
   CacheStatus,
   CatalogHealth,
   DbStatus,
+  EditorConfig,
+  EditorLaunchSummary,
   FileOpPlan,
   FileOpRow,
   FilterValueOptions,
@@ -51,6 +53,15 @@ export const api = {
   logClientError: (source: string, message: string, stack: string | null): Promise<void> =>
     invoke("log_client_error", { source, message, stack }),
   pickFolder: (): Promise<string | null> => invoke("pick_folder"),
+  pickEditorApplication: (): Promise<string | null> => invoke("pick_editor_application"),
+  getEditorConfig: (): Promise<EditorConfig | null> => invoke("get_editor_config"),
+  setEditorConfig: (executable: string): Promise<EditorConfig> =>
+    invoke("set_editor_config", { executable }),
+  clearEditorConfig: (): Promise<void> => invoke("clear_editor_config"),
+  launchInEditor: (photoIds: number[]): Promise<EditorLaunchSummary> =>
+    invoke("launch_in_editor", { photoIds }),
+  openInFileManager: (path: string): Promise<void> =>
+    invoke("open_in_file_manager", { path }),
   setActiveFolder: (path: string): Promise<void> =>
     invoke("set_active_folder", { path }),
   getActiveFolder: (): Promise<string | null> => invoke("get_active_folder"),

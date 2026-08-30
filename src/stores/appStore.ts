@@ -319,8 +319,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openInFileManager: async (path: string) => {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("open_in_file_manager", { path });
+    await api.openInFileManager(path);
   },
 
   setDashboardLayout: async (layout) => {

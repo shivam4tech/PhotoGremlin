@@ -1,6 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
 import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
+import { api, toErrorMessage } from "@/lib/ipc";
+import { useAppStore } from "@/stores/appStore";
+import type { EditorConfig } from "@/types/api";
 import { ExportSheetButton } from "./ExportSheetButton";
 import { MarksPanel } from "./MarksPanel";
 
@@ -29,11 +32,24 @@ export function CullActionTray({
 }: CullActionTrayProps) {
   const [fileAction, setFileAction] = useState<FileOpsTab | null>(null);
   const [collectionId, setCollectionId] = useState<number | null>(null);
+  const [editor, setEditor] = useState<EditorConfig | null>(null);
+  const [editorLoaded, setEditorLoaded] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
   const counts = useMemo(() => [
     `${selectedIds.length.toLocaleString()} kept`,
     `${rejectedCount.toLocaleString()} rejected`,
     `${laterCount.toLocaleString()} later`,
   ].join(" · "), [selectedIds.length, rejectedCount, laterCount]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getEditorConfig()
+      .then((config) => { if (!cancelled) setEditor(config); })
+      .catch(() => { if (!cancelled) setEditor(null); })
+      .finally(() => { if (!cancelled) setEditorLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
 
   function chooseFileAction(event: React.MouseEvent<HTMLButtonElement>, action: FileOpsTab) {
     event.currentTarget.closest("details")?.removeAttribute("open");
@@ -43,6 +59,26 @@ export function CullActionTray({
   function chooseTrayAction(event: React.MouseEvent<HTMLButtonElement>, action: () => void) {
     event.currentTarget.closest("details")?.removeAttribute("open");
     action();
+  }
+
+  async function openInEditor(event: React.MouseEvent<HTMLButtonElement>) {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+    setLaunchError(null);
+    if (!editor) {
+      useAppStore.getState().setView("settings");
+      return;
+    }
+    setLaunching(true);
+    try {
+      const result = await api.launchInEditor(selectedIds);
+      useAppStore.getState().setNotice(
+        `Opened ${result.launched.toLocaleString()} photograph${result.launched === 1 ? "" : "s"} in ${result.application}${result.skippedMissing ? ` · ${result.skippedMissing} missing skipped` : ""}.`,
+      );
+    } catch (error) {
+      setLaunchError(toErrorMessage(error));
+    } finally {
+      setLaunching(false);
+    }
   }
 
   return (
@@ -67,12 +103,23 @@ export function CullActionTray({
         <details className="action-menu">
           <summary className="btn btn-sm" aria-label="Export selected photographs">Export</summary>
           <div className="action-menu-popover">
+            <button
+              className="action-menu-item"
+              disabled={!editorLoaded || selectedIds.length === 0 || operating || launching || Boolean(editor && selectedIds.length > editor.maxFilesPerLaunch)}
+              onClick={(event) => void openInEditor(event)}
+            >
+              <strong>{editor ? `Open in ${editor.displayName}` : "Configure editing app…"}</strong>
+              <span>{editor && selectedIds.length > editor.maxFilesPerLaunch ? `Limited to ${editor.maxFilesPerLaunch} files; export this larger set instead` : "Hand kept source files to a local desktop editor"}</span>
+            </button>
+            <span className="action-menu-separator" />
             <button className="action-menu-item" disabled={selectedIds.length === 0 || operating} onClick={(event) => chooseFileAction(event, "copy")}>
               <strong>Export originals…</strong><span>Copy kept files to a folder</span>
             </button>
             <ExportSheetButton photoIds={selectedIds} presentation="menu" />
           </div>
         </details>
+
+        {launchError && <span className="cull-tray-error" role="alert">{launchError}</span>}
 
         <details className="action-menu">
           <summary className="btn btn-sm btn-ghost" aria-label="More cull actions">More</summary>

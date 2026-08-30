@@ -10,7 +10,7 @@ import {
   runtimeLine,
 } from "@/features/settings/ai";
 import { SHORTCUTS } from "@/features/shortcuts";
-import type { CacheStatus, CatalogHealth } from "@/types/api";
+import type { CacheStatus, CatalogHealth, EditorConfig } from "@/types/api";
 
 function PathRow({ label, value }: { label: string; value: string }) {
   return (
@@ -121,6 +121,83 @@ function StorageMaintenanceCard() {
         </details>
       )}
       {message && <p role="status" className="faint" style={{ marginBottom: 0, fontSize: 12.5 }}>{message}</p>}
+    </div>
+  );
+}
+
+function EditingApplicationCard() {
+  const [config, setConfig] = useState<EditorConfig | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getEditorConfig()
+      .then((value) => { if (!cancelled) setConfig(value); })
+      .catch((error) => { if (!cancelled) { setMessage(toErrorMessage(error)); setFailed(true); } })
+      .finally(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function choose() {
+    setBusy(true);
+    setMessage(null);
+    setFailed(false);
+    try {
+      const executable = await api.pickEditorApplication();
+      if (!executable) return;
+      const next = await api.setEditorConfig(executable);
+      setConfig(next);
+      setMessage(`${next.displayName} is ready for local handoff.`);
+    } catch (error) {
+      setFailed(true);
+      setMessage(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function clear() {
+    setBusy(true);
+    setMessage(null);
+    setFailed(false);
+    try {
+      await api.clearEditorConfig();
+      setConfig(null);
+      setMessage("Editing application cleared.");
+    } catch (error) {
+      setFailed(true);
+      setMessage(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card settings-card">
+      <h3>Editing handoff</h3>
+      <p className="faint settings-card-copy">
+        Send a kept set to Lightroom, Capture One, darktable, or another desktop editor. PhotoGremlin starts the application with your source files; it never writes to an editor catalog or changes the photographs.
+      </p>
+      <div className="editor-config-row">
+        <div className="editor-config-summary">
+          <span className="label">Editing application</span>
+          <strong>{!loaded ? "Checking…" : config?.displayName ?? "Not configured"}</strong>
+          {config && <span className="mono faint">{config.executable}</span>}
+        </div>
+        <div className="settings-actions">
+          <button className="btn btn-sm" disabled={busy} onClick={() => void choose()}>
+            {config ? "Change…" : "Choose application…"}
+          </button>
+          {config && <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => void clear()}>Clear</button>}
+        </div>
+      </div>
+      <p className="faint settings-note">
+        Direct launch is capped at {config?.maxFilesPerLaunch ?? 500} files for stability. Use Export originals for larger selections.
+      </p>
+      {message && <p role={failed ? "alert" : "status"} className={failed ? "settings-inline-error" : "settings-inline-status"}>{message}</p>}
     </div>
   );
 }
@@ -366,6 +443,8 @@ export function SettingsView() {
       </div>
 
       <LocalIntelligenceCard />
+
+      <EditingApplicationCard />
 
       <StorageMaintenanceCard />
 
