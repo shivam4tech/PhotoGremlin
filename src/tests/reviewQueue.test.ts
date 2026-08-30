@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildReviewUnits, firstUnreviewedId, reviewCounts } from "@/features/review/reviewQueue";
+import {
+  buildReviewUnits,
+  comparisonPhotoIds,
+  firstUnreviewedId,
+  reviewCounts,
+} from "@/features/review/reviewQueue";
 import type { PhotoSummary, ReviewSequence } from "@/types/api";
 
 const photos: PhotoSummary[] = [1, 2, 3, 4, 5].map((id) => ({
@@ -38,5 +43,14 @@ describe("shoot review queue", () => {
       needsAttention: 1,
       reviewed: 3,
     });
+  });
+
+  it("keeps a bounded chronological window around the focused comparison frame", () => {
+    const ids = [10, 11, 12, 13, 14, 15];
+    expect(comparisonPhotoIds(ids, 10)).toEqual([10, 11, 12, 13]);
+    expect(comparisonPhotoIds(ids, 13)).toEqual([12, 13, 14, 15]);
+    expect(comparisonPhotoIds(ids, 15)).toEqual([12, 13, 14, 15]);
+    expect(comparisonPhotoIds(ids, 12, 2)).toEqual([12, 13]);
+    expect(comparisonPhotoIds(ids, 12, 0)).toEqual([]);
   });
 });

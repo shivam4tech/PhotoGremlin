@@ -81,6 +81,12 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   Once every indexed photograph has a decision, the surface exposes an
   explicit finish state with factual totals, a return-to-kept-set action, and
   the optional local editor handoff described in `EDITOR_HANDOFF.md`.
+- `features/review/ReviewCompareDialog.tsx` (Sprint 29) — on-demand comparison
+  for a capture-order window of at most four frames. It requests only local
+  viewer thumbnails, applies one shared zoom level, and maps scroll positions
+  as normalized coordinates so panes stay synchronized without loading or
+  manipulating source pixels in React. The pure `comparisonPhotoIds` helper
+  owns the bounded-window rule and is covered independently by Vitest.
 - `commands/app.rs` editor handoff (Sprint 28) — a machine-global setting
   stores one canonical, user-selected editing-application path. Rust validates
   the target, resolves a deduplicated list of at most 500 photo IDs through the

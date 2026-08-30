@@ -155,6 +155,10 @@ Per-sprint coverage (✓ = in place today):
 - IPC ownership (Sprint 28): editor configuration, launch, and file-manager
   opening remain typed methods in `src/lib/ipc.ts`; views and stores do not
   import Tauri `invoke` directly. ✓
+- Review comparison (Sprint 29): the pure capture-window helper remains
+  chronological, follows the focused frame at both edges, and never returns
+  more than four photo IDs. The UI consumes bounded viewer thumbnails and
+  shares one zoom/normalized pan state across its panes. ✓
 - Preview routing (Sprint 27): mixed-case RAW extensions reach the Rust
   provider while HEIC/HEIF remain on the explicit placeholder path ✓
 - Error reporting (`src/tests/errorReporting.test.ts`) ✓: arbitrary browser
@@ -259,8 +263,11 @@ directory) so one command validates the pipeline.
 
 small folder · large folder (multi-thousand) · missing file mid-session ·
 unsupported format · duplicate import · rename collision · move · copy ·
-trash · filter · saved view · dashboard · session comparison · offline mode
-(network disabled).
+trash · filter · saved view · dashboard · session comparison · grouped review
+comparison (two through four frames, synchronized zoom/pan, focus frame) ·
+range-slider keyboard and drag bubbles · opaque Export/More menus · editor
+handoff · offline mode (network disabled). See `BETA_TESTING.md` for the
+photographer-facing beta pass.
 
 **Automated smoke (Sprint 10, Linux):** the **release** binary is booted
 headless (`xvfb-run`) against a fresh data directory: clean start,

@@ -68,6 +68,16 @@ export function firstUnreviewedId(unit: ReviewUnit, selections: Record<number, S
   return unit.photoIds.find((id) => !selections[id]) ?? unit.photoIds[0];
 }
 
+/** Keep comparison bounded while preserving the sequence's capture order. */
+export function comparisonPhotoIds(photoIds: number[], focusedId: number, limit = 4): number[] {
+  if (limit <= 0 || photoIds.length === 0) return [];
+  const boundedLimit = Math.min(limit, photoIds.length);
+  const focusIndex = Math.max(0, photoIds.indexOf(focusedId));
+  const idealStart = focusIndex - Math.floor((boundedLimit - 1) / 2);
+  const start = Math.max(0, Math.min(photoIds.length - boundedLimit, idealStart));
+  return photoIds.slice(start, start + boundedLimit);
+}
+
 export function reviewCounts(photoIds: number[], selections: Record<number, SelectionState>) {
   let selected = 0;
   let rejected = 0;
