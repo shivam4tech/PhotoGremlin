@@ -393,8 +393,9 @@ export function SettingsView() {
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Appearance</h3>
         <p className="faint" style={{ marginTop: 0, marginBottom: 12 }}>
-          Choose deep graphite for a darkroom workflow or warm neutrals for a
-          gallery-light workspace. The choice stays on this machine.
+          Choose neutral graphite for a darkroom workflow or clean silver for
+          a light workspace. Both use the same quiet blue controls, and the
+          choice stays on this machine.
         </p>
         <div className="segmented" role="radiogroup" aria-label="Theme">
           <button

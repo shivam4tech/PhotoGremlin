@@ -1,6 +1,6 @@
 /* PhotoGremlin — design tokens and base styles.
-   Two themes share one restrained graphite-and-champagne token set: dark
-   (default, the photography "darkroom" look) and a warm gallery light theme,
+   Two themes share one restrained graphite, silver and cool-blue token set:
+   dark (default, the photography "darkroom" look) and a neutral light theme,
    selected via <html data-theme="light">
    (see src/lib/theme.ts, toggled in Settings). Every color in the app must
    come from these tokens so both themes always have correct contrast. */
@@ -8,48 +8,37 @@
 :root {
   color-scheme: dark;
 
-  --bg: #0d0f12;
-  --bg-panel: #14171b;
-  --bg-elevated: #1b1f24;
-  --bg-hover: #23282e;
-  --bg-active: #2b3138;
+  --bg: #101114;
+  --bg-panel: #17181c;
+  --bg-elevated: #202126;
+  --bg-hover: #292b31;
+  --bg-active: #32343b;
 
-  --border: #30353c;
-  --border-subtle: #23272d;
-  --border-hover: #464d56;
-  --border-focus: #d6a85f;
-  --scrollbar: #343a42;
-  --scrollbar-hover: #48505a;
+  --border: #363840;
+  --border-subtle: #27292f;
+  --border-hover: #4b4e58;
+  --border-focus: #58a6ff;
+  --scrollbar: #3a3d45;
+  --scrollbar-hover: #50545e;
 
-  --text: #f0efeb;
-  --text-dim: #aaaeb3;
-  --text-faint: #7d838b;
+  --text: #f4f4f5;
+  --text-dim: #b2b3b9;
+  --text-faint: #858791;
 
-  --accent: #deb66f;
-  --accent-strong: #c6923f;
+  --accent: #58a6ff;
+  --accent-strong: #0a75d8;
+  --accent-hover: #0b6fca;
   /* Text on top of a solid accent button. */
-  --accent-on-strong: #171108;
-  --accent-soft: rgba(222, 182, 111, 0.12);
-  --accent-border: rgba(222, 182, 111, 0.26);
-  --accent-border-strong: rgba(222, 182, 111, 0.44);
+  --accent-on-strong: #ffffff;
+  --accent-soft: rgba(88, 166, 255, 0.13);
+  --accent-border: rgba(88, 166, 255, 0.28);
+  --accent-border-strong: rgba(88, 166, 255, 0.48);
   --positive: #55c98a;
   --positive-soft: rgba(85, 201, 138, 0.12);
   --positive-border: rgba(85, 201, 138, 0.42);
-  --range-grade-low: #274737;
-  --range-grade-mid: #32945a;
-  --range-grade-high: #69e395;
-  --range-brightness-low: #25282c;
-  --range-brightness-mid: #7c838b;
-  --range-brightness-high: #e8eaed;
-  --range-contrast-low: #344354;
-  --range-contrast-mid: #6586a8;
-  --range-contrast-high: #b9d6ed;
-  --range-iso-low: #315273;
-  --range-iso-mid: #8b6f42;
-  --range-iso-high: #d08a4b;
-  --range-focal-low: #4c405d;
-  --range-focal-mid: #765e94;
-  --range-focal-high: #b59be3;
+  --range-low: #293542;
+  --range-mid: #3975aa;
+  --range-high: #69b8ff;
   --photo-canvas: #090b0e;
   --dialog-backdrop: rgba(6, 8, 12, 0.78);
   --photo-overlay: rgba(7, 9, 12, 0.9);
@@ -74,11 +63,15 @@
   --radius-md: 12px;
   --radius: 10px;
   --radius-lg: 14px;
+  --control-h: 32px;
+  --control-h-sm: 30px;
+  --control-px: 12px;
+  --control-px-sm: 10px;
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.28);
 
-  --font-ui: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system,
-    sans-serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    "Inter", system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code",
     Menlo, monospace;
 
@@ -90,47 +83,36 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg: #f2f0eb;
-  --bg-panel: #fbfaf7;
-  --bg-elevated: #fffdfa;
-  --bg-hover: #eeebe4;
-  --bg-active: #e5e0d7;
+  --bg: #f2f2f4;
+  --bg-panel: #f9f9fb;
+  --bg-elevated: #ffffff;
+  --bg-hover: #ececef;
+  --bg-active: #e2e3e7;
 
-  --border: #d8d2c7;
-  --border-subtle: #e8e3da;
-  --border-hover: #c4bbaa;
-  --border-focus: #95631d;
-  --scrollbar: #cbc4b8;
-  --scrollbar-hover: #aba295;
+  --border: #d2d3d8;
+  --border-subtle: #e3e4e8;
+  --border-hover: #b8bac2;
+  --border-focus: #006edb;
+  --scrollbar: #c9cbd1;
+  --scrollbar-hover: #a9acb5;
 
-  --text: #211f1b;
-  --text-dim: #5f5a52;
-  --text-faint: #746f66;
+  --text: #1d1d1f;
+  --text-dim: #5f6068;
+  --text-faint: #747680;
 
-  --accent: #95631d;
-  --accent-strong: #7f5113;
+  --accent: #006edb;
+  --accent-strong: #0067c7;
+  --accent-hover: #075fad;
   --accent-on-strong: #ffffff;
-  --accent-soft: rgba(149, 99, 29, 0.1);
-  --accent-border: rgba(149, 99, 29, 0.28);
-  --accent-border-strong: rgba(149, 99, 29, 0.46);
+  --accent-soft: rgba(0, 110, 219, 0.1);
+  --accent-border: rgba(0, 110, 219, 0.26);
+  --accent-border-strong: rgba(0, 110, 219, 0.44);
   --positive: #17784d;
   --positive-soft: rgba(23, 120, 77, 0.1);
   --positive-border: rgba(23, 120, 77, 0.36);
-  --range-grade-low: #d4ecdc;
-  --range-grade-mid: #67bd84;
-  --range-grade-high: #15803d;
-  --range-brightness-low: #4b5158;
-  --range-brightness-mid: #a7adb4;
-  --range-brightness-high: #f7f8f9;
-  --range-contrast-low: #d9e2eb;
-  --range-contrast-mid: #7394b5;
-  --range-contrast-high: #284967;
-  --range-iso-low: #c8dced;
-  --range-iso-mid: #c7a46a;
-  --range-iso-high: #a6531d;
-  --range-focal-low: #e2d9ef;
-  --range-focal-mid: #9b82ba;
-  --range-focal-high: #63457f;
+  --range-low: #d7e2ec;
+  --range-mid: #79a9d4;
+  --range-high: #1d70bd;
   --photo-canvas: #111317;
   --dialog-backdrop: rgba(15, 18, 24, 0.68);
   --photo-overlay: rgba(10, 12, 15, 0.88);
@@ -151,8 +133,8 @@
   --info: #0369a1;
   --info-soft: rgba(3, 105, 161, 0.1);
 
-  --shadow-card: 0 1px 2px rgba(38, 31, 20, 0.07), 0 1px 1px rgba(38, 31, 20, 0.04);
-  --shadow-pop: 0 14px 34px rgba(38, 31, 20, 0.16), 0 2px 7px rgba(38, 31, 20, 0.08);
+  --shadow-card: 0 1px 2px rgba(20, 21, 26, 0.08), 0 1px 1px rgba(20, 21, 26, 0.04);
+  --shadow-pop: 0 14px 34px rgba(20, 21, 26, 0.16), 0 2px 7px rgba(20, 21, 26, 0.08);
 }
 
 * {
@@ -289,7 +271,7 @@ select:focus {
 }
 
 .brand-name .gremlin {
-  color: var(--accent);
+  color: var(--text-dim);
 }
 
 .sidebar-scroll {
@@ -454,13 +436,16 @@ select:focus {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  padding: 7px 14px;
+  min-height: var(--control-h);
+  padding: 0 var(--control-px);
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-elevated);
   color: var(--text);
+  font-size: 12.5px;
   font-weight: 550;
-  transition: background 80ms ease, border-color 80ms ease, box-shadow 80ms ease;
+  line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
 }
 
 .btn:hover:not(:disabled) {
@@ -488,12 +473,12 @@ select:focus {
   border-color: var(--accent-strong);
   color: var(--accent-on-strong);
   font-weight: 650;
-  box-shadow: var(--shadow-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.22);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .btn-danger {
@@ -514,15 +499,16 @@ select:focus {
 }
 
 .btn-sm {
-  padding: 4px 10px;
-  font-size: 12.5px;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--control-px-sm);
+  font-size: 12px;
 }
 
 /* Segmented control (Settings: appearance). */
 .segmented {
   display: inline-flex;
-  gap: 3px;
-  padding: 3px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
@@ -532,12 +518,13 @@ select:focus {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 14px;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--control-px);
   border-radius: calc(var(--radius) - 3px);
   font-size: 12.5px;
   font-weight: 550;
   color: var(--text-dim);
-  transition: background 80ms ease, color 80ms ease, box-shadow 80ms ease;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
 }
 
 .segmented button:hover {
@@ -990,29 +977,6 @@ select:focus {
 .range-scrubber {
   position: relative;
   min-height: 44px;
-  --range-low: var(--range-grade-low);
-  --range-mid: var(--range-grade-mid);
-  --range-high: var(--range-grade-high);
-}
-.range-scrubber[data-field="brightness"] {
-  --range-low: var(--range-brightness-low);
-  --range-mid: var(--range-brightness-mid);
-  --range-high: var(--range-brightness-high);
-}
-.range-scrubber[data-field="contrast"] {
-  --range-low: var(--range-contrast-low);
-  --range-mid: var(--range-contrast-mid);
-  --range-high: var(--range-contrast-high);
-}
-.range-scrubber[data-field="iso"] {
-  --range-low: var(--range-iso-low);
-  --range-mid: var(--range-iso-mid);
-  --range-high: var(--range-iso-high);
-}
-.range-scrubber[data-field="focal_length"] {
-  --range-low: var(--range-focal-low);
-  --range-mid: var(--range-focal-mid);
-  --range-high: var(--range-focal-high);
 }
 .range-track {
   position: absolute;
@@ -1038,7 +1002,7 @@ select:focus {
     var(--range-mid),
     var(--range-high)
   );
-  opacity: 0.42;
+  opacity: 0.62;
 }
 .range-track-selected { background: transparent; }
 .range-scrubber.is-filtered .range-track-selected {
@@ -1147,8 +1111,8 @@ select:focus {
   gap: 8px;
 }
 .range-filter-actions button {
-  min-height: 24px;
-  padding: 2px 4px;
+  min-height: var(--control-h-sm);
+  padding: 0 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -1227,7 +1191,6 @@ select:focus {
 .filterbar-inspector .filterbar-compose .input,
 .filterbar-inspector .filterbar-compose .date-picker,
 .filterbar-inspector .filterbar-compose .date-picker-trigger { width: 100%; min-width: 0; }
-.filterbar-inspector .filterbar-compose > .btn { min-height: 28px; }
 .inspector-save {
   padding: 8px;
   border-top: 1px solid var(--border-subtle);
@@ -1250,8 +1213,9 @@ select:focus {
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 12.5px;
-  padding: 5px 8px;
-  min-height: 28px;
+  min-height: var(--control-h-sm);
+  height: var(--control-h-sm);
+  padding: 0 var(--control-px-sm);
 }
 .input:focus {
   outline: none;
@@ -1269,8 +1233,8 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
   min-width: 136px;
-  min-height: 30px;
-  padding: 5px 8px;
+  min-height: var(--control-h-sm);
+  padding: 0 var(--control-px-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg-elevated);
@@ -1314,8 +1278,8 @@ select:focus {
 }
 
 .date-picker-head button {
-  width: 26px;
-  height: 26px;
+  width: var(--control-h-sm);
+  height: var(--control-h-sm);
   border-radius: var(--radius-sm);
   font-size: 19px;
   line-height: 1;
@@ -1332,7 +1296,7 @@ select:focus {
 .date-picker-weekdays { margin: 10px 0 4px; color: var(--text-faint); font-size: 10px; }
 
 .date-picker-days button {
-  height: 29px;
+  height: var(--control-h-sm);
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -2641,7 +2605,8 @@ li.is-bad .preview-note {
 .rating-filter-head { display: flex; align-items: center; gap: 5px; }
 .rating-filter-head strong { margin-right: auto; font-size: 11.5px; }
 .rating-filter-head button {
-  padding: 2px 5px;
+  min-height: var(--control-h-sm);
+  padding: 0 6px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;

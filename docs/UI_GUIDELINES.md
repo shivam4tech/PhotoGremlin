@@ -15,13 +15,16 @@ with a concrete fix, like the skills prescribe.
 
 - Every color, radius, shadow, font comes from `--*` tokens in
   `theme.css`; raw hex values in components are violations.
-- One accent per view. Muted champagne `--accent` is the single affordance
+- One accent per view. Restrained cool blue `--accent` is the single affordance
   color. `--positive` is reserved for kept/complete state, while
   `--warning/--danger/--info` communicate their named states, not decoration.
 - Both themes must always be checked: if you touch a color, verify dark AND
   light (`data-theme="light"`) contrast.
 - New UI needs new tokens only when existing ones genuinely cannot express
   it — add them to both theme blocks together, or don't add them.
+- Standard controls are 32 px high; compact toolbar, form and segmented
+  controls are 30 px high. Bespoke square icon controls may be smaller only
+  when they are isolated from a standard control row.
 
 ## 2. Layout & hierarchy baseline
 
@@ -56,7 +59,7 @@ At the supported 1024 px minimum window width, the rails remain visible and
 the center grid stays the only photograph scroller. The inspector has its own
 vertical scroll; it must never make the virtual grid measure its contents.
 This is a structural convention, not an Adobe visual clone: PhotoGremlin keeps
-its own graphite/champagne tokens, language, and local-first controls.
+its own graphite/silver tokens, language, and local-first controls.
 
 ### Photo-first culling (Sprint 26)
 
@@ -72,11 +75,10 @@ its own graphite/champagne tokens, language, and local-first controls.
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
 - Brightness, sharpness, contrast, ISO and focal length are always-visible
-  dual-range controls in the scrollable inspector. Their tracks encode the
-  measured scale with restrained, field-specific color: dark-to-light for
-  brightness, low-to-high intensity for sharpness, cool magnitude for
-  contrast, cool-to-warm for ISO, and violet magnitude for focal length. This
-  is measurement context, never a red/green quality verdict. Exact values are
+  dual-range controls in the scrollable inspector. Their tracks use one
+  restrained low-to-high cool-blue tonal ramp, so measurement controls remain
+  easy to identify without turning the inspector into a multicolor dashboard.
+  This is measurement context, never a red/green quality verdict. Exact values are
   hidden at rest and appear in the thumb bubble while the control is being
   adjusted; screen readers receive the same value through the native range
   input and `aria-valuetext`.
