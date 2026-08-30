@@ -26,6 +26,19 @@ export interface DashboardLayout {
   order: string[];
 }
 
+export interface EditorConfig {
+  displayName: string;
+  executable: string;
+  maxFilesPerLaunch: number;
+}
+
+export interface EditorLaunchSummary {
+  application: string;
+  requested: number;
+  launched: number;
+  skippedMissing: number;
+}
+
 export interface AppInfo {
   name: string;
   version: string;

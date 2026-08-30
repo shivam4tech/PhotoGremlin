@@ -17,6 +17,7 @@ vi.mock("@/lib/ipc", () => ({
     getActiveFolder: vi.fn(async () => null),
     pickFolder: vi.fn(),
     setActiveFolder: vi.fn(async () => {}),
+    openInFileManager: vi.fn(async () => {}),
     updateMarks: vi.fn(async () => 1),
   },
   toErrorMessage: (e: unknown) => (e instanceof Error ? e.message : String(e)),
@@ -90,6 +91,11 @@ describe("appStore", () => {
     await useAppStore.getState().updateMarks([42], 4, null, null);
     expect(api.updateMarks).toHaveBeenCalledWith([42], 4, null, null);
     expect(useAppStore.getState().marksVersion).toBe(1);
+  });
+
+  it("opens folders through the typed IPC client", async () => {
+    await useAppStore.getState().openInFileManager("/photos/shoot");
+    expect(api.openInFileManager).toHaveBeenCalledWith("/photos/shoot");
   });
 });
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore, type SelectionState } from "@/stores/appStore";
 import { buildReviewUnits, firstUnreviewedId, reviewCounts } from "@/features/review/reviewQueue";
-import type { PhotoFull, PhotoSummary, ReviewQueue } from "@/types/api";
+import type { EditorConfig, PhotoFull, PhotoSummary, ReviewQueue } from "@/types/api";
 
 type ImageState = { kind: "loading" } | { kind: "ready"; url: string } | { kind: "unavailable"; message: string };
 type LastAction = { photoId: number; previous: SelectionState | null; unitIndex: number };
@@ -68,6 +68,11 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [full, setFull] = useState<PhotoFull | null>(null);
   const [lastAction, setLastAction] = useState<LastAction | null>(null);
+  const [finishDismissed, setFinishDismissed] = useState(false);
+  const [editor, setEditor] = useState<EditorConfig | null>(null);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffMessage, setHandoffMessage] = useState<string | null>(null);
+  const [handoffFailed, setHandoffFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +99,14 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
     }).catch((error) => { if (!cancelled) setLoadError(toErrorMessage(error)); });
     return () => { cancelled = true; };
   }, [sessionId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getEditorConfig().then((config) => {
+      if (!cancelled) setEditor(config);
+    }).catch(() => { if (!cancelled) setEditor(null); });
+    return () => { cancelled = true; };
+  }, []);
 
   const photosById = useMemo(() => new Map(queue?.photos.map((photo) => [photo.id, photo]) ?? []), [queue]);
   const units = useMemo(() => buildReviewUnits(queue?.photos ?? [], queue?.sequences ?? []), [queue]);
@@ -164,6 +177,26 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
     setLastAction(null);
   }
 
+  async function handoffKept() {
+    const keptIds = allPhotoIds.filter((id) => selections[id] === "selected");
+    setHandoffMessage(null);
+    setHandoffFailed(false);
+    if (!editor) {
+      useAppStore.getState().setView("settings");
+      return;
+    }
+    setHandoffBusy(true);
+    try {
+      const result = await api.launchInEditor(keptIds);
+      setHandoffMessage(`Opened ${result.launched.toLocaleString()} photograph${result.launched === 1 ? "" : "s"} in ${result.application}${result.skippedMissing ? `; ${result.skippedMissing} missing file${result.skippedMissing === 1 ? " was" : "s were"} skipped` : ""}.`);
+    } catch (error) {
+      setHandoffFailed(true);
+      setHandoffMessage(toErrorMessage(error));
+    } finally {
+      setHandoffBusy(false);
+    }
+  }
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
@@ -190,6 +223,49 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
   const context = currentUnit.kind === "burst" ? `Burst · ${unitPhotos.length} frames` : currentUnit.kind === "similar" ? `Similar frames · ${unitPhotos.length}` : "Single frame";
   const measurement = measurementLabel(full);
   const activeSelection = focusedId === null ? null : selections[focusedId] ?? null;
+  const finished = allPhotoIds.length > 0 && counts.reviewed === allPhotoIds.length;
+
+  if (finished && !finishDismissed) {
+    const keptIds = allPhotoIds.filter((id) => selections[id] === "selected");
+    const launchTooLarge = Boolean(editor && keptIds.length > editor.maxFilesPerLaunch);
+    return (
+      <section className="review-shell" aria-label="Shoot review complete">
+        <header className="review-header">
+          <button className="btn btn-sm" onClick={onClose}>← Library</button>
+          <div><strong>Review: {sessionName}</strong><span>All indexed photographs have a decision</span></div>
+          <div className="review-progress"><strong>{allPhotoIds.length.toLocaleString()} / {allPhotoIds.length.toLocaleString()}</strong><span>reviewed</span></div>
+        </header>
+        <main className="review-finish">
+          <div className="review-finish-card">
+            <span className="review-finish-kicker">Shoot review complete</span>
+            <h2>Review decisions are complete.</h2>
+            <p>Every decision is stored locally and remains reversible. Source photographs have not been moved, renamed, changed, or deleted.</p>
+            <div className="review-finish-counts" aria-label="Review totals">
+              <div><strong>{counts.selected.toLocaleString()}</strong><span>kept</span></div>
+              <div><strong>{counts.rejected.toLocaleString()}</strong><span>rejected</span></div>
+              <div><strong>{counts.needsAttention.toLocaleString()}</strong><span>later</span></div>
+            </div>
+            <div className="review-finish-actions">
+              <button className="btn btn-primary" disabled={handoffBusy || keptIds.length === 0 || launchTooLarge} onClick={() => void handoffKept()}>
+                {editor ? `Open kept in ${editor.displayName}` : "Configure editing app…"}
+              </button>
+              <button className="btn" onClick={() => {
+                useAppStore.getState().setFilterConditions([{ field: "review_state", operator: "=", value: "selected" }]);
+                onClose();
+              }}>Return to kept set</button>
+              <button className="btn btn-ghost" onClick={() => setFinishDismissed(true)}>Review decisions</button>
+            </div>
+            {launchTooLarge && <p className="review-finish-note">This kept set exceeds the {editor?.maxFilesPerLaunch} file direct-launch limit. Return to the kept set and use Export originals.</p>}
+            {handoffMessage && <p role={handoffFailed ? "alert" : "status"} className={handoffFailed ? "review-finish-error" : "review-finish-status"}>{handoffMessage}</p>}
+          </div>
+        </main>
+        <footer className="review-footer">
+          <button className="btn btn-sm review-undo" onClick={undo} disabled={!lastAction}><kbd>U</kbd> Undo last decision</button>
+          <span className="faint">No file was changed during review.</span>
+        </footer>
+      </section>
+    );
+  }
 
   return (
     <section className="review-shell" aria-label="Shoot review">

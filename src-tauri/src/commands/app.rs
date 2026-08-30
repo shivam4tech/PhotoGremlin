@@ -1,6 +1,7 @@
 //! App-level commands: info, paths, database status, active library folder,
 //! recent projects, project lifecycle, and dashboard layout.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -16,7 +17,9 @@ const SETTING_ACTIVE_FOLDER: &str = "active_folder";
 const SETTING_RECENT_FOLDERS: &str = "recent_folders";
 const SETTING_RECENT_FOLDERS_CAP: usize = 12;
 const SETTING_DASHBOARD_LAYOUT: &str = "dashboard_layout";
+const SETTING_EDITOR_CONFIG: &str = "editor_config";
 const SETTING_CATALOG_PREFIX: &str = "project_catalog:";
+const MAX_EDITOR_FILES: usize = 500;
 
 #[derive(Serialize, Clone)]
 pub struct AppInfo {
@@ -95,12 +98,50 @@ fn truncate_log_field(value: &str, max_bytes: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_log_field;
+    use super::{editor_display_name, truncate_log_field, validate_editor_target};
+    use std::path::Path;
 
     #[test]
     fn truncation_preserves_utf8_boundaries() {
         assert_eq!(truncate_log_field("abcédef", 4), "abc… [truncated]");
         assert_eq!(truncate_log_field("brief", 16), "brief");
+    }
+
+    #[test]
+    fn editor_names_are_human_readable() {
+        assert_eq!(
+            editor_display_name(Path::new("/opt/darktable/bin/darktable")),
+            "darktable"
+        );
+        assert_eq!(
+            editor_display_name(Path::new("C:/Apps/Capture-One.exe")),
+            "Capture One"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn editor_target_must_be_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "photogremlin-editor-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("editor");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        assert!(validate_editor_target(&path).is_err());
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            validate_editor_target(&path).unwrap(),
+            path.canonicalize().unwrap()
+        );
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(dir).unwrap();
     }
 }
 
@@ -146,6 +187,25 @@ pub struct RecentProject {
 pub struct DashboardLayout {
     pub hidden: Vec<String>,
     pub order: Vec<String>,
+}
+
+/// A user-selected local application. The path is stored globally because it
+/// is a machine preference, not project catalog data.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorConfig {
+    pub display_name: String,
+    pub executable: String,
+    pub max_files_per_launch: usize,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorLaunchSummary {
+    pub application: String,
+    pub requested: usize,
+    pub launched: usize,
+    pub skipped_missing: usize,
 }
 
 /// Build display metadata for a recent-project path.
@@ -487,6 +547,153 @@ pub fn set_dashboard_layout(state: State<AppState>, layout: DashboardLayout) -> 
     state.settings_db.set_setting(SETTING_DASHBOARD_LAYOUT, &json)
 }
 
+fn editor_display_name(path: &Path) -> String {
+    let raw = path
+        .file_stem()
+        .or_else(|| path.file_name())
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Editing application".to_string());
+    raw.trim_end_matches(".app").replace(['_', '-'], " ")
+}
+
+fn validate_editor_target(path: &Path) -> AppResult<PathBuf> {
+    let canonical = path.canonicalize().map_err(|_| {
+        AppError::validation(
+            "The configured editing application no longer exists. Choose it again in Settings.",
+        )
+    })?;
+    let is_macos_bundle = cfg!(target_os = "macos")
+        && canonical.is_dir()
+        && canonical.extension().and_then(|value| value.to_str()) == Some("app");
+    if !canonical.is_file() && !is_macos_bundle {
+        return Err(AppError::validation(
+            "Choose an application executable, not a document or ordinary folder.",
+        ));
+    }
+    #[cfg(unix)]
+    if canonical.is_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = canonical
+            .metadata()
+            .map_err(|e| AppError::io(e, canonical.display().to_string()))?
+            .permissions()
+            .mode();
+        if mode & 0o111 == 0 {
+            return Err(AppError::validation(
+                "The chosen file is not executable. Choose the editing application's launcher.",
+            ));
+        }
+    }
+    Ok(canonical)
+}
+
+#[tauri::command]
+pub fn get_editor_config(state: State<AppState>) -> AppResult<Option<EditorConfig>> {
+    let Some(json) = state.settings_db.get_setting(SETTING_EDITOR_CONFIG)? else {
+        return Ok(None);
+    };
+    let mut config: EditorConfig = serde_json::from_str(&json)
+        .map_err(|e| AppError::Database(format!("editor_config corrupt: {e}")))?;
+    config.max_files_per_launch = MAX_EDITOR_FILES;
+    Ok(Some(config))
+}
+
+#[tauri::command]
+pub fn set_editor_config(state: State<AppState>, executable: String) -> AppResult<EditorConfig> {
+    let canonical = validate_editor_target(Path::new(&executable))?;
+    let config = EditorConfig {
+        display_name: editor_display_name(&canonical),
+        executable: canonical.to_string_lossy().into_owned(),
+        max_files_per_launch: MAX_EDITOR_FILES,
+    };
+    let json = serde_json::to_string(&config)
+        .map_err(|e| AppError::Database(e.to_string()))?;
+    state.settings_db.set_setting(SETTING_EDITOR_CONFIG, &json)?;
+    Ok(config)
+}
+
+#[tauri::command]
+pub fn clear_editor_config(state: State<AppState>) -> AppResult<()> {
+    state.settings_db.clear_setting(SETTING_EDITOR_CONFIG)
+}
+
+#[tauri::command]
+pub fn launch_in_editor(
+    state: State<AppState>,
+    photo_ids: Vec<i64>,
+) -> AppResult<EditorLaunchSummary> {
+    if photo_ids.is_empty() {
+        return Err(AppError::validation(
+            "Keep at least one photograph before opening an editing application.",
+        ));
+    }
+    let mut seen = HashSet::with_capacity(photo_ids.len());
+    let unique_ids = photo_ids
+        .into_iter()
+        .filter(|id| seen.insert(*id))
+        .collect::<Vec<_>>();
+    if unique_ids.len() > MAX_EDITOR_FILES {
+        return Err(AppError::validation(format!(
+            "Direct launch is limited to {MAX_EDITOR_FILES} photographs to protect application stability. Use Export originals for this larger set."
+        )));
+    }
+    let config = get_editor_config(state.clone())?.ok_or_else(|| {
+        AppError::validation("Choose an editing application in Settings before using this handoff.")
+    })?;
+    let target = validate_editor_target(Path::new(&config.executable))?;
+    let db = state.db()?;
+    let requested = unique_ids.len();
+    let mut paths = Vec::with_capacity(requested);
+    let mut skipped_missing = 0;
+    for id in unique_ids {
+        let photo = db.get_photo_full(id)?;
+        if Path::new(&photo.path).is_file() {
+            paths.push(photo.path);
+        } else {
+            skipped_missing += 1;
+            tracing::warn!(
+                photo_id = id,
+                path = %photo.path,
+                "editor handoff skipped a missing source file"
+            );
+        }
+    }
+    if paths.is_empty() {
+        return Err(AppError::validation(
+            "None of the selected source files are currently available. Re-scan the project and try again.",
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    let mut command = if target.is_dir() {
+        let mut value = std::process::Command::new("open");
+        value.arg("-a").arg(&target);
+        value
+    } else {
+        std::process::Command::new(&target)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut command = std::process::Command::new(&target);
+    command.args(&paths).spawn().map_err(|error| {
+        AppError::operation(format!(
+            "Could not open {}. Check the application in Settings and try again. ({error})",
+            config.display_name
+        ))
+    })?;
+    tracing::info!(
+        application = %config.display_name,
+        launched = paths.len(),
+        skipped_missing,
+        "photographs handed to local editing application"
+    );
+    Ok(EditorLaunchSummary {
+        application: config.display_name,
+        requested,
+        launched: paths.len(),
+        skipped_missing,
+    })
+}
+
 #[tauri::command]
 pub fn open_in_file_manager(path: String) -> AppResult<()> {
     let p = Path::new(&path);
@@ -533,6 +740,20 @@ pub async fn pick_folder(app: AppHandle) -> Option<String> {
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
     app.dialog().file().pick_folder(move |selection| {
         let _ = tx.send(selection.map(|p| p.to_string()));
+    });
+    match tokio::time::timeout(std::time::Duration::from_secs(15 * 60), rx).await {
+        Ok(Ok(path)) => path,
+        _ => None,
+    }
+}
+
+/// Open a native application/file picker without blocking the UI thread.
+#[tauri::command]
+pub async fn pick_editor_application(app: AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<String>>();
+    app.dialog().file().pick_file(move |selection| {
+        let _ = tx.send(selection.map(|path| path.to_string()));
     });
     match tokio::time::timeout(std::time::Duration::from_secs(15 * 60), rx).await {
         Ok(Ok(path)) => path,

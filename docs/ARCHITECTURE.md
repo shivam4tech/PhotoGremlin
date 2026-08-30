@@ -78,6 +78,16 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   advance through a burst/similar decision context; `U` restores the previous
   state. The pure `reviewQueue.ts` resolves overlapping groups once and keeps
   the capture order intact, so rendering stays predictable for large shoots.
+  Once every indexed photograph has a decision, the surface exposes an
+  explicit finish state with factual totals, a return-to-kept-set action, and
+  the optional local editor handoff described in `EDITOR_HANDOFF.md`.
+- `commands/app.rs` editor handoff (Sprint 28) — a machine-global setting
+  stores one canonical, user-selected editing-application path. Rust validates
+  the target, resolves a deduplicated list of at most 500 photo IDs through the
+  active catalog, skips missing source files, and spawns the application with
+  paths as direct process arguments. No shell, catalog mutation, sidecar write,
+  source edit, network request, or background job is involved. The native file
+  picker is asynchronous so it never blocks the webview event loop.
 - `analysis/` (Sprint 4) — local image analysis. `metrics.rs` holds pure,
   Tauri/I-O-free math on an `RgbImage` (Rec.709 luma → one 256-bin histogram
   pass yields brightness/contrast/clipping/percentiles; per-pixel saturation;

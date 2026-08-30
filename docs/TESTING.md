@@ -8,6 +8,11 @@ flaky timing.
 Per-sprint coverage (✓ = in place today):
 
 - Database: schema migration creates expected tables; migration idempotent ✓
+- Local editor handoff (Sprint 28): configured targets must exist and, on Unix,
+  carry an executable bit; display names are derived without changing the
+  executable path. Launch itself is not exercised by automated tests because
+  it intentionally starts user software; command validation and the 500-file
+  bound run before process spawn. ✓
 - Catalog/review integrity (Sprint 27): a consistent `VACUUM INTO` backup
   opens independently, passes `PRAGMA integrity_check`, never overwrites an
   existing destination, and mutations in the source do not alter the backup;
@@ -147,6 +152,9 @@ Per-sprint coverage (✓ = in place today):
 ## Frontend tests (`npm test`, Vitest)
 
 - Store behavior (view switching, progress payloads) ✓
+- IPC ownership (Sprint 28): editor configuration, launch, and file-manager
+  opening remain typed methods in `src/lib/ipc.ts`; views and stores do not
+  import Tauri `invoke` directly. ✓
 - Preview routing (Sprint 27): mixed-case RAW extensions reach the Rust
   provider while HEIC/HEIF remain on the explicit placeholder path ✓
 - Error reporting (`src/tests/errorReporting.test.ts`) ✓: arbitrary browser

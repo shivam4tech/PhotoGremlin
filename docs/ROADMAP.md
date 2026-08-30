@@ -53,8 +53,22 @@ search.
 
 ## v0.4
 
-Advanced culling, side-by-side comparison with synchronized zoom, better
-burst analysis, customizable shortcuts, project management.
+Advanced culling, better burst analysis, customizable shortcuts, project
+management.
+
+## Beta-readiness sprints
+
+| # | sprint | status |
+|---|---|---|
+| 27 | Catalog integrity, bounded caches, resumable review and large-shoot paging | **done** (2026-08-30) |
+| 28 | Professional editor handoff — configured local editing application, safe kept-set launch and a visible review finish state | **done** (2026-08-30) |
+| 29 | Photographer comparison + beta finish — on-demand side-by-side sequence comparison, premium interaction/accessibility cleanup and release verification | **planned** |
+
+Editor handoff deliberately does not write Lightroom or Capture One catalogs.
+Those formats are private, stateful databases whose direct mutation would put
+the photographer's catalog at risk. PhotoGremlin hands normal source files to
+a user-selected desktop application without modifying those files; copying and
+sidecar-preserving interchange can be expanded after beta feedback.
 
 ## v0.5
 

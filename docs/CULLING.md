@@ -47,6 +47,22 @@ view. Similar, burst and local face-appearance cards live in the dedicated
 Groups workspace; removing them from above the Library grid does not make the
 grouping result unreachable.
 
+## Finish and editor handoff (Sprint 28)
+
+When every indexed photograph in a shoot has a decision, Review changes to a
+finish state instead of silently wrapping back to the queue. It reports the
+kept/rejected/later totals and offers three reversible next steps: open the kept
+set in a configured local editing application, return to a Library view filtered
+to kept photographs, or review the decisions again.
+
+The editing application is chosen in Settings and stored as a machine-level
+preference. PhotoGremlin passes normal source paths to that executable; it does
+not edit a Lightroom or Capture One catalog, create sidecars, move originals,
+or change decisions. Direct launch is capped at 500 files because desktop
+applications and operating-system argument limits vary. Larger kept sets stay
+available through **Export originals**, which uses the existing preview-first
+copy workflow. See `EDITOR_HANDOFF.md` for the safety boundary.
+
 ## Deferred scoring research
 
 The following was explored as a future configurable assistance layer. It is
