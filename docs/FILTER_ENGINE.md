@@ -68,11 +68,15 @@ to compose raw operators:
 
 The five dual-ended scrubbers remain visible in the Library inspector, so the
 photographer can compare and refine measured ranges without opening rows one at
-a time. Pointer drags update the local labels immediately and write the filter
-once on release; keyboard steps write immediately. This avoids issuing a stream
-of SQLite grid queries during a drag. The accent marks only an active selected
-interval; neutral tracks never imply quality. The generic composer remains
-under **More filters**, but does not duplicate these five fields.
+a time. Their rounded rails use a low-to-high tonal grade of the single
+interface accent, with a stronger grade marking an active selected interval.
+The grade communicates numeric position only; it does not imply photo quality.
+The controls do not show persistent endpoint numbers. The exact value appears
+in a handle-attached bubble only while that handle is dragged or adjusted from
+the keyboard. Pointer drags update that local value and write the filter once on
+release; keyboard steps write immediately. This avoids issuing a stream of
+SQLite grid queries during a drag. The generic composer remains under **More
+filters**, but does not duplicate these five fields.
 
 Every control reports locally recorded and missing counts from
 `numeric_filter_stats`. A numeric range follows SQL NULL semantics

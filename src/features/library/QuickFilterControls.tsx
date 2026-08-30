@@ -31,6 +31,16 @@ interface RangeSpec {
 }
 
 const MEASURED_VALUES = Array.from({ length: 101 }, (_, index) => index);
+const RANGE_INTERACTION_KEYS = new Set([
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+  "ArrowDown",
+  "Home",
+  "End",
+  "PageUp",
+  "PageDown",
+]);
 
 const RANGE_SPECS: readonly RangeSpec[] = [
   { field: "brightness", label: "Brightness", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
@@ -51,25 +61,12 @@ function formatValue(value: number, unit = ""): string {
   return `${value.toLocaleString()}${unit}`;
 }
 
-function conditionSummary(condition: FilterCondition | undefined, unit = "", missingNoun = "unmeasured"): string {
+function conditionSummary(condition: FilterCondition | undefined, missingNoun = "unmeasured"): string {
   if (!condition) return "Any";
   if (condition.operator === "is-null") return `${missingNoun[0].toUpperCase()}${missingNoun.slice(1)} only`;
   if (condition.operator === "not-null") return "Recorded only";
-  if (condition.operator === "between" && Array.isArray(condition.value) && condition.value.length === 2) {
-    return `${formatValue(Number(condition.value[0]), unit)}–${formatValue(Number(condition.value[1]), unit)}`;
-  }
-  if (typeof condition.value === "number") {
-    const symbol: Partial<Record<FilterCondition["operator"], string>> = {
-      "=": "=", "!=": "≠", ">": ">", ">=": "≥", "<": "<", "<=": "≤",
-    };
-    return `${symbol[condition.operator] ?? condition.operator} ${formatValue(condition.value, unit)}`;
-  }
+  if (condition.operator === "between" || typeof condition.value === "number") return "Range active";
   return "Custom condition";
-}
-
-function tickPositions(valueCount: number): number[] {
-  const intervals = Math.min(valueCount - 1, 10);
-  return Array.from({ length: intervals + 1 }, (_, index) => index / intervals * 100);
 }
 
 interface RangeFilterRowProps {
@@ -98,6 +95,7 @@ function RangeFilterRow({
   const initialUpper = Math.max(initialLower, nearestValueIndex(spec.values, parsed.upper));
   const [lowerIndex, setLowerIndex] = useState(initialLower);
   const [upperIndex, setUpperIndex] = useState(initialUpper);
+  const [activeHandle, setActiveHandle] = useState<"lower" | "upper" | null>(null);
   const boundsRef = useRef({ lower: initialLower, upper: initialUpper });
   const lastCommitRef = useRef(JSON.stringify(condition ?? null));
   const noRecordedValues = !stats || stats.recorded_count === 0;
@@ -132,45 +130,59 @@ function RangeFilterRow({
     onChange(replaceFieldConditions(draft, spec.field, replacement));
   }
 
-  function commitKeyboard(event: React.KeyboardEvent<HTMLInputElement>) {
-    if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
-      commitRange();
-    }
+  function beginKeyboardInteraction(
+    event: React.KeyboardEvent<HTMLInputElement>,
+    handle: "lower" | "upper",
+  ) {
+    if (RANGE_INTERACTION_KEYS.has(event.key)) setActiveHandle(handle);
+  }
+
+  function finishKeyboardInteraction(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (!RANGE_INTERACTION_KEYS.has(event.key)) return;
+    setActiveHandle(null);
+    commitRange();
+  }
+
+  function finishInteraction() {
+    setActiveHandle(null);
+    commitRange();
   }
 
   const availability = stats
     ? `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
     : statsReady ? "Values unavailable" : "Checking local values…";
-  const minimum = stats?.minimum == null ? null : formatValue(Math.round(stats.minimum * 10) / 10, spec.unit);
-  const maximum = stats?.maximum == null ? null : formatValue(Math.round(stats.maximum * 10) / 10, spec.unit);
-
   return (
     <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
       <div className="range-filter-heading">
         <span>{spec.label}</span>
         <span className={`range-filter-summary mono${condition ? " is-active" : ""}`}>
-          {conditionSummary(condition, spec.unit, spec.missingNoun)}
+          {conditionSummary(condition, spec.missingNoun)}
         </span>
       </div>
 
       <div className="range-filter-detail" id={`range-filter-${spec.field}`}>
           <div className="range-filter-availability">
             <span>{availability}</span>
-            {minimum !== null && maximum !== null && <span className="mono">{minimum}–{maximum}</span>}
           </div>
 
-          <div className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}>
-            <output className="range-bound mono">{formatValue(spec.values[lowerIndex], spec.unit)}</output>
-            <output className="range-bound mono">{formatValue(spec.values[upperIndex], spec.unit)}</output>
+          <div
+            className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}
+            data-field={spec.field}
+          >
             <div className="range-track" aria-hidden="true">
               <span className="range-track-base" />
               <span className="range-track-selected" style={{ left: `${lowerPercent}%`, right: `${100 - upperPercent}%` }} />
-              {tickPositions(spec.values.length).map((position) => (
-                <span className="range-track-tick" key={position} style={{ left: `${position}%` }} />
-              ))}
             </div>
+            {activeHandle && (
+              <output
+                className="range-value-bubble mono"
+                style={{ left: `clamp(24px, ${activeHandle === "lower" ? lowerPercent : upperPercent}%, calc(100% - 24px))` }}
+              >
+                {formatValue(spec.values[activeHandle === "lower" ? lowerIndex : upperIndex], spec.unit)}
+              </output>
+            )}
             <input
-              className="range-input range-input-lower"
+              className={`range-input range-input-lower${activeHandle === "lower" ? " is-active" : ""}`}
               type="range"
               min={0}
               max={spec.values.length - 1}
@@ -179,13 +191,15 @@ function RangeFilterRow({
               aria-label={`${spec.label} minimum`}
               aria-valuetext={`Minimum ${formatValue(spec.values[lowerIndex], spec.unit)}`}
               onChange={(event) => updateLower(Number(event.target.value))}
-              onPointerUp={commitRange}
-              onPointerCancel={commitRange}
-              onBlur={commitRange}
-              onKeyUp={commitKeyboard}
+              onPointerDown={() => setActiveHandle("lower")}
+              onPointerUp={finishInteraction}
+              onPointerCancel={finishInteraction}
+              onBlur={finishInteraction}
+              onKeyDown={(event) => beginKeyboardInteraction(event, "lower")}
+              onKeyUp={finishKeyboardInteraction}
             />
             <input
-              className="range-input range-input-upper"
+              className={`range-input range-input-upper${activeHandle === "upper" ? " is-active" : ""}`}
               type="range"
               min={0}
               max={spec.values.length - 1}
@@ -194,10 +208,12 @@ function RangeFilterRow({
               aria-label={`${spec.label} maximum`}
               aria-valuetext={`Maximum ${formatValue(spec.values[upperIndex], spec.unit)}`}
               onChange={(event) => updateUpper(Number(event.target.value))}
-              onPointerUp={commitRange}
-              onPointerCancel={commitRange}
-              onBlur={commitRange}
-              onKeyUp={commitKeyboard}
+              onPointerDown={() => setActiveHandle("upper")}
+              onPointerUp={finishInteraction}
+              onPointerCancel={finishInteraction}
+              onBlur={finishInteraction}
+              onKeyDown={(event) => beginKeyboardInteraction(event, "upper")}
+              onKeyUp={finishKeyboardInteraction}
             />
           </div>
 
