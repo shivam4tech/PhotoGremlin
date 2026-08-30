@@ -393,8 +393,8 @@ export function SettingsView() {
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Appearance</h3>
         <p className="faint" style={{ marginTop: 0, marginBottom: 12 }}>
-          Choose how PhotoGremlin looks. The choice is remembered on this
-          machine and applied the next time the app starts.
+          Choose deep graphite for a darkroom workflow or warm neutrals for a
+          gallery-light workspace. The choice stays on this machine.
         </p>
         <div className="segmented" role="radiogroup" aria-label="Theme">
           <button
@@ -404,7 +404,7 @@ export function SettingsView() {
             onClick={() => setTheme("dark")}
           >
             <MoonIcon />
-            Dark
+            Darkroom
           </button>
           <button
             role="radio"
@@ -413,7 +413,7 @@ export function SettingsView() {
             onClick={() => setTheme("light")}
           >
             <SunIcon />
-            Light
+            Gallery light
           </button>
         </div>
       </div>

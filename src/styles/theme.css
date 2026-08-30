@@ -1,37 +1,40 @@
 /* PhotoGremlin — design tokens and base styles.
-   Two themes share one token set: dark (default, the photography "darkroom"
-   look) and a premium light theme, selected via <html data-theme="light">
+   Two themes share one restrained graphite-and-champagne token set: dark
+   (default, the photography "darkroom" look) and a warm gallery light theme,
+   selected via <html data-theme="light">
    (see src/lib/theme.ts, toggled in Settings). Every color in the app must
    come from these tokens so both themes always have correct contrast. */
 
 :root {
   color-scheme: dark;
 
-  --bg: #101214;
-  --bg-panel: #16181b;
-  --bg-elevated: #1d2024;
-  --bg-hover: #23272c;
-  --bg-active: #2a2f35;
+  --bg: #0d0f12;
+  --bg-panel: #14171b;
+  --bg-elevated: #1b1f24;
+  --bg-hover: #23282e;
+  --bg-active: #2b3138;
 
-  --border: #2b2f34;
-  --border-subtle: #212429;
-  --border-hover: #383e44;
-  --border-focus: #4ade80;
-  --scrollbar: #2e3338;
-  --scrollbar-hover: #3a4046;
+  --border: #30353c;
+  --border-subtle: #23272d;
+  --border-hover: #464d56;
+  --border-focus: #d6a85f;
+  --scrollbar: #343a42;
+  --scrollbar-hover: #48505a;
 
-  --text: #e9ebed;
-  --text-dim: #9aa1a9;
-  --text-faint: #666d75;
+  --text: #f0efeb;
+  --text-dim: #aaaeb3;
+  --text-faint: #7d838b;
 
-  --accent: #4ade80;
-  --accent-strong: #22c55e;
+  --accent: #deb66f;
+  --accent-strong: #c6923f;
   /* Text on top of a solid accent button. */
-  --accent-on-strong: #08130b;
-  --accent-soft: rgba(74, 222, 128, 0.12);
-  --accent-border: rgba(74, 222, 128, 0.25);
-  --accent-border-strong: rgba(74, 222, 128, 0.4);
-  --accent-glow: rgba(74, 222, 128, 0.7);
+  --accent-on-strong: #171108;
+  --accent-soft: rgba(222, 182, 111, 0.12);
+  --accent-border: rgba(222, 182, 111, 0.26);
+  --accent-border-strong: rgba(222, 182, 111, 0.44);
+  --positive: #55c98a;
+  --positive-soft: rgba(85, 201, 138, 0.12);
+  --positive-border: rgba(85, 201, 138, 0.42);
   --range-grade-low: #274737;
   --range-grade-mid: #32945a;
   --range-grade-high: #69e395;
@@ -47,8 +50,18 @@
   --range-focal-low: #4c405d;
   --range-focal-mid: #765e94;
   --range-focal-high: #b59be3;
-  --photo-canvas: #0b0d10;
+  --photo-canvas: #090b0e;
   --dialog-backdrop: rgba(6, 8, 12, 0.78);
+  --photo-overlay: rgba(7, 9, 12, 0.9);
+  --photo-control: rgba(20, 23, 27, 0.9);
+  --photo-label: rgba(7, 9, 12, 0.74);
+  --photo-label-strong: rgba(7, 9, 12, 0.92);
+  --photo-outline: rgba(0, 0, 0, 0.35);
+  --photo-shadow: 0 12px 32px rgba(0, 0, 0, 0.42);
+  --star: #e6bb63;
+  --flag: #ef8b68;
+  --on-photo-control: #f4f3ef;
+  --on-solid-dark: #111318;
   --warning: #fbbf24;
   --warning-soft: rgba(251, 191, 36, 0.12);
   --danger: #f87171;
@@ -61,8 +74,8 @@
   --radius-md: 12px;
   --radius: 10px;
   --radius-lg: 14px;
-  --shadow-card: none;
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.28);
 
   --font-ui: "Inter", "SF Pro Text", "Segoe UI", system-ui, -apple-system,
     sans-serif;
@@ -77,30 +90,32 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg: #f3f4f6;
-  --bg-panel: #ffffff;
-  --bg-elevated: #ffffff;
-  --bg-hover: #eef0f3;
-  --bg-active: #e5e8ec;
+  --bg: #f2f0eb;
+  --bg-panel: #fbfaf7;
+  --bg-elevated: #fffdfa;
+  --bg-hover: #eeebe4;
+  --bg-active: #e5e0d7;
 
-  --border: #dfe2e7;
-  --border-subtle: #e9ebef;
-  --border-hover: #c7cdd5;
-  --border-focus: #16a34a;
-  --scrollbar: #c9cdd4;
-  --scrollbar-hover: #aab0ba;
+  --border: #d8d2c7;
+  --border-subtle: #e8e3da;
+  --border-hover: #c4bbaa;
+  --border-focus: #95631d;
+  --scrollbar: #cbc4b8;
+  --scrollbar-hover: #aba295;
 
-  --text: #1c1f24;
-  --text-dim: #565e68;
-  --text-faint: #8b939d;
+  --text: #211f1b;
+  --text-dim: #5f5a52;
+  --text-faint: #746f66;
 
-  --accent: #16a34a;
-  --accent-strong: #15803d;
+  --accent: #95631d;
+  --accent-strong: #7f5113;
   --accent-on-strong: #ffffff;
-  --accent-soft: rgba(22, 163, 74, 0.1);
-  --accent-border: rgba(22, 163, 74, 0.28);
-  --accent-border-strong: rgba(22, 163, 74, 0.45);
-  --accent-glow: rgba(22, 163, 74, 0.3);
+  --accent-soft: rgba(149, 99, 29, 0.1);
+  --accent-border: rgba(149, 99, 29, 0.28);
+  --accent-border-strong: rgba(149, 99, 29, 0.46);
+  --positive: #17784d;
+  --positive-soft: rgba(23, 120, 77, 0.1);
+  --positive-border: rgba(23, 120, 77, 0.36);
   --range-grade-low: #d4ecdc;
   --range-grade-mid: #67bd84;
   --range-grade-high: #15803d;
@@ -118,6 +133,16 @@
   --range-focal-high: #63457f;
   --photo-canvas: #111317;
   --dialog-backdrop: rgba(15, 18, 24, 0.68);
+  --photo-overlay: rgba(10, 12, 15, 0.88);
+  --photo-control: rgba(25, 28, 33, 0.9);
+  --photo-label: rgba(9, 11, 14, 0.72);
+  --photo-label-strong: rgba(9, 11, 14, 0.92);
+  --photo-outline: rgba(0, 0, 0, 0.35);
+  --photo-shadow: 0 12px 30px rgba(15, 18, 24, 0.28);
+  --star: #a9690c;
+  --flag: #c84f2c;
+  --on-photo-control: #f7f6f2;
+  --on-solid-dark: #111318;
   --warning: #b45309;
   --warning-soft: rgba(180, 83, 9, 0.1);
   --danger: #dc2626;
@@ -126,8 +151,8 @@
   --info: #0369a1;
   --info-soft: rgba(3, 105, 161, 0.1);
 
-  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.05), 0 1px 1px rgba(15, 23, 42, 0.03);
-  --shadow-pop: 0 10px 28px rgba(15, 23, 42, 0.14), 0 2px 6px rgba(15, 23, 42, 0.07);
+  --shadow-card: 0 1px 2px rgba(38, 31, 20, 0.07), 0 1px 1px rgba(38, 31, 20, 0.04);
+  --shadow-pop: 0 14px 34px rgba(38, 31, 20, 0.16), 0 2px 7px rgba(38, 31, 20, 0.08);
 }
 
 * {
@@ -379,7 +404,7 @@ select:focus {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--positive);
   flex-shrink: 0;
 }
 
@@ -1464,8 +1489,8 @@ select:focus {
   gap: 8px;
   padding: 6px 8px;
   font-size: 10.5px;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.72));
-  color: var(--text);
+  background: linear-gradient(transparent, var(--photo-label));
+  color: var(--on-photo-control);
   pointer-events: none;
 }
 .tile-dim {
@@ -1481,8 +1506,8 @@ select:focus {
   padding: 2px 6px;
   font-size: 10.5px;
   line-height: 1.3;
-  background: rgba(0, 0, 0, 0.6);
-  color: #ffd97a;
+  background: var(--photo-label-strong);
+  color: var(--star);
   pointer-events: none;
 }
 .tile-marks-contextual .tile-badge {
@@ -1494,7 +1519,7 @@ select:focus {
 .tile-marks-contextual.tile-kept .tile-badge,
 .tile-marks-contextual.tile-rejected .tile-badge { opacity: 1; }
 .tile-badge-flag {
-  color: #ff8f6b;
+  color: var(--flag);
   font-size: 13px;
   padding: 0 5px;
 }
@@ -1503,7 +1528,7 @@ select:focus {
   height: 12px;
   padding: 0;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 0 0 1px var(--photo-outline);
 }
 
 /* Inner action button fills the wrapper (Sprint 7 wrapped the tile so a
@@ -1526,8 +1551,8 @@ select:focus {
   cursor: default;
 }
 .tile-kept {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  border-color: var(--positive);
+  box-shadow: 0 0 0 1px var(--positive) inset;
 }
 .tile-rejected {
   border-color: var(--border-subtle);
@@ -1550,26 +1575,26 @@ select:focus {
   justify-content: center;
   border-radius: 6px;
   border: 1px solid var(--border-subtle);
-  background: rgba(10, 12, 16, 0.72);
-  color: var(--text-dim);
+  background: var(--photo-label);
+  color: var(--on-photo-control);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
   transition: background 80ms ease, color 80ms ease;
 }
 .tile-sel-btn:hover {
-  color: var(--text);
-  background: rgba(10, 12, 16, 0.9);
+  color: var(--on-photo-control);
+  background: var(--photo-label-strong);
 }
 .tile-sel-btn.is-on {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #0b0d10;
+  background: var(--positive);
+  border-color: var(--positive);
+  color: var(--on-solid-dark);
 }
 .tile-sel-reject.is-on {
   background: var(--danger);
   border-color: var(--danger);
-  color: #0b0d10;
+  color: var(--on-solid-dark);
 }
 
 .library-statusbar {
@@ -1700,7 +1725,7 @@ select:focus {
   color: var(--text);
   box-shadow: var(--shadow-pop);
 }
-.workspace-dialog::backdrop { background: rgba(6, 8, 12, .72); }
+.workspace-dialog::backdrop { background: var(--dialog-backdrop); }
 .workspace-dialog-card { max-height: calc(100dvh - 48px); overflow: auto; }
 .workspace-dialog-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid var(--border-subtle); }
 .workspace-dialog-head > div { display: grid; gap: 2px; }
@@ -1720,7 +1745,7 @@ select:focus {
   min-height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: var(--bg);
   color: var(--text);
 }
 
@@ -1768,7 +1793,7 @@ select:focus {
   max-width: 100%;
   max-height: calc(100vh - 240px);
   object-fit: contain;
-  box-shadow: 0 12px 35px rgba(0, 0, 0, .35);
+  box-shadow: var(--photo-shadow);
 }
 
 .review-image-placeholder {
@@ -1826,7 +1851,7 @@ select:focus {
 .review-finish-status,
 .review-finish-error { margin: 12px 0 0; font-size: 12px; }
 .review-finish-error { color: var(--danger) !important; }
-.review-finish-status { color: var(--accent) !important; }
+.review-finish-status { color: var(--positive) !important; }
 
 .review-details {
   padding: 24px 20px;
@@ -2020,7 +2045,7 @@ select:focus {
 
 .review-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .review-thumb.is-active { border-color: var(--accent); }
-.review-thumb.is-selected { border-color: var(--accent); }
+.review-thumb.is-selected { border-color: var(--positive); }
 .review-thumb.is-rejected { opacity: .48; border-color: var(--danger); }
 .review-thumb.is-needs_attention { border-color: var(--warning); }
 
@@ -2237,8 +2262,7 @@ li.is-bad .preview-note {
 .viewer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(6, 8, 10, 0.9);
-  backdrop-filter: blur(4px);
+  background: var(--photo-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2268,7 +2292,7 @@ li.is-bad .preview-note {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0a0c0e;
+  background: var(--photo-canvas);
 }
 .viewer-img {
   max-width: 100%;
@@ -2305,7 +2329,8 @@ li.is-bad .preview-note {
   align-items: center;
   gap: 12px;
   padding: 5px 12px;
-  background: rgba(22, 24, 27, 0.85);
+  background: var(--photo-control);
+  color: var(--on-photo-control);
   border: 1px solid var(--border-subtle);
   border-radius: 20px;
 }
@@ -2555,7 +2580,7 @@ li.is-bad .preview-note {
   line-height: 1;
 }
 .marks-star.is-on {
-  color: #ffd97a;
+  color: var(--star);
 }
 .marks-colors {
   display: inline-flex;
@@ -2922,6 +2947,11 @@ li.is-bad .preview-note {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .tile-skeleton,
+  .viewer-loader,
+  .viewer-backdrop {
+    animation: none;
+  }
   .home-row,
   .home-row-menu,
   .home-menu,
