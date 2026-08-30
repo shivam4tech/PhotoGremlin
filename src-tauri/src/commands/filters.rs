@@ -24,7 +24,7 @@ pub fn list_filtered_photos(
 ) -> AppResult<PhotoPage> {
     let filter = filters::parse_filter(&filter_json)?;
     let (where_sql, params) = filters::build_where(&filter)?;
-    let (photos, total) = state.db.photos_where(&where_sql, params, offset, limit)?;
+    let (photos, total) = state.db()?.photos_where(&where_sql, params, offset, limit)?;
     Ok(PhotoPage { photos, total })
 }
 
@@ -36,7 +36,7 @@ pub fn filter_value_options(
     field: String,
     session_id: Option<i64>,
 ) -> AppResult<FilterValueOptions> {
-    state.db.filter_value_options(&field, session_id)
+    state.db()?.filter_value_options(&field, session_id)
 }
 
 /// Recorded/missing counts and observed numeric bounds for the quick filter
@@ -47,5 +47,5 @@ pub fn numeric_filter_stats(
     field: String,
     session_id: Option<i64>,
 ) -> AppResult<NumericFilterStats> {
-    state.db.numeric_filter_stats(&field, session_id)
+    state.db()?.numeric_filter_stats(&field, session_id)
 }

@@ -32,6 +32,14 @@ The tray's Export and More menus use the shared popover layer above the photo
 grid, so tile controls never paint through their opaque surfaces. Both menus
 use the same two-line option rows and close as soon as an action is chosen.
 
+Sprint 27 removes the former 20,000-decision IPC ceiling. Selection rows are
+cursor-paged in 5,000-row-or-smaller chunks and joined to the active session,
+so a large project cannot leak decisions from another shoot or silently lose
+older decisions. The frontend waits for the active session before loading the
+map. Review also stores `unit_index` and the focused photo per session; opening
+**Review this shoot** resumes the last decision context, while the decisions
+themselves remain independently durable in `selections`.
+
 Rating/flag/label writes increment a shared `marksVersion`. Library queries,
 Collection and Group grids and the open viewer refresh from that version, so
 every photo surface reflects a successful mark mutation without reopening the

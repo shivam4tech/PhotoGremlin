@@ -16,6 +16,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::SystemTime;
 
 use image::{ImageReader, RgbImage};
 use rusqlite::{params, OptionalExtension};
@@ -28,6 +30,9 @@ use crate::scanner::{classify_extension, FileClass};
 pub const THUMB_VERSION: u32 = 1;
 /// Maximum concurrent full-image decodes/encodes.
 pub const THUMB_GENERATE_CONCURRENCY: usize = 3;
+pub const DEFAULT_CACHE_QUOTA_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+pub const MIN_CACHE_QUOTA_BYTES: u64 = 256 * 1024 * 1024;
+pub const MAX_CACHE_QUOTA_BYTES: u64 = 100 * 1024 * 1024 * 1024;
 /// Refuse to decode absurdly large images into memory (≈500 MP guard).
 const MAX_PIXELS: u64 = 500_000_000;
 
@@ -84,6 +89,13 @@ pub struct ThumbData {
     pub from_cache: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CacheStatus {
+    pub bytes: u64,
+    pub files: u64,
+    pub quota_bytes: u64,
+}
+
 #[derive(Debug)]
 enum Outcome {
     Ready(Vec<u8>, u32, u32),
@@ -109,20 +121,63 @@ pub struct ThumbService {
     cache_dir: PathBuf,
     sem: tokio::sync::Semaphore,
     in_flight: std::sync::Mutex<HashMap<String, ()>>,
+    quota_bytes: AtomicU64,
+    writes: AtomicUsize,
 }
 
 impl ThumbService {
     pub fn new(cache_dir: PathBuf) -> Self {
+        Self::with_quota(cache_dir, DEFAULT_CACHE_QUOTA_BYTES)
+    }
+
+    pub fn with_quota(cache_dir: PathBuf, quota_bytes: u64) -> Self {
         let _ = std::fs::create_dir_all(&cache_dir);
         Self {
             cache_dir,
             sem: tokio::sync::Semaphore::new(THUMB_GENERATE_CONCURRENCY),
             in_flight: std::sync::Mutex::new(HashMap::new()),
+            quota_bytes: AtomicU64::new(clamp_cache_quota(quota_bytes)),
+            writes: AtomicUsize::new(0),
         }
     }
 
     pub fn cache_dir(&self) -> &Path {
         &self.cache_dir
+    }
+
+    pub fn status(&self) -> AppResult<CacheStatus> {
+        let (bytes, files) = cache_usage(&self.cache_dir)?;
+        Ok(CacheStatus {
+            bytes,
+            files,
+            quota_bytes: self.quota_bytes.load(Ordering::Relaxed),
+        })
+    }
+
+    pub fn set_quota(&self, quota_bytes: u64) -> AppResult<CacheStatus> {
+        let quota = clamp_cache_quota(quota_bytes);
+        self.quota_bytes.store(quota, Ordering::Relaxed);
+        prune_cache_dir(&self.cache_dir, quota)?;
+        self.status()
+    }
+
+    pub fn clear(&self) -> AppResult<CacheStatus> {
+        if !self.in_flight.lock().expect("in-flight map poisoned").is_empty() {
+            return Err(AppError::operation(
+                "Wait for visible previews to finish loading, then clear the cache again.",
+            ));
+        }
+        for entry in std::fs::read_dir(&self.cache_dir)
+            .map_err(|e| AppError::io(e, self.cache_dir.display().to_string()))?
+            .flatten()
+        {
+            let path = entry.path();
+            if is_cache_file(&path) {
+                std::fs::remove_file(&path)
+                    .map_err(|e| AppError::io(e, path.display().to_string()))?;
+            }
+        }
+        self.status()
     }
 
     /// Generate (or read from cache) a thumbnail for a photo row.
@@ -178,6 +233,7 @@ impl ThumbService {
             let (w, h) = image_dimensions_of(&bytes)
                 .ok_or_else(|| AppError::operation("Cached thumbnail is corrupt"))?;
             tracing::debug!(photo_id, %path, "thumbnail cache hit");
+            touch_cache_file(&cache_file);
             return Ok(ThumbData {
                 data_url: b64_data_url(&bytes),
                 width: w,
@@ -250,6 +306,9 @@ impl ThumbService {
 
         let path_owned = path.to_path_buf();
         let cache_owned = cache_file.to_path_buf();
+        let cache_dir = self.cache_dir.clone();
+        let quota_bytes = self.quota_bytes.load(Ordering::Relaxed);
+        let should_prune = self.writes.fetch_add(1, Ordering::Relaxed) % 64 == 63;
         let result = tokio::task::spawn_blocking(move || {
             // RAW files go through the content-sniffing decode provider
             // (Sprint 15) — rawler discovers the format from the bytes, so
@@ -331,6 +390,10 @@ impl ThumbService {
             std::fs::rename(&tmp, &cache_owned)
                 .map_err(|e| AppError::io(e, cache_owned.display().to_string()))?;
 
+            if should_prune {
+                prune_cache_dir(&cache_dir, quota_bytes)?;
+            }
+
             Ok(Outcome::Ready(bytes, tw, th))
         })
         .await;
@@ -342,6 +405,82 @@ impl ThumbService {
             },
             Err(e) => Outcome::Fail(AppError::operation(format!("Thumbnail task failed: {e}"))),
         }
+    }
+}
+
+fn clamp_cache_quota(bytes: u64) -> u64 {
+    bytes.clamp(MIN_CACHE_QUOTA_BYTES, MAX_CACHE_QUOTA_BYTES)
+}
+
+fn is_cache_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("jpg") || extension.eq_ignore_ascii_case("part"))
+}
+
+fn cache_usage(cache_dir: &Path) -> AppResult<(u64, u64)> {
+    let mut bytes = 0u64;
+    let mut files = 0u64;
+    for entry in std::fs::read_dir(cache_dir)
+        .map_err(|e| AppError::io(e, cache_dir.display().to_string()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if !is_cache_file(&path) {
+            continue;
+        }
+        if let Ok(metadata) = entry.metadata() {
+            bytes = bytes.saturating_add(metadata.len());
+            files += 1;
+        }
+    }
+    Ok((bytes, files))
+}
+
+fn prune_cache_dir(cache_dir: &Path, quota_bytes: u64) -> AppResult<()> {
+    let mut entries = Vec::new();
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(cache_dir)
+        .map_err(|e| AppError::io(e, cache_dir.display().to_string()))?
+        .flatten()
+    {
+        let path = entry.path();
+        if !is_cache_file(&path) {
+            continue;
+        }
+        if let Ok(metadata) = entry.metadata() {
+            let size = metadata.len();
+            total = total.saturating_add(size);
+            let recency = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+            entries.push((recency, path, size));
+        }
+    }
+    if total <= quota_bytes {
+        return Ok(());
+    }
+    entries.sort_by_key(|(recency, _, _)| *recency);
+    for (_, path, size) in entries {
+        if total <= quota_bytes {
+            break;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => total = total.saturating_sub(size),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                total = total.saturating_sub(size)
+            }
+            Err(error) => return Err(AppError::io(error, path.display().to_string())),
+        }
+    }
+    Ok(())
+}
+
+fn touch_cache_file(path: &Path) {
+    let result = std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .and_then(|file| file.set_times(std::fs::FileTimes::new().set_modified(SystemTime::now())));
+    if let Err(error) = result {
+        tracing::debug!(path = %path.display(), %error, "could not update cache recency");
     }
 }
 
@@ -570,6 +709,37 @@ mod tests {
         assert!(err.to_string().contains("no longer in the library"));
 
         let _ = std::fs::remove_file(&dbp);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lru_prune_removes_oldest_and_clear_preserves_unrelated_files() {
+        let dir = temp_dir("lru");
+        let cache = dir.join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        let oldest = cache.join("old.jpg");
+        let newest = cache.join("new.jpg");
+        let marker = cache.join("keep.txt");
+        std::fs::write(&oldest, b"12345").unwrap();
+        std::fs::write(&newest, b"67890").unwrap();
+        std::fs::write(&marker, b"not cache data").unwrap();
+        let old_file = std::fs::OpenOptions::new().write(true).open(&oldest).unwrap();
+        old_file.set_times(std::fs::FileTimes::new().set_modified(
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1),
+        )).unwrap();
+        let new_file = std::fs::OpenOptions::new().write(true).open(&newest).unwrap();
+        new_file.set_times(std::fs::FileTimes::new().set_modified(
+            SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(2),
+        )).unwrap();
+
+        prune_cache_dir(&cache, 5).unwrap();
+        assert!(!oldest.exists());
+        assert!(newest.exists());
+
+        let service = ThumbService::new(cache);
+        let status = service.clear().unwrap();
+        assert_eq!(status.files, 0);
+        assert!(marker.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

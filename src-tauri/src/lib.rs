@@ -24,7 +24,7 @@ pub mod statistics;
 pub mod thumbnailer;
 pub mod time;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::paths::AppPaths;
 use tauri::Manager;
@@ -63,27 +63,52 @@ fn run_inner() -> Result<(), tauri::Error> {
                 "PhotoGremlin starting (local-only mode)"
             );
 
-            let db = Arc::new(
+            let settings_db = Arc::new(
                 crate::database::Db::open(&paths.db_path())
                     .expect("could not open local database"),
             );
-            db.migrate().expect("could not migrate schema");
+            let settings_version = settings_db
+                .schema_version()
+                .expect("could not inspect settings database version");
+            if settings_version > 0 && settings_version < crate::database::CURRENT_SCHEMA_VERSION {
+                let stamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                let backup = paths
+                    .catalog_backups_dir()
+                    .join(format!("pre-migration-database-{stamp}.sqlite"));
+                settings_db
+                    .backup_to(&backup)
+                    .expect("could not back up database before migration");
+                tracing::info!(from = settings_version, backup = %backup.display(), "database backed up before migration");
+            }
+            settings_db.migrate().expect("could not migrate settings database");
+            settings_db
+                .integrity_check()
+                .expect("settings database failed integrity check");
+            let (catalog, catalog_path) = crate::commands::app::initial_catalog(
+                &settings_db,
+                &paths,
+            )
+            .expect("could not open active project catalog");
+            let cache_quota = settings_db
+                .get_setting(crate::commands::cache::SETTING_CACHE_QUOTA_BYTES)
+                .ok()
+                .flatten()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(crate::thumbnailer::DEFAULT_CACHE_QUOTA_BYTES);
 
-            app.manage(crate::state::AppState {
-                db,
-                paths: paths.clone(),
-                scan: Arc::new(Mutex::new(None)),
-                analysis: Arc::new(Mutex::new(None)),
-                metadata: Arc::new(Mutex::new(None)),
-                operation: Arc::new(Mutex::new(None)),
-                similarity: Arc::new(Mutex::new(None)),
-                faces: Arc::new(Mutex::new(None)),
-                scenes: Arc::new(Mutex::new(None)),
-                export: Arc::new(Mutex::new(None)),
-                thumb: Arc::new(crate::thumbnailer::ThumbService::new(
+            app.manage(crate::state::AppState::new(
+                settings_db,
+                catalog,
+                catalog_path,
+                paths.clone(),
+                Arc::new(crate::thumbnailer::ThumbService::with_quota(
                     paths.thumbnails_dir(),
+                    cache_quota,
                 )),
-            });
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,6 +124,13 @@ fn run_inner() -> Result<(), tauri::Error> {
             commands::clear_recent_projects,
             commands::close_project,
             commands::open_project,
+            commands::catalog_health,
+            commands::backup_catalog,
+            commands::list_catalog_backups,
+            commands::restore_catalog,
+            commands::cache_status,
+            commands::set_cache_quota,
+            commands::clear_cache,
             commands::open_in_file_manager,
             commands::get_dashboard_layout,
             commands::set_dashboard_layout,
@@ -135,6 +167,8 @@ fn run_inner() -> Result<(), tauri::Error> {
             commands::list_sessions,
             commands::list_photos,
             commands::review_queue,
+            commands::get_review_progress,
+            commands::set_review_progress,
             commands::get_photo_full,
             commands::get_thumbnail,
             commands::start_similarity,

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
 import { MoonIcon, ShieldIcon, SunIcon } from "@/components/Icons";
@@ -10,6 +10,7 @@ import {
   runtimeLine,
 } from "@/features/settings/ai";
 import { SHORTCUTS } from "@/features/shortcuts";
+import type { CacheStatus, CatalogHealth } from "@/types/api";
 
 function PathRow({ label, value }: { label: string; value: string }) {
   return (
@@ -20,6 +21,106 @@ function PathRow({ label, value }: { label: string; value: string }) {
       <div className="mono" style={{ fontSize: 12, wordBreak: "break-all" }}>
         {value}
       </div>
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(0, bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageMaintenanceCard() {
+  const [cache, setCache] = useState<CacheStatus | null>(null);
+  const [health, setHealth] = useState<CatalogHealth | null>(null);
+  const [backups, setBackups] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function refresh() {
+    const [nextCache, nextHealth, nextBackups] = await Promise.all([
+      api.cacheStatus(),
+      api.catalogHealth(),
+      api.listCatalogBackups(),
+    ]);
+    setCache(nextCache);
+    setHealth(nextHealth);
+    setBackups(nextBackups);
+  }
+
+  useEffect(() => {
+    void refresh().catch((error) => setMessage(toErrorMessage(error)));
+  }, []);
+
+  async function run(action: () => Promise<unknown>, success: string) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await action();
+      await refresh();
+      setMessage(success);
+    } catch (error) {
+      setMessage(toErrorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3>Catalog safety &amp; preview cache</h3>
+      <p className="faint" style={{ marginTop: 0 }}>
+        Each project has an isolated local catalog. Backups contain catalog data and decisions, never copies of source photographs.
+      </p>
+      <div className="stat-grid" style={{ marginBottom: 12 }}>
+        <div className="stat-card">
+          <div className="label">Catalog</div>
+          <div className="value" style={{ fontSize: 16 }}>{health?.healthy ? "Healthy" : "Checking…"}</div>
+          {health && <div className="faint" style={{ fontSize: 12 }}>schema {health.schemaVersion}</div>}
+        </div>
+        <div className="stat-card">
+          <div className="label">Preview cache</div>
+          <div className="value" style={{ fontSize: 16 }}>{cache ? formatBytes(cache.bytes) : "Checking…"}</div>
+          {cache && <div className="faint" style={{ fontSize: 12 }}>{cache.files.toLocaleString()} files</div>}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <button className="btn btn-sm" disabled={busy} onClick={() => void run(api.backupCatalog, "Catalog backup created.")}>Back up catalog</button>
+        <label className="faint" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+          Cache limit
+          <select
+            className="input"
+            disabled={busy || !cache}
+            value={cache ? Math.round(cache.quota_bytes / (1024 ** 3)) : 5}
+            onChange={(event) => void run(
+              () => api.setCacheQuota(Number(event.target.value) * 1024 ** 3),
+              "Preview cache limit updated.",
+            )}
+            style={{ width: 90 }}
+          >
+            {[1, 5, 10, 25, 50].map((gb) => <option key={gb} value={gb}>{gb} GB</option>)}
+          </select>
+        </label>
+        <button className="btn btn-sm" disabled={busy || !cache || cache.files === 0} onClick={() => void run(api.clearCache, "Preview cache cleared. It will rebuild as needed.")}>Clear previews</button>
+      </div>
+      {backups.length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary className="faint" style={{ cursor: "pointer", fontSize: 12.5 }}>Restore from a local backup</summary>
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+            {backups.slice(0, 5).map((path) => (
+              <div key={path} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span className="mono faint" style={{ fontSize: 11.5, flex: 1, wordBreak: "break-all" }}>{path.split(/[\\/]/).pop()}</span>
+                <button className="btn btn-sm" disabled={busy} onClick={() => {
+                  if (!window.confirm("Restore this catalog backup? PhotoGremlin will switch to a recovered copy; your current catalog and photographs will not be overwritten.")) return;
+                  void run(async () => { await api.restoreCatalog(path); window.location.reload(); }, "Catalog restored.");
+                }}>Restore copy</button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {message && <p role="status" className="faint" style={{ marginBottom: 0, fontSize: 12.5 }}>{message}</p>}
     </div>
   );
 }
@@ -265,6 +366,8 @@ export function SettingsView() {
       </div>
 
       <LocalIntelligenceCard />
+
+      <StorageMaintenanceCard />
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h3>Keyboard shortcuts</h3>

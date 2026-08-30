@@ -141,7 +141,7 @@ interface AppState {
   removeRecentProject: (path: string) => Promise<void>;
   openInFileManager: (path: string) => Promise<void>;
   setDashboardLayout: (layout: import("@/types/api").DashboardLayout) => Promise<void>;
-  loadSelections: () => Promise<void>;
+  loadSelections: (sessionId?: number | null) => Promise<void>;
   /** Set one photo's selection (optimistic + persisted). */
   setSelection: (photoId: number, state: SelectionState | null) => void;
   /** Set many photos to the same selection (e.g. "select all on page"). */
@@ -328,11 +328,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     try { await api.setDashboardLayout(layout); } catch {}
   },
 
-  loadSelections: async () => {
+  loadSelections: async (sessionId = null) => {
     try {
-      const rows = await api.listSelections();
       const map: Record<number, SelectionState> = {};
-      for (const r of rows) map[r.photo_id] = r.state;
+      let cursor: number | null = null;
+      do {
+        const page = await api.listSelections(sessionId, cursor);
+        for (const row of page.selections) map[row.photo_id] = row.state;
+        cursor = page.next_after_photo_id;
+      } while (cursor !== null);
       set({ selections: map });
     } catch {
       // Culling state is non-critical; keep whatever we have.

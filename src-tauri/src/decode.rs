@@ -13,32 +13,78 @@
 
 use std::path::Path;
 
-use image::{imageops::FilterType, DynamicImage, RgbImage};
-use rawler::{decode_file, decoders::Orientation, imgop::develop::RawDevelop};
+use image::{imageops::FilterType, DynamicImage, ImageReader, RgbImage};
+use rawler::{
+    decoders::{Orientation, RawDecodeParams},
+    get_decoder,
+    imgop::develop::RawDevelop,
+    rawsource::RawSource,
+};
 
 use crate::error::{AppError, AppResult};
 
-/// One raw decode at a time is dialed to full-sensor resolution; transient
-/// u16 RGB ≈ 6 bytes/pixel, so 30 MP peaks around 180 MB before the preview
-/// downscale. Refuse anything above that with a friendly message instead of
-/// a swap storm (the JPEG path keeps its own 500 MP guard).
-const RAW_MAX_PIXELS: u64 = 30_000_000;
+/// Full-sensor development has several simultaneous u16/RGB buffers. Keeping
+/// the fallback below 24 MP bounds its working set on the 16 GB target
+/// workstation. Embedded and paired previews are attempted first and do not
+/// consume this budget.
+const RAW_MAX_DEVELOP_PIXELS: u64 = 24_000_000;
 
 /// Decode `path` to an RGB preview at most `max_width` px wide.
 pub fn decode_to_preview(path: &Path, max_width: u32) -> AppResult<Option<RgbImage>> {
-    let raw = match decode_file(path) {
-        Ok(raw) => raw,
+    // RAW+JPEG capture is common. Prefer the same-stem JPEG when present: it
+    // reflects the camera rendering and avoids allocating sensor-size buffers.
+    if let Some(image) = paired_jpeg_preview(path, max_width)? {
+        return Ok(Some(image));
+    }
+
+    let source = match RawSource::new(path) {
+        Ok(source) => source,
         Err(e) => {
             tracing::warn!(path = %path.display(), error = %e, "raw decode rejected the file");
             return Ok(None);
         }
     };
+    let decoder = match get_decoder(&source) {
+        Ok(decoder) => decoder,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "raw decoder could not identify the file");
+            return Ok(None);
+        }
+    };
+    let params = RawDecodeParams::default();
 
-    if (raw.width as u64) * (raw.height as u64) > RAW_MAX_PIXELS {
+    // These are camera-produced JPEG previews stored inside the RAW. They are
+    // already developed and are dramatically cheaper than sensor demosaicing.
+    for embedded in [
+        decoder.preview_image(&source, &params),
+        decoder.thumbnail_image(&source, &params),
+    ] {
+        match embedded {
+            Ok(Some(image)) => return Ok(Some(resize_preview(image, max_width))),
+            Ok(None) => {}
+            Err(error) => tracing::debug!(path = %path.display(), %error, "embedded raw preview unavailable"),
+        }
+    }
+
+    // The dummy pass reads metadata/dimensions but does not allocate the raw
+    // pixel plane. This guard therefore runs before the expensive fallback.
+    let dimensions = match decoder.raw_image(&source, &params, true) {
+        Ok(raw) => raw,
+        Err(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "raw metadata decode failed");
+            return Ok(None);
+        }
+    };
+
+    if (dimensions.width as u64) * (dimensions.height as u64) > RAW_MAX_DEVELOP_PIXELS {
         return Err(AppError::operation(
-            "This raw file is too large to preview safely on this computer.",
+            "This RAW has no embedded or paired preview and is too large to develop safely. Add a same-name JPEG or enable in-camera RAW+JPEG capture.",
         ));
     }
+
+    let raw = decoder.raw_image(&source, &params, false).map_err(|e| {
+        AppError::operation(format!("Could not decode this RAW file locally: {e}"))
+    })?;
 
     let dynimg = RawDevelop::default()
         .develop_intermediate(&raw)
@@ -51,7 +97,11 @@ pub fn decode_to_preview(path: &Path, max_width: u32) -> AppResult<Option<RgbIma
 
     let oriented = apply_exif_orientation(dynimg, raw.orientation);
 
-    let (w, h) = (oriented.width(), oriented.height());
+    Ok(Some(resize_preview(oriented, max_width)))
+}
+
+fn resize_preview(image: DynamicImage, max_width: u32) -> RgbImage {
+    let (w, h) = (image.width(), image.height());
     let scale = f64::from(max_width) / f64::from(w.max(1));
     let (tw, th) = if scale < 1.0 {
         (
@@ -62,11 +112,35 @@ pub fn decode_to_preview(path: &Path, max_width: u32) -> AppResult<Option<RgbIma
         (w, h)
     };
 
-    Ok(Some(
-        oriented
-            .resize_exact(tw, th, FilterType::Triangle)
-            .to_rgb8(),
-    ))
+    image.resize_exact(tw, th, FilterType::Triangle).to_rgb8()
+}
+
+fn paired_jpeg_preview(path: &Path, max_width: u32) -> AppResult<Option<RgbImage>> {
+    let Some(parent) = path.parent() else { return Ok(None) };
+    let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else { return Ok(None) };
+    let entries = std::fs::read_dir(parent)
+        .map_err(|e| AppError::io(e, parent.display().to_string()))?;
+    for entry in entries.flatten() {
+        let candidate = entry.path();
+        let is_pair = candidate
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case(stem))
+            && candidate
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.eq_ignore_ascii_case("jpg") || value.eq_ignore_ascii_case("jpeg"));
+        if !is_pair {
+            continue;
+        }
+        let image = ImageReader::open(&candidate)
+            .and_then(|reader| reader.with_guessed_format())
+            .map_err(|e| AppError::ImageRead { path: candidate.display().to_string(), reason: e.to_string() })?
+            .decode()
+            .map_err(|e| AppError::ImageRead { path: candidate.display().to_string(), reason: e.to_string() })?;
+        return Ok(Some(resize_preview(image, max_width)));
+    }
+    Ok(None)
 }
 
 /// EXIF orientation → actual pixels. The develop pipeline crops and
@@ -157,6 +231,21 @@ mod tests {
         let path = dir.join("IMG_0001.CR2");
         std::fs::write(&path, b"this is definitely not a camera raw file").unwrap();
         assert!(matches!(decode_to_preview(&path, 256).unwrap(), None));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_stem_jpeg_is_used_before_raw_decode() {
+        let dir = std::env::temp_dir().join(format!("pg_rawpair_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let raw_path = dir.join("IMG_0042.CR3");
+        let jpeg_path = dir.join("img_0042.JpG");
+        std::fs::write(&raw_path, b"not a real raw, proving the pair wins").unwrap();
+        DynamicImage::new_rgb8(800, 400).save(&jpeg_path).unwrap();
+
+        let preview = decode_to_preview(&raw_path, 200).unwrap().unwrap();
+        assert_eq!(preview.dimensions(), (200, 100));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

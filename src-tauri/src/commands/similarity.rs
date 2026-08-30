@@ -47,7 +47,7 @@ pub async fn start_similarity(
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let slot = state.similarity.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();
@@ -122,7 +122,7 @@ pub fn list_similarity_groups(
     state: State<'_, AppState>,
     limit: i64,
 ) -> AppResult<Vec<SimilarityGroup>> {
-    state.db.list_similarity_groups(limit)
+    state.db()?.list_similarity_groups(limit)
 }
 
 /// One page of a group's photographs (same summary shape as the grid), so a
@@ -134,6 +134,6 @@ pub fn group_photos(
     offset: i64,
     limit: i64,
 ) -> AppResult<PhotoPage> {
-    let (photos, total) = state.db.group_photos(group_id, offset, limit)?;
+    let (photos, total) = state.db()?.group_photos(group_id, offset, limit)?;
     Ok(PhotoPage { photos, total })
 }

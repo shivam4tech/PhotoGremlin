@@ -6,14 +6,17 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::database::DbStatus;
-use crate::error::AppResult;
+use crate::database::{Db, DbStatus, CURRENT_SCHEMA_VERSION};
+use crate::error::{AppError, AppResult};
+use crate::paths::AppPaths;
 use crate::state::AppState;
+use std::sync::Arc;
 
 const SETTING_ACTIVE_FOLDER: &str = "active_folder";
 const SETTING_RECENT_FOLDERS: &str = "recent_folders";
 const SETTING_RECENT_FOLDERS_CAP: usize = 12;
 const SETTING_DASHBOARD_LAYOUT: &str = "dashboard_layout";
+const SETTING_CATALOG_PREFIX: &str = "project_catalog:";
 
 #[derive(Serialize, Clone)]
 pub struct AppInfo {
@@ -55,14 +58,14 @@ pub fn app_paths(state: State<AppState>) -> PathsInfo {
         data_dir: p.data_dir.clone(),
         cache_dir: p.cache_dir.clone(),
         log_dir: p.log_dir.clone(),
-        db_path: p.db_path(),
+        db_path: state.catalog_path().unwrap_or_else(|_| p.db_path()),
         thumbnails_dir: p.thumbnails_dir(),
     }
 }
 
 #[tauri::command]
 pub fn db_status(state: State<AppState>) -> AppResult<DbStatus> {
-    state.db.status()
+    state.db()?.status()
 }
 
 /// Best-effort browser crash reporting. The payload is written only to the
@@ -104,16 +107,7 @@ mod tests {
 /// Persist the active library folder (a scan root) and record it in recents.
 #[tauri::command]
 pub fn set_active_folder(state: State<AppState>, path: String) -> AppResult<()> {
-    let p = Path::new(&path);
-    if !p.is_dir() {
-        return Err(crate::error::AppError::validation(format!(
-            "Folder does not exist: {path}"
-        )));
-    }
-    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf()).display().to_string();
-    state.db.set_setting(SETTING_ACTIVE_FOLDER, &canonical)?;
-    let _ = touch_recent(&state.db, &canonical);
-    Ok(())
+    open_project_inner(&state, &path)
 }
 
 /// Resolve the persisted active folder, dropping it (and the setting) when
@@ -132,7 +126,7 @@ pub fn resolve_active_folder(db: &crate::database::Db) -> AppResult<Option<Strin
 
 #[tauri::command]
 pub fn get_active_folder(state: State<AppState>) -> AppResult<Option<String>> {
-    resolve_active_folder(&state.db)
+    resolve_active_folder(&state.settings_db)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -175,10 +169,10 @@ fn recent_entry(path: &str, photo_count: i64) -> RecentProject {
 }
 
 /// MRU upsert for recent_folders: dedup, prepend, cap 12, persist.
-fn touch_recent(db: &crate::database::Db, path: &str) -> AppResult<()> {
-    let mut recents = load_recent_raw(db)?;
+fn touch_recent(settings_db: &Db, catalog_db: &Db, path: &str) -> AppResult<()> {
+    let mut recents = load_recent_raw(settings_db)?;
     // count photos for this path's session if possible
-    let photo_count = db
+    let photo_count = catalog_db
         .status()
         .map(|s| s.photo_count)
         .unwrap_or(0);
@@ -192,7 +186,7 @@ fn touch_recent(db: &crate::database::Db, path: &str) -> AppResult<()> {
     if let Some(first) = recents.first_mut() {
         first.last_opened_at = crate::time::now_utc();
     }
-    save_recent_raw(db, &recents)
+    save_recent_raw(settings_db, &recents)
 }
 
 fn load_recent_raw(db: &crate::database::Db) -> AppResult<Vec<RecentProject>> {
@@ -232,63 +226,250 @@ fn ensure_recents_seeded(db: &crate::database::Db) -> AppResult<Vec<RecentProjec
 
 #[tauri::command]
 pub fn get_recent_projects(state: State<AppState>) -> AppResult<Vec<RecentProject>> {
-    ensure_recents_seeded(&state.db)
+    ensure_recents_seeded(&state.settings_db)
 }
 
 #[tauri::command]
 pub fn remove_recent_project(state: State<AppState>, path: String) -> AppResult<()> {
-    let mut recents = load_recent_raw(&state.db)?;
+    let mut recents = load_recent_raw(&state.settings_db)?;
     recents.retain(|r| r.path != path);
-    save_recent_raw(&state.db, &recents)
+    save_recent_raw(&state.settings_db, &recents)
 }
 
 #[tauri::command]
 pub fn clear_recent_projects(state: State<AppState>) -> AppResult<()> {
-    state.db.clear_setting(SETTING_RECENT_FOLDERS)
+    state.settings_db.clear_setting(SETTING_RECENT_FOLDERS)
 }
 
 #[tauri::command]
 pub fn close_project(state: State<AppState>) -> AppResult<()> {
-    state.db.clear_setting(SETTING_ACTIVE_FOLDER)?;
+    state.ensure_jobs_idle()?;
+    state.db()?.clear_setting(SETTING_ACTIVE_FOLDER)?;
+    state.settings_db.clear_setting(SETTING_ACTIVE_FOLDER)?;
     Ok(())
 }
 
 /// Open a project: validate the folder, set it active, and record it in recents.
 #[tauri::command]
 pub fn open_project(state: State<AppState>, path: String) -> AppResult<()> {
-    let p = Path::new(&path);
+    open_project_inner(&state, &path)
+}
+
+fn canonical_project(path: &str) -> AppResult<PathBuf> {
+    let p = Path::new(path);
     if !p.is_dir() {
-        return Err(crate::error::AppError::validation(format!(
+        return Err(AppError::validation(format!(
             "Folder does not exist: {path}"
         )));
     }
-    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    let s = canonical.display().to_string();
-    state.db.set_setting(SETTING_ACTIVE_FOLDER, &s)?;
-    touch_recent(&state.db, &s)?;
+    p.canonicalize().map_err(|e| AppError::io(e, path.to_string()))
+}
 
-    // Per-catalog scaffolding (Sprint 19): ensure catalogs/<slug>.sqlite exists
-    // so the directory is visibly populated. Active-DB hot-swap lands on
-    // Sprint 20; for now the app stays on the single catalog.
-    let slug: String = Path::new(&canonical)
+fn project_hash(path: &Path) -> u64 {
+    crate::thumbnailer::fnv1a64(path.to_string_lossy().as_bytes())
+}
+
+fn project_slug(path: &Path) -> String {
+    let name: String = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "project".to_string())
         .chars()
         .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
         .collect();
-    let catalog_path = state.paths.catalogs_dir().join(format!("{slug}.sqlite"));
-    if !catalog_path.exists() {
-        if let Ok(db) = crate::database::Db::open(&catalog_path) {
-            let _ = db.migrate();
+    let name = name.trim_matches('_');
+    let name = if name.is_empty() { "project" } else { name };
+    format!("{name}-{:016x}", project_hash(path))
+}
+
+fn catalog_setting_key(path: &Path) -> String {
+    format!("{SETTING_CATALOG_PREFIX}{:016x}", project_hash(path))
+}
+
+fn backup_stamp() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+fn open_catalog_checked(path: &Path, paths: &AppPaths) -> AppResult<Arc<Db>> {
+    let existed = path.exists();
+    let db = Arc::new(Db::open(path)?);
+    if existed {
+        db.integrity_check()?;
+        let version = db.schema_version()?;
+        if version > 0 && version < CURRENT_SCHEMA_VERSION {
+            let backup = paths.catalog_backups_dir().join(format!(
+                "pre-migration-{}-{}.sqlite",
+                path.file_stem().unwrap_or_default().to_string_lossy(),
+                backup_stamp()
+            ));
+            db.backup_to(&backup)?;
+            tracing::info!(catalog = %path.display(), backup = %backup.display(), from = version, to = CURRENT_SCHEMA_VERSION, "catalog backed up before migration");
         }
     }
+    db.migrate()?;
+    db.integrity_check()?;
+    Ok(db)
+}
+
+/// Resolve the catalog used on startup. A legacy single-catalog install is
+/// registered to its current project exactly once, preserving every prior
+/// scan and decision; subsequent projects receive isolated catalog files.
+pub fn initial_catalog(settings_db: &Arc<Db>, paths: &AppPaths) -> AppResult<(Arc<Db>, PathBuf)> {
+    let Some(active) = resolve_active_folder(settings_db)? else {
+        return Ok((settings_db.clone(), paths.db_path()));
+    };
+    let project = PathBuf::from(&active);
+    let key = catalog_setting_key(&project);
+    let catalog_path = match settings_db.get_setting(&key)? {
+        Some(mapped) => PathBuf::from(mapped),
+        None => {
+            // The pre-Sprint-27 database is the authoritative catalog for the
+            // project that was active during upgrade.
+            let legacy = paths.db_path();
+            settings_db.set_setting(&key, &legacy.to_string_lossy())?;
+            legacy
+        }
+    };
+    let catalog = if catalog_path == paths.db_path() {
+        settings_db.clone()
+    } else {
+        open_catalog_checked(&catalog_path, paths)?
+    };
+    catalog.set_setting(SETTING_ACTIVE_FOLDER, &active)?;
+    Ok((catalog, catalog_path))
+}
+
+fn open_project_inner(state: &AppState, path: &str) -> AppResult<()> {
+    state.ensure_jobs_idle()?;
+    let canonical = canonical_project(path)?;
+    let canonical_text = canonical.to_string_lossy().into_owned();
+    let key = catalog_setting_key(&canonical);
+    let catalog_path = state
+        .settings_db
+        .get_setting(&key)?
+        .map(PathBuf::from)
+        .unwrap_or_else(|| state.paths.catalog_db_path(&project_slug(&canonical)));
+
+    let catalog = if state.is_active_catalog(&catalog_path)? {
+        state.db()?
+    } else {
+        open_catalog_checked(&catalog_path, &state.paths)?
+    };
+    catalog.set_setting(SETTING_ACTIVE_FOLDER, &canonical_text)?;
+
+    // Persist registry/active state only after the replacement is fully
+    // usable; then swap both Arc and path in one short critical section.
+    state
+        .settings_db
+        .set_setting(&key, &catalog_path.to_string_lossy())?;
+    state
+        .settings_db
+        .set_setting(SETTING_ACTIVE_FOLDER, &canonical_text)?;
+    state.switch_catalog(catalog.clone(), catalog_path)?;
+    touch_recent(&state.settings_db, &catalog, &canonical_text)?;
     Ok(())
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CatalogHealth {
+    pub path: PathBuf,
+    pub schema_version: i64,
+    pub healthy: bool,
+}
+
+#[tauri::command]
+pub fn catalog_health(state: State<AppState>) -> AppResult<CatalogHealth> {
+    let db = state.db()?;
+    db.integrity_check()?;
+    Ok(CatalogHealth {
+        path: state.catalog_path()?,
+        schema_version: db.schema_version()?,
+        healthy: true,
+    })
+}
+
+#[tauri::command]
+pub fn backup_catalog(state: State<AppState>) -> AppResult<PathBuf> {
+    state.ensure_jobs_idle()?;
+    let db = state.db()?;
+    let stem = state
+        .catalog_path()?
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let destination = state
+        .paths
+        .catalog_backups_dir()
+        .join(format!("{stem}-{}.sqlite", backup_stamp()));
+    db.backup_to(&destination)?;
+    Ok(destination)
+}
+
+#[tauri::command]
+pub fn list_catalog_backups(state: State<AppState>) -> AppResult<Vec<PathBuf>> {
+    let mut backups = std::fs::read_dir(state.paths.catalog_backups_dir())
+        .map_err(|e| AppError::io(e, "catalog backup folder"))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("sqlite"))
+        .collect::<Vec<_>>();
+    backups.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    backups.truncate(20);
+    Ok(backups)
+}
+
+#[tauri::command]
+pub fn restore_catalog(state: State<AppState>, backup_path: String) -> AppResult<()> {
+    state.ensure_jobs_idle()?;
+    let requested = PathBuf::from(&backup_path);
+    let backup = requested
+        .canonicalize()
+        .map_err(|e| AppError::io(e, backup_path.clone()))?;
+    let root = state
+        .paths
+        .catalog_backups_dir()
+        .canonicalize()
+        .map_err(|e| AppError::io(e, "catalog backup folder"))?;
+    if !backup.starts_with(&root) || backup.extension().and_then(|e| e.to_str()) != Some("sqlite") {
+        return Err(AppError::validation(
+            "Choose a PhotoGremlin catalog backup from the catalog-backups folder.",
+        ));
+    }
+    let restored = state.paths.catalogs_dir().join(format!(
+        "restored-{}-{}.sqlite",
+        backup.file_stem().unwrap_or_default().to_string_lossy(),
+        backup_stamp()
+    ));
+    std::fs::copy(&backup, &restored)
+        .map_err(|e| AppError::io(e, restored.display().to_string()))?;
+    let db = open_catalog_checked(&restored, &state.paths)?;
+    let active = resolve_active_folder(&state.settings_db)?.ok_or_else(|| {
+        AppError::validation("Open a project before restoring its catalog.")
+    })?;
+    if db
+        .get_setting(SETTING_ACTIVE_FOLDER)?
+        .is_some_and(|folder| folder != active)
+    {
+        return Err(AppError::validation(
+            "That backup belongs to a different project. Open that project before restoring it.",
+        ));
+    }
+    state.settings_db.set_setting(
+        &catalog_setting_key(Path::new(&active)),
+        &restored.to_string_lossy(),
+    )?;
+    db.set_setting(SETTING_ACTIVE_FOLDER, &active)?;
+    state.switch_catalog(db, restored)
 }
 
 #[tauri::command]
 pub fn get_dashboard_layout(state: State<AppState>) -> AppResult<Option<DashboardLayout>> {
-    match state.db.get_setting(SETTING_DASHBOARD_LAYOUT)? {
+    match state.settings_db.get_setting(SETTING_DASHBOARD_LAYOUT)? {
         Some(json) => {
             let v: DashboardLayout = serde_json::from_str(&json).map_err(|e| {
                 crate::error::AppError::Database(format!("dashboard_layout corrupt: {e}"))
@@ -303,7 +484,7 @@ pub fn get_dashboard_layout(state: State<AppState>) -> AppResult<Option<Dashboar
 pub fn set_dashboard_layout(state: State<AppState>, layout: DashboardLayout) -> AppResult<()> {
     let json = serde_json::to_string(&layout)
         .map_err(|e| crate::error::AppError::Database(e.to_string()))?;
-    state.db.set_setting(SETTING_DASHBOARD_LAYOUT, &json)
+    state.settings_db.set_setting(SETTING_DASHBOARD_LAYOUT, &json)
 }
 
 #[tauri::command]

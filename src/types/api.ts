@@ -123,6 +123,30 @@ export interface SelectionRow {
   updated_at: string;
 }
 
+export interface SelectionPage {
+  selections: SelectionRow[];
+  next_after_photo_id: number | null;
+}
+
+export interface ReviewProgress {
+  session_id: number;
+  unit_index: number;
+  focused_photo_id: number | null;
+  updated_at: string;
+}
+
+export interface CacheStatus {
+  bytes: number;
+  files: number;
+  quota_bytes: number;
+}
+
+export interface CatalogHealth {
+  path: string;
+  schemaVersion: number;
+  healthy: boolean;
+}
+
 /** One item in an operation plan (the preview). */
 export interface PlanItem {
   photo_id: number;

@@ -77,12 +77,17 @@ intent, only green reality.
 
 ## Performance guardrails
 
-- Grid never decodes full-res images; thumbnails are cached on disk keyed by
-  path+size+mtime+thumb-version, generated lazily with bounded concurrency.
+- Grid never decodes full-res ordinary images; thumbnails are cached on disk
+  keyed by path+size+mtime+thumb-version and generated lazily with bounded
+  concurrency. RAW tries paired/embedded previews before a 24 MP-capped
+  develop. The preview cache defaults to a 5 GB LRU quota and is user-clearable.
 - Analysis runs off the UI thread with a small worker pool; SQLite writes are
   incremental per photo.
-- 5,000 photos must browse smoothly; 10,000 usable. Memory bounded by the
-  worker pool, not by the library size.
+- Selection state is session-scoped and cursor-paged; the regression suite
+  covers more than 20,000 decisions without a fixed payload ceiling.
+- 50,000-photo projects are the beta scale target. Memory is bounded by
+  worker pools, thumbnail virtualization, and paged IPC rather than library
+  size.
 
 ## Release (v0.1.0, Sprint 10)
 

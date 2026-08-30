@@ -27,23 +27,28 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 
 ## Module notes (what actually exists today)
 
-- `lib.rs` — app entry. Wires plugin (dialog), creates `AppState { db, paths }`,
-  registers commands. No business logic.
-- `state.rs` — `AppState` (Arc of `Db` + `AppPaths` + `ThumbService` + the
+- `lib.rs` — app entry. Wires plugin (dialog), opens the global settings DB,
+  resolves and verifies the active project catalog, creates `AppState`, and
+  registers commands. No domain business logic.
+- `state.rs` — `AppState` (global settings `Db` + atomically swappable active
+   catalog `{ Arc<Db>, path }` + `AppPaths` + `ThumbService` + the
    scan-job slot + the analysis-job slot + the metadata-job slot + the
    file-operation slot + the similarity slot + the faces slot), shared via
    Tauri's managed state. Commands take `State<AppState>`. Each slot holds
    the live `Job { running, cancel }` Arcs: a claim-and-cancel mechanism
    shared between `start_*`/`stop_*` and the background task (scan, analysis,
    metadata, file operations, similarity and face detection are separate
-   slots; the UI keeps them mutually exclusive).
+   slots; the UI keeps them mutually exclusive). Each command captures the
+   active catalog `Arc`; switching projects is rejected while any background
+   slot is running, so a worker and its completion event cannot drift into a
+   different project.
 - `thumbnailer.rs` — the local thumbnail engine (Sprint 3). One `ThumbService`
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
   in-flight dedup map (waiters poll the cache file with a 10 s bounded
   deadline instead of decoding twice). `get(db, photo_id, kind)` = photo row
-  lookup → previewable-format check (RAW/HEIC return a friendly unsupported
-  error the UI renders as a labelled placeholder) → missing-file check →
+  lookup → previewable-format check (HEIC returns a friendly unsupported
+  error; RAW uses the local preview ladder) → missing-file check →
   cache hit? → else `spawn_blocking` generation: header-only
   `image_dimensions` check (≤ ~500 MP guard) → `resize_exact` (triangle
   filter) → JPEG q82 → atomic temp+rename cache write. The UI receives base64
@@ -52,9 +57,12 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `path|size|mtime|width|THUMB_VERSION` (std's `DefaultHasher` is randomly
   seeded and must not be used for cache keys); version bump invalidates all.
   Base64 is a ~40-line local impl (round-trip tested), not a dependency.
-  RAW files (Sprint 15) take a different branch inside generation: the
-  decode provider (`decode.rs`) develops them through rawler and falls back
-  to the placeholder error for undecodable files — see RAW_PREVIEWS.md.
+  RAW files take a different branch inside generation: `decode.rs` tries a
+  paired JPEG, embedded preview, embedded thumbnail, then a preflight-capped
+  develop through rawler — see RAW_PREVIEWS.md. Sprint 27 adds a configurable
+  256 MB–100 GB quota (5 GB default), access-time-by-mtime LRU pruning every
+  64 writes, cache status, and an explicit clear action. Maintenance runs via
+  `spawn_blocking` and only touches generated `.jpg`/`.part` files.
 - `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
   (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
   the `State` guard before awaiting — Tauri command futures must be `Send`).
@@ -62,6 +70,9 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   capture-time-ordered photo rows together with existing local burst/similar
   group membership. It performs no pixel decode, score, or automatic choice;
   the review UI fetches thumbnails only for the decision currently in view.
+  `get_review_progress` / `set_review_progress` persist a validated unit and
+  focus per session. Selection loading is separately cursor-paged and scoped
+  to that session rather than using a catalog-wide fixed cap.
 - `features/review/ReviewMode.tsx` — session-only, keyboard-first review
   surface. `K`/`X`/`L` write a local selection state through the store and
   advance through a burst/similar decision context; `U` restores the previous
@@ -410,7 +421,8 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
 |---|---|
 | Tauri 2 over Electron | Small binaries, native filesystem/integration, Rust for pixel work |
 | SQLite (bundled rusqlite) | Zero servers, one file, perfect for statistics, survives OS-level inspection |
-| Mutex-wrapped single connection | Simplest correct model for one-writer desktop catalog |
+| One SQLite file per project | Prevents project decisions, groups, and reports from leaking across shoots |
+| Mutex-wrapped connection per catalog | Simplest correct model for one-writer desktop catalog |
 | Structured filter JSON | One representation reused by library, saved views, statistics |
 | `algorithm_version` on analysis rows | Lets future algorithm improvements trigger re-analysis on demand |
 | OS-conventional dirs | `~/.local/share`, `~/.cache`, `~/.local/state` (Linux) equivalents elsewhere |

@@ -49,7 +49,7 @@ pub async fn start_metadata(
         job
     };
 
-    let db = state.db.clone();
+    let db = state.db()?;
     let slot = state.metadata.clone();
     let cancel = job.cancel.clone();
     let running = job.running.clone();

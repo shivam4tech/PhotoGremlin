@@ -24,14 +24,14 @@ pub fn list_photos(
     offset: i64,
     limit: i64,
 ) -> AppResult<PhotoPage> {
-    let (photos, total) = state.db.list_photos(offset, limit)?;
+    let (photos, total) = state.db()?.list_photos(offset, limit)?;
     Ok(PhotoPage { photos, total })
 }
 
 /// Full photo + analysis for the viewer.
 #[tauri::command]
 pub fn get_photo_full(state: State<'_, AppState>, id: i64) -> AppResult<crate::database::PhotoFull> {
-    state.db.get_photo_full(id)
+    state.db()?.get_photo_full(id)
 }
 
 /// Thumbnail for one photo (grid or viewer size). Served from local cache
@@ -47,7 +47,7 @@ pub async fn get_thumbnail(
 ) -> AppResult<ThumbData> {
     let kind = parse_kind(kind)?;
     let thumb = state.thumb.clone();
-    let db = state.db.clone();
+    let db = state.db()?;
     drop(state);
     thumb.get(&db, photo_id, kind).await
 }
