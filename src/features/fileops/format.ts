@@ -23,6 +23,8 @@ export function opVerb(op: FileOpPlan["op"]): string {
       return "be copied";
     case "trash":
       return "be trashed";
+    case "delete-permanently":
+      return "be permanently deleted";
   }
 }
 

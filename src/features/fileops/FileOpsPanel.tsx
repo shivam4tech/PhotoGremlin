@@ -11,7 +11,7 @@ import {
   resultHeadline,
 } from "@/features/fileops/format";
 
-export type FileOpsTab = "rename" | "move" | "copy" | "trash";
+export type FileOpsTab = "rename" | "move" | "copy" | "trash" | "delete-permanently";
 
 const TEMPLATES = [
   { label: "date_name_seq", value: "{date}_{name}_{sequence}" },
@@ -21,10 +21,11 @@ const TEMPLATES = [
 ];
 
 /**
- * File operations (Sprint 7): rename / move / copy / trash for the
+ * File operations (Sprints 7 and 32): rename / move / copy / trash /
+ * permanent delete for the
  * photographs currently marked "selected". Preview-first: every action builds
  * a plan the backend returns, the user inspects it, confirms, and only then
- * does anything touch disk. Destructive (trash) gets a native confirmation.
+ * does anything touch disk. Destructive actions get a native confirmation.
  */
 export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: number[]; initialTab?: FileOpsTab }) {
   const operating = useAppStore((s) => s.operating);
@@ -62,7 +63,9 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
           ? await api.planGroupRename(photoIds, template, groupName)
           : tab === "trash"
             ? await api.planTrash(photoIds)
-            : await api.planMoveCopy(photoIds, destDir as string, tab, onCollision);
+            : tab === "delete-permanently"
+              ? await api.planPermanentDelete(photoIds)
+              : await api.planMoveCopy(photoIds, destDir as string, tab, onCollision);
       setPlan(p);
     } catch (e) {
       setLocalErr(toErrorMessage(e));
@@ -87,6 +90,13 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
         );
         if (!yes) return;
         await api.startTrash(photoIds);
+      } else if (tab === "delete-permanently") {
+        const yes = await ask(
+          `Permanently delete ${okCount.toLocaleString()} photograph${okCount === 1 ? "" : "s"}? This removes the original file${okCount === 1 ? "" : "s"} and cannot be undone. Use system trash if you may need to restore ${okCount === 1 ? "it" : "them"}.`,
+          { title: "Permanently delete photographs", kind: "warning" },
+        );
+        if (!yes) return;
+        await api.startPermanentDelete(photoIds);
       } else if (tab === "rename") {
         await api.startGroupRename(photoIds, template, groupName);
       } else {
@@ -124,7 +134,7 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
         <span>
           <strong>{photoIds.length.toLocaleString()}</strong> selected photograph{photoIds.length === 1 ? "" : "s"}
         </span>
-        <span className="faint">Renames, moves, copies and trashes — all previewed before anything touches disk.</span>
+        <span className="faint">Every file action is previewed before anything touches disk.</span>
         <span className="spacer" />
         {opSummary && !operating && (
           <button className="btn btn-ghost btn-sm" onClick={() => store().setOpSummary(null)}>
@@ -134,14 +144,22 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
       </div>
 
       <div className="fileops-tabs">
-        {(["rename", "move", "copy", "trash"] as FileOpsTab[]).map((t) => (
+        {(["rename", "move", "copy", "trash", "delete-permanently"] as FileOpsTab[]).map((t) => (
           <button
             key={t}
-            className={`fileops-tab${tab === t ? " is-on" : ""}${t === "trash" ? " is-danger" : ""}`}
+            className={`fileops-tab${tab === t ? " is-on" : ""}${t === "trash" || t === "delete-permanently" ? " is-danger" : ""}`}
             onClick={() => setTab(t)}
             disabled={operating}
           >
-            {t === "rename" ? "Rename" : t === "move" ? "Move" : t === "copy" ? "Copy" : "Trash"}
+            {t === "rename"
+              ? "Rename"
+              : t === "move"
+                ? "Move"
+                : t === "copy"
+                  ? "Copy"
+                  : t === "trash"
+                    ? "Trash"
+                    : "Delete permanently"}
           </button>
         ))}
       </div>
@@ -229,7 +247,15 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
         {tab === "trash" && (
           <div className="field-col">
             <span className="field-hint field-warn">
-              Photos go to your <strong>system trash</strong> — nothing is permanently deleted in v0.1. You can restore them from the OS trash.
+              Photos go to your <strong>system trash</strong>. This is the recommended removal option because you can restore them from the OS trash.
+            </span>
+          </div>
+        )}
+
+        {tab === "delete-permanently" && (
+          <div className="field-col">
+            <span className="field-hint field-warn">
+              <strong>Permanent deletion cannot be undone.</strong> The original files are removed without going to system trash. A second native confirmation is required after preview.
             </span>
           </div>
         )}
@@ -240,12 +266,14 @@ export function FileOpsPanel({ photoIds, initialTab = "rename" }: { photoIds: nu
               {planning ? "Previewing…" : "Preview"}
             </button>
             {plan && (
-              <button className={`btn${tab === "trash" ? " btn-danger" : " btn-primary"}`} onClick={start} disabled={!canStart}>
+              <button className={`btn${tab === "trash" || tab === "delete-permanently" ? " btn-danger" : " btn-primary"}`} onClick={start} disabled={!canStart}>
                 {starting
                   ? "Starting…"
                   : tab === "trash"
                     ? `Move ${okCount.toLocaleString()} to trash`
-                    : `${tab === "rename" ? "Rename" : tab === "move" ? "Move" : "Copy"} ${okCount.toLocaleString()} file${okCount === 1 ? "" : "s"}`}
+                    : tab === "delete-permanently"
+                      ? `Delete ${okCount.toLocaleString()} permanently`
+                      : `${tab === "rename" ? "Rename" : tab === "move" ? "Move" : "Copy"} ${okCount.toLocaleString()} file${okCount === 1 ? "" : "s"}`}
               </button>
             )}
           </div>
@@ -320,7 +348,13 @@ function PreviewKey({ item, op }: { item: PlanItem; op: FileOpPlan["op"] }) {
       <span className="mono">{fileBase(item.source)}</span>
       <span className="preview-arrow">→</span>
       <span className="mono">
-        {item.destination ? fileBase(item.destination) : op === "trash" ? "system trash" : "—"}
+        {item.destination
+          ? fileBase(item.destination)
+          : op === "trash"
+            ? "system trash"
+            : op === "delete-permanently"
+              ? "permanently deleted"
+              : "—"}
       </span>
       {item.note && <span className="preview-note">{item.note}</span>}
     </li>

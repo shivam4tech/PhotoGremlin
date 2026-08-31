@@ -166,7 +166,7 @@ impl Db {
             )
             .map_err(db_err("create views + similarity"))?;
 
-            // v4: file operation audit log (rename/move/copy/trash history).
+            // v4: file operation audit log (all previewed filesystem changes).
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS file_operations (
                     id INTEGER PRIMARY KEY,

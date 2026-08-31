@@ -157,7 +157,9 @@ face_groups, elapsed_ms, cancelled }`, carried in `similarity-complete`.
   decides (via culling + file ops).
 - **No person identity or name inference.** Face-appearance candidates are
   local, optional and deliberately labelled as candidates.
-- **No permanent delete** anywhere — trash only (Sprint 7).
+- **No automatic deletion.** Trash remains the default; Sprint 32's permanent
+  deletion is available only as an explicit per-photo or selected-photo action
+  with its own preview and irreversible confirmation.
 
 ## Testing
 

@@ -9,7 +9,8 @@ non-destructive, but confirmed file operations intentionally change files.
 ## Beta boundary
 
 - Source photographs stay in their existing folders unless the photographer
-  explicitly previews and confirms a rename, move, copy or trash operation.
+  explicitly previews and confirms a rename, move, copy, trash, or permanent
+  delete operation.
 - Review decisions are reversible local catalog state. They do not rate,
   delete or edit a photograph.
 - Editor handoff passes at most 500 normal source paths to the configured local
@@ -30,7 +31,10 @@ non-destructive, but confirmed file operations intentionally change files.
 3. Repeat with a multi-thousand-photo project. Scroll deeply, filter, reopen
    the project and confirm the grid and review position resume without a large
    memory spike.
-4. Exercise brightness, sharpness, contrast, ISO and focal-length ranges with
+4. Exercise Black & white, Color, Dark, Bright, Landscape, Portrait, and
+   Contains faces quick views. Confirm exclusive pairs replace each other while
+   an unrelated ISO or review-state condition stays active. Then exercise
+   brightness, sharpness, contrast, ISO and focal-length ranges with
    mouse and keyboard. The track should show a field-specific measured scale;
    exact values should appear only while the control is adjusted and remain
    available to assistive technology.
@@ -45,9 +49,12 @@ non-destructive, but confirmed file operations intentionally change files.
 8. Finish a fully decided shoot. Verify the factual totals, kept Library view,
    review-again action, and configured local editor handoff. Also verify the
    over-500-file message directs the photographer to preview-first export.
-9. Preview a rename, move, copy and trash operation. Test a destination
-   collision, a source removed between preview and confirm, and destructive
-   confirmation. No item may be silently overwritten or permanently deleted.
+9. Preview a rename, move, copy, trash, and permanent-delete operation. Test a
+   destination collision, a source removed between preview and confirm, and
+   each destructive confirmation. Permanent deletion must show the exact path,
+   warn that recovery is impossible, and affect only the confirmed indexed
+   file. No item may be silently overwritten or deleted from a filter/review
+   decision alone.
 10. Restart after each workflow. Confirm decisions, collections, saved views,
     settings and generated-thumbnail cache controls remain consistent.
 11. Disconnect networking for the full pass. The workflow must remain fully

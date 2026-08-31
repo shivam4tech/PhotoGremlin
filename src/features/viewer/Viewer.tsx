@@ -75,11 +75,15 @@ export function Viewer({
   ordered,
   onClose,
   onNavigate,
+  onTrash,
+  onDeletePermanently,
 }: {
   photoId: number;
   ordered: PhotoSummary[];
   onClose: () => void;
   onNavigate: (id: number) => void;
+  onTrash?: (id: number) => void;
+  onDeletePermanently?: (id: number) => void;
 }) {
   const [full, setFull] = useState<PhotoFull | null>(null);
   const [image, setImage] = useState<ImageState>({ kind: "loading" });
@@ -292,6 +296,24 @@ export function Viewer({
               </div>
             )}
           </Section>
+
+          {(onTrash || onDeletePermanently) && (
+            <Section title="File actions">
+              <div className="viewer-file-actions">
+                {onTrash && (
+                  <button className="btn btn-sm" onClick={() => onTrash(photoId)}>
+                    Move to trash…
+                  </button>
+                )}
+                {onDeletePermanently && (
+                  <button className="btn btn-sm btn-danger" onClick={() => onDeletePermanently(photoId)}>
+                    Delete permanently…
+                  </button>
+                )}
+              </div>
+              <div className="meta-empty">Both actions show a file preview and require confirmation.</div>
+            </Section>
+          )}
 
           <div className="viewer-path mono faint" title={full?.path}>
             {full?.path ?? ""}

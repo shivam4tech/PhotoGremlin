@@ -124,6 +124,80 @@ export interface QuickRangeBounds {
   editable: boolean;
 }
 
+export interface QuickFilterPreset {
+  id: string;
+  label: string;
+  condition: FilterCondition;
+  /** Fields removed together so paired shortcuts cannot contradict each other. */
+  exclusiveFields: readonly string[];
+}
+
+export const QUICK_FILTER_PRESETS: readonly QuickFilterPreset[] = [
+  {
+    id: "monochrome",
+    label: "Black & white",
+    condition: { field: "monochrome", operator: "=", value: true },
+    exclusiveFields: ["monochrome", "color"],
+  },
+  {
+    id: "color",
+    label: "Color",
+    condition: { field: "monochrome", operator: "=", value: false },
+    exclusiveFields: ["monochrome", "color"],
+  },
+  {
+    id: "dark",
+    label: "Dark",
+    condition: { field: "dark", operator: "=", value: true },
+    exclusiveFields: ["dark", "bright"],
+  },
+  {
+    id: "bright",
+    label: "Bright",
+    condition: { field: "bright", operator: "=", value: true },
+    exclusiveFields: ["dark", "bright"],
+  },
+  {
+    id: "landscape",
+    label: "Landscape",
+    condition: { field: "orientation", operator: "=", value: "landscape" },
+    exclusiveFields: ["orientation"],
+  },
+  {
+    id: "portrait",
+    label: "Portrait",
+    condition: { field: "orientation", operator: "=", value: "portrait" },
+    exclusiveFields: ["orientation"],
+  },
+  {
+    id: "faces",
+    label: "Contains faces",
+    condition: { field: "faces_present", operator: "=", value: true },
+    exclusiveFields: ["faces_present"],
+  },
+];
+
+export function isQuickFilterPresetActive(
+  conditions: FilterCondition[],
+  preset: QuickFilterPreset,
+): boolean {
+  return conditions.some((condition) => condition.field === preset.condition.field
+    && condition.operator === preset.condition.operator
+    && JSON.stringify(condition.value) === JSON.stringify(preset.condition.value));
+}
+
+/** Toggle a preset while clearing only its mutually-exclusive shortcut group. */
+export function toggleQuickFilterPreset(
+  conditions: FilterCondition[],
+  preset: QuickFilterPreset,
+): FilterCondition[] {
+  const alreadyActive = isQuickFilterPresetActive(conditions, preset);
+  const remaining = conditions.filter(
+    (condition) => !preset.exclusiveFields.includes(condition.field),
+  );
+  return alreadyActive ? remaining : [...remaining, preset.condition];
+}
+
 /** Convert the inclusive range scrubber into the ordinary filter wire format. */
 export function quickRangeCondition(
   field: QuickRangeField,

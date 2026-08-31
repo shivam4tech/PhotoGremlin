@@ -153,6 +153,8 @@ fn run_inner() -> Result<(), tauri::Error> {
             commands::start_move_copy,
             commands::plan_trash,
             commands::start_trash,
+            commands::plan_permanent_delete,
+            commands::start_permanent_delete,
             commands::stop_operation,
             commands::set_selection,
             commands::set_selections,

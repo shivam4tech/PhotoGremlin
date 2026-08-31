@@ -17,7 +17,7 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
      │     filters/     structured filter engine (pure: JSON → parameterized WHERE)
      │     similarity/  perceptual hash + grouping
     │     statistics/  period-scoped aggregation (UI-independent)
-    │     filesystem/  rename/move/copy/trash safety rules
+    │     filesystem/  rename/move/copy/trash/permanent-delete safety rules
     │     ml/          optional local models (isolated; AI-optional)
     │
    ├── database.rs    SQLite via rusqlite (bundled), Mutex<Connection>
@@ -227,17 +227,21 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    photos) + `add_to_collection` (idempotent, returns count added) /
    `remove_from_collection` / `collection_photos` (paged `PhotoSummary`, the
    same shape the grid uses). All synchronous; files are never touched.
-- `filesystem/` (Sprint 7) — rename/move/copy/trash behind the universal
+- `filesystem/` (Sprints 7 and 32) — rename/move/copy/trash/permanent delete behind the universal
   safety protocol (see FILE_OPERATIONS.md). Tauri-independent
-  (`plan_rename` / `plan_move_copy` / `plan_trash` + `run_operation(db, plan,
-  progress, cancel)`), integration-tested on real temp dirs. Pure template
+  (`plan_rename` / `plan_move_copy` / `plan_trash` /
+  `plan_permanent_delete` + `run_operation(db, plan, progress, cancel)`),
+  integration-tested on real temp dirs. Pure template
   engine (`expand_template` single-pass, `sanitize_name`, `{sequence}`
   zero-pad), fixed-bins-free. Rename = atomic in-dir `rename`; in-plan name
   collisions abort the whole plan, on-disk collisions block the item. Move/copy
   = `fs::rename` with `CrossesDevices` → staged copy→size-verify→delete; copy
   never touches the original and indexes the copy. Trash = freedesktop XDG
-  trash (Linux) with `.trashinfo`; never permanent delete. Every executed item
-  updates the photo row (rename/move) or removes it (trash) and appends a
+  trash (Linux) with `.trashinfo` and remains the recoverable default.
+  Permanent deletion is a separate Sprint 32 operation: it resolves indexed
+  IDs, previews exact source paths, re-plans after confirmation, requires a
+  regular file, and uses `remove_file`. Every successful item updates the photo
+  row (rename/move) or removes it (trash/permanent delete) and appends a
   `file_operations` audit row. Execution re-checks each destination right
   before acting so preview→confirm races are per-item failures, not
   overwrites.
@@ -266,7 +270,8 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `faces-complete`, `db-changed`) +
   `ProgressPayload { total, done, stage, current }` (stages: discovering,
   indexing, analyzing, reading metadata, hashing, grouping, detecting faces,
-  done, and the operation verb rename/move/copy/trash). Progress flows
+  done, and the operation verb rename/move/copy/trash/delete-permanently).
+  Progress flows
   Rust → UI via Tauri events, never by polling. Every `*-complete` event
   carries `{ summary?, error? }` (`operation-complete`'s summary is
   `OperationSummary`: per-item done/failed/skipped/cancelled, capped at 500
@@ -320,7 +325,10 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    navigate to the Library — and rendered by `features/library/FilterBar.tsx`.
    The pure registry + helpers live in `features/library/filterFields.ts`
    (field/operator knowledge, chip labels, condition composition) and are
-   unit-tested in `src/tests/filterFields.test.ts`. Changing the filter
+   unit-tested in `src/tests/filterFields.test.ts`. Sprint 32's quick views
+   are accessible buttons over the same conditions: monochrome/color,
+   dark/bright, landscape/portrait, and contains-faces. Exclusive pairs replace
+   only their paired field while all unrelated conditions remain. Changing the filter
    re-loads page 0; the exact `Filter` object is stringified and sent to the
    engine (and is what a saved view stores).
  - Saved views + collections (Sprint 8): `views/SavedViewsView.tsx` lists

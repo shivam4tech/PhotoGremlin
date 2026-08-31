@@ -10,6 +10,8 @@ import {
   type GroupTab,
 } from "@/features/similarity/groups";
 import { groupLabel } from "@/features/organize/labels";
+import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
+import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { Viewer } from "@/features/viewer/Viewer";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
@@ -41,7 +43,13 @@ export function GroupsView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  const [photoFileAction, setPhotoFileAction] = useState<{ photoId: number; tab: FileOpsTab } | null>(null);
   const requestRef = useRef(0);
+
+  function openPhotoFileAction(photoId: number, action: FileOpsTab) {
+    setViewerId(null);
+    setPhotoFileAction({ photoId, tab: action });
+  }
 
   useEffect(() => {
     setOpenGroup(null);
@@ -107,7 +115,7 @@ export function GroupsView() {
               title="This group is empty"
               action={<button className="btn btn-sm" onClick={() => setOpenGroup(null)}>Back to groups</button>}
             >
-              <p>Its photographs may have moved or been sent to trash.</p>
+              <p>Its photographs may have moved or been removed from the library.</p>
             </EmptyState>
           </div>
         ) : (
@@ -117,12 +125,34 @@ export function GroupsView() {
               onReachEnd={() => {
                 if (!loading && photos.length < total) loadGroup(openGroup, photos.length);
               }}
-              render={(index) => <PhotoTile photo={photos[index]} onOpen={setViewerId} marksMode="always" />}
+              render={(index) => (
+                <PhotoTile
+                  photo={photos[index]}
+                  onOpen={setViewerId}
+                  onTrash={(id) => openPhotoFileAction(id, "trash")}
+                  onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
+                  marksMode="always"
+                />
+              )}
             />
           </div>
         )}
         {viewerId !== null && (
-          <Viewer photoId={viewerId} ordered={photos} onClose={() => setViewerId(null)} onNavigate={setViewerId} />
+          <Viewer
+            photoId={viewerId}
+            ordered={photos}
+            onClose={() => setViewerId(null)}
+            onNavigate={setViewerId}
+            onTrash={(id) => openPhotoFileAction(id, "trash")}
+            onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
+          />
+        )}
+        {photoFileAction && (
+          <FileOpsDialog
+            photoIds={[photoFileAction.photoId]}
+            initialTab={photoFileAction.tab}
+            onClose={() => setPhotoFileAction(null)}
+          />
         )}
       </div>
     );

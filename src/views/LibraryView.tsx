@@ -9,6 +9,8 @@ import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
 import { CullActionTray } from "@/features/library/CullActionTray";
+import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
+import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { ReviewMode } from "@/features/review/ReviewMode";
 import { cleanName } from "@/features/organize/labels";
 import { draftToFilter } from "@/features/library/filterFields";
@@ -37,6 +39,7 @@ export function LibraryView() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  const [photoFileAction, setPhotoFileAction] = useState<{ photoId: number; tab: FileOpsTab } | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
 
   // Saving the current filter as a named view.
@@ -315,6 +318,11 @@ export function LibraryView() {
     store().setSelection(id, null);
   }
 
+  function openPhotoFileAction(photoId: number, tab: "trash" | "delete-permanently") {
+    setViewerId(null);
+    setPhotoFileAction({ photoId, tab });
+  }
+
   // Forward wheel events from toolbar/filter areas to the photo grid
   function forwardWheel(e: React.WheelEvent) {
     const vg = document.querySelector(".vg") as HTMLDivElement | null;
@@ -434,7 +442,7 @@ export function LibraryView() {
           className={`btn btn-sm${selectionMode ? " btn-primary" : ""}`}
           onClick={() => store().setSelectionMode(!selectionMode)}
           disabled={anyPassRunning || operating || findingSimilar || photos.total === 0}
-          title="Cull the library: mark photographs to keep or reject, then rename, move, copy or trash them."
+          title="Cull the library: mark photographs to keep or reject, then choose a previewed file action."
         >
           {selectionMode ? "Done culling" : "Cull"}
         </button>
@@ -595,6 +603,8 @@ export function LibraryView() {
                     onKeep={keep}
                     onReject={reject}
                     onClear={clearSel}
+                    onTrash={(id) => openPhotoFileAction(id, "trash")}
+                    onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
                     marksMode={selectionMode ? "always" : "contextual"}
                   />
                 )}
@@ -703,6 +713,15 @@ export function LibraryView() {
           ordered={pagePhotos}
           onClose={() => setViewerId(null)}
           onNavigate={setViewerId}
+          onTrash={(id) => openPhotoFileAction(id, "trash")}
+          onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
+        />
+      )}
+      {photoFileAction && (
+        <FileOpsDialog
+          photoIds={[photoFileAction.photoId]}
+          initialTab={photoFileAction.tab}
+          onClose={() => setPhotoFileAction(null)}
         />
       )}
     </div>

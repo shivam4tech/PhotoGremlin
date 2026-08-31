@@ -66,6 +66,7 @@ describe("opVerb / previewHeadline", () => {
     expect(opVerb("move")).toBe("be moved");
     expect(opVerb("copy")).toBe("be copied");
     expect(opVerb("trash")).toBe("be trashed");
+    expect(opVerb("delete-permanently")).toBe("be permanently deleted");
   });
 
   it("counts only the items that will run", () => {

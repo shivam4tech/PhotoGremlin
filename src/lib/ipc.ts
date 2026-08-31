@@ -159,6 +159,10 @@ export const api = {
     invoke("plan_trash", { photoIds }),
   startTrash: (photoIds: number[]): Promise<void> =>
     invoke("start_trash", { photoIds }),
+  planPermanentDelete: (photoIds: number[]): Promise<FileOpPlan> =>
+    invoke("plan_permanent_delete", { photoIds }),
+  startPermanentDelete: (photoIds: number[]): Promise<void> =>
+    invoke("start_permanent_delete", { photoIds }),
   stopOperation: (): Promise<boolean> => invoke("stop_operation"),
 
   // Selection (culling) state.

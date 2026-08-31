@@ -226,9 +226,11 @@ PK; up to the first 4 member ids (by id order) are surfaced as `cover_photos`
 by the list query for UI cover strips.
 
 ### file_operations
-Audit log for every rename/move/copy/trash: op_type, source, destination,
-status, detail, timestamp. This underpins "what happened to my files?" and
-the selection-ratio statistics.
+Audit log for every completed rename/move/copy/trash/permanent-delete item:
+op_type, source, destination, status, detail, timestamp. This underpins "what
+happened to my files?" and the selection-ratio statistics. Trash and permanent
+deletion remove the photo row only after the filesystem action succeeds;
+foreign-key cascades then remove dependent catalog state.
 
 ### selections
 Culling state (v8, Sprint 6 infrastructure; written by the Sprint 7
@@ -241,7 +243,7 @@ selection UI): one row per photo.
 | updated_at | TEXT | RFC3339 |
 
 The statistics engine treats it as *a* selection signal; an empty table (plus
-no move/copy/rename/trash operations) means "no selection signal" and the
+no move/copy/rename/trash/permanent-delete operations) means "no selection signal" and the
 ratio section is hidden entirely, not zeroed.
 
 ### app_settings

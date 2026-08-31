@@ -1,5 +1,6 @@
 //! File-operation commands (Sprint 7): preview (plan) + execute (start) for
-//! group rename, move/copy and trash, selection state, and the audit log.
+//! group rename, move/copy, trash and permanent deletion, selection state,
+//! and the audit log.
 //!
 //! Plans are synchronous and cheap (stat-based) so the preview is instant;
 //! execution runs in the single operation slot off the UI thread and streams
@@ -15,9 +16,7 @@ use tauri::{AppHandle, State};
 use crate::database::{FileOpRow, SelectionPage};
 use crate::error::{AppError, AppResult};
 use crate::events;
-use crate::filesystem::{
-    self, CollisionPolicy, FileOpPlan, OperationSummary, OpKind,
-};
+use crate::filesystem::{self, CollisionPolicy, FileOpPlan, OpKind, OperationSummary};
 use crate::state::{AppState, Job};
 
 /// Payload for the `operation-complete` event: exactly one of the two is set.
@@ -133,6 +132,15 @@ pub fn plan_trash(photo_ids: Vec<i64>, state: State<AppState>) -> AppResult<File
     filesystem::plan_trash(&db, &photo_ids)
 }
 
+#[tauri::command]
+pub fn plan_permanent_delete(
+    photo_ids: Vec<i64>,
+    state: State<AppState>,
+) -> AppResult<FileOpPlan> {
+    let db = state.db()?;
+    filesystem::plan_permanent_delete(&db, &photo_ids)
+}
+
 // ---------------------------------------------------------------------------
 // Execute commands (background, event-driven)
 // ---------------------------------------------------------------------------
@@ -153,7 +161,9 @@ pub fn start_group_rename(
         ));
     }
     if plan.items.iter().all(|i| !i.ok) {
-        return Err(AppError::validation("No photographs can be renamed (files no longer exist)".to_string()));
+        return Err(AppError::validation(
+            "No photographs can be renamed (files no longer exist)".to_string(),
+        ));
     }
     spawn_operation(app, &state, "rename", plan)
 }
@@ -185,9 +195,27 @@ pub fn start_trash(app: AppHandle, state: State<'_, AppState>, photo_ids: Vec<i6
     let db = state.db()?;
     let plan = filesystem::plan_trash(&db, &photo_ids)?;
     if plan.items.iter().all(|i| !i.ok) {
-        return Err(AppError::validation("No photographs can be trashed (files no longer exist)".to_string()));
+        return Err(AppError::validation(
+            "No photographs can be trashed (files no longer exist)".to_string(),
+        ));
     }
     spawn_operation(app, &state, "trash", plan)
+}
+
+#[tauri::command]
+pub fn start_permanent_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    photo_ids: Vec<i64>,
+) -> AppResult<()> {
+    let db = state.db()?;
+    let plan = filesystem::plan_permanent_delete(&db, &photo_ids)?;
+    if plan.items.iter().all(|i| !i.ok) {
+        return Err(AppError::validation(
+            "No photographs can be permanently deleted (files no longer exist)".to_string(),
+        ));
+    }
+    spawn_operation(app, &state, filesystem::OP_DELETE_PERMANENTLY, plan)
 }
 
 /// Request cancellation (takes effect between items). Returns whether a

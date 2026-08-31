@@ -140,6 +140,9 @@ export function CullActionTray({
             <button className="action-menu-item is-danger" onClick={(event) => chooseFileAction(event, "trash")} disabled={selectedIds.length === 0 || operating}>
               <strong>Move to trash…</strong><span>Review and confirm before moving files</span>
             </button>
+            <button className="action-menu-item is-danger" onClick={(event) => chooseFileAction(event, "delete-permanently")} disabled={selectedIds.length === 0 || operating}>
+              <strong>Delete permanently…</strong><span>Remove originals without using system trash</span>
+            </button>
           </div>
         </details>
       </div>

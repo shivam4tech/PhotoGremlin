@@ -4,6 +4,8 @@ import { useAppStore } from "@/stores/appStore";
 import { EmptyState } from "@/components/EmptyState";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
+import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
+import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { Viewer } from "@/features/viewer/Viewer";
 import { cleanName } from "@/features/organize/labels";
 import { PHOTOS_PAGE_SIZE } from "@/hooks/useFilteredPhotos";
@@ -22,6 +24,12 @@ function CollectionGrid({ col }: { col: Collection }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerId, setViewerId] = useState<number | null>(null);
+  const [photoFileAction, setPhotoFileAction] = useState<{ photoId: number; tab: FileOpsTab } | null>(null);
+
+  function openPhotoFileAction(photoId: number, action: FileOpsTab) {
+    setViewerId(null);
+    setPhotoFileAction({ photoId, tab: action });
+  }
 
   function load(offset: number) {
     setLoading(true);
@@ -54,7 +62,7 @@ function CollectionGrid({ col }: { col: Collection }) {
         </span>
         <span className="spacer" />
         <span className="faint" style={{ fontSize: 12 }}>
-          Curated set — photographs are never moved or modified
+          Collection membership never moves or modifies files
         </span>
       </div>
       {error && (
@@ -76,7 +84,13 @@ function CollectionGrid({ col }: { col: Collection }) {
           <VirtualGrid
             itemCount={photos.length}
             render={(i) => (
-              <PhotoTile photo={photos[i]} onOpen={setViewerId} marksMode="always" />
+              <PhotoTile
+                photo={photos[i]}
+                onOpen={setViewerId}
+                onTrash={(id) => openPhotoFileAction(id, "trash")}
+                onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
+                marksMode="always"
+              />
             )}
           />
         </div>
@@ -87,6 +101,15 @@ function CollectionGrid({ col }: { col: Collection }) {
           ordered={photos}
           onClose={() => setViewerId(null)}
           onNavigate={setViewerId}
+          onTrash={(id) => openPhotoFileAction(id, "trash")}
+          onDeletePermanently={(id) => openPhotoFileAction(id, "delete-permanently")}
+        />
+      )}
+      {photoFileAction && (
+        <FileOpsDialog
+          photoIds={[photoFileAction.photoId]}
+          initialTab={photoFileAction.tab}
+          onClose={() => setPhotoFileAction(null)}
         />
       )}
       <span className="faint" style={{ fontSize: 11.5, padding: "6px 4px" }}>

@@ -37,6 +37,8 @@ export function PhotoTile({
   onKeep,
   onReject,
   onClear,
+  onTrash,
+  onDeletePermanently,
   marksMode = "contextual",
 }: {
   photo: PhotoSummary;
@@ -48,6 +50,8 @@ export function PhotoTile({
   onKeep?: (id: number) => void;
   onReject?: (id: number) => void;
   onClear?: (id: number) => void;
+  onTrash?: (id: number) => void;
+  onDeletePermanently?: (id: number) => void;
   marksMode?: "contextual" | "always";
 }) {
   const [state, setState] = useState<TileState>({ kind: "loading" });
@@ -139,6 +143,36 @@ export function PhotoTile({
             ✕
           </button>
         </span>
+      )}
+      {!selectionMode && (onTrash || onDeletePermanently) && (
+        <details className="tile-file-menu">
+          <summary title={`File actions for ${photo.filename}`} aria-label={`File actions for ${photo.filename}`}>
+            •••
+          </summary>
+          <div className="tile-file-menu-popover">
+            {onTrash && (
+              <button
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  onTrash(photo.id);
+                }}
+              >
+                Move to trash…
+              </button>
+            )}
+            {onDeletePermanently && (
+              <button
+                className="is-danger"
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  onDeletePermanently(photo.id);
+                }}
+              >
+                Delete permanently…
+              </button>
+            )}
+          </div>
+        </details>
       )}
     </div>
   );

@@ -46,7 +46,7 @@ pub struct AppState {
     pub analysis: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single metadata slot (claim-and-cancel for the EXIF pass).
     pub metadata: Arc<Mutex<Option<Arc<Job>>>>,
-    /// Single file-operation slot (claim-and-cancel for rename/move/copy/trash).
+    /// Single file-operation slot (rename/move/copy/trash/permanent delete).
     pub operation: Arc<Mutex<Option<Arc<Job>>>>,
     /// Single similarity slot (claim-and-cancel for hashing + grouping).
     pub similarity: Arc<Mutex<Option<Arc<Job>>>>,

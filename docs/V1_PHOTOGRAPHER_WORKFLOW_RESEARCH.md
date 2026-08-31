@@ -95,7 +95,8 @@ unbounded grid, they see a progress-aware queue of decision units:
 5. a final **Needs attention** queue for groups with ambiguity or technical
    warnings, followed by **Selected** as the safe hand-off set.
 
-No cloud, no permanent deletion, no “best aesthetic photo” claim. The magic is
+No cloud, no automatic deletion, no “best aesthetic photo” claim. Explicit
+file removal remains behind the preview and confirmation flow. The magic is
 that the boring mechanical work disappears while the photographer remains the
 author of every final selection.
 
