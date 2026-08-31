@@ -189,6 +189,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    hash `phash_queue()` (incremental on `phash_source_mtime`) → group within
    each session → `replace_similarity_groups` (atomic swap). Cancellation is
    per-file; grouping still completes so the app ends on a consistent set.
+- Burst context (Sprint 34) stays in the database/similarity boundary rather
+  than adding another model. After a session's groups are replaced, and once
+  per affected session after a face-and-eye pass, `database.rs` recomputes nullable
+  `analysis.possible_blink` values for burst interiors. A frame is `true` only
+  when the same local face-crop hash (Hamming distance ≤ 10) has hard-open eyes
+  in both immediate neighbors and hard-closed eyes in the current frame.
+  Boundaries, stale eye results, incomplete faces, and ambiguous eye
+  probabilities remain `NULL`; fully evaluable non-matches are `false`.
 - `commands/similarity.rs` — `start_similarity` (claims the similarity slot,
    `spawn_blocking`s the pass) / `stop_similarity`; `similarity-progress` +
    `similarity-complete` events carry the `SimilaritySummary { hashed, failed,
@@ -343,12 +351,15 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    culling bar ("Add to collection"). The pure naming/labeling rules
    (`cleanName`, `groupLabel`) live in `features/organize/labels.ts`
    (unit-tested, `src/tests/organizeLabels.test.ts`).
-  - Similarity (Sprint 8, frontend): the Library's "Find similar photos"
+  - Similarity (Sprints 8 and 34, frontend): the Library's "Find similar photos"
     toolbar button starts the pass (progress via `similarity-progress`); on
     completion the "Similar groups" panel shows group cards (cover strips via
     `features/similarity/CoverThumb.tsx`, factual labels via `groupLabel`).
     Clicking a card opens that group's photographs in the same grid + viewer
-    path (`group_photos`), with a back bar. The language is kept factual
+    path (`group_photos`), with a back bar. Group cards expose measured counts
+    for possible blinks, closed-eye candidates, and missing eye measurements;
+    an open group can sort by capture time, sharpness descending, combined
+    clipping ascending, or eyes-open first. The language is kept factual
     ("near-identical structure", "captured within seconds") — the user decides
     via culling + file ops.
   - Global shortcuts + notices (Sprint 10): `features/shortcuts.ts` is the

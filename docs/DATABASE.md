@@ -12,7 +12,7 @@ legacy upgrade. See `CATALOG_RECOVERY.md`. Every file uses WAL mode,
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 19). Tests assert both expected-table presence and idempotency.
+(currently 20). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -64,6 +64,9 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   `max_eye_closure_confidence`, `eye_algorithm_version`, `eyes_at`) and
   per-eye open probabilities to `face_observations`. Existing rows remain
   unknown and are re-queued by the eye algorithm version.
+- v20 (Sprint 34): adds nullable `analysis.possible_blink`. It is a contextual
+  burst measurement recomputed from current face/eye observations and adjacent
+  frames; existing rows remain unknown until enough local evidence exists.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
@@ -175,7 +178,7 @@ face_count, smile_count (nullable until local AI runs; face_count is
 written by the face pass, smile_count is deferred and stays NULL),
 eye_evaluated_count, closed_eye_face_count, max_eye_closure_confidence,
 eye_algorithm_version, eyes_at (nullable until the Sprint 33 face-and-eye
-pass),
+pass), possible_blink (nullable Sprint 34 burst-context result),
 perceptual_hash (hex, Sprint 8), algorithm_version (INTEGER, see below),
 analyzed_at, source_mtime (v6: RFC3339 mtime of the file the row was
 computed from; NULL on pre-v6 rows), faces_at (v10: the file mtime the
@@ -204,6 +207,16 @@ keeps it in `analysis_queue()` until the analysis pass fills the
 measurements — and that pass's upsert preserves the face columns (integrated-
 tested in `tests/ml_integration.rs`).
 
+**Burst context (Sprint 34):** `possible_blink` is tri-state. `1` means an
+interior burst frame contains a hard-closed face whose local appearance hash
+matches hard-open faces in both immediate chronological neighbors. `0` means
+the complete three-frame window was measurable and that pattern was absent.
+`NULL` means the context was not evaluable (including burst boundaries,
+missing/stale eye results, incomplete observations, or ambiguous eye
+probabilities). Replacing a session's similarity groups recomputes inside the
+same transaction; a face/eye pass recomputes once per affected session after
+its successful writes, including the completed portion of a cancelled pass.
+
 ### collections / collection_photos
 Manually curated sets (Sprint 8 UI). `collection_photos` is the join table
 with composite PK. Deleting a collection removes only its membership rows
@@ -229,9 +242,10 @@ for bursts) and `photo_count` is denormalized. The whole group set is
 **replaced atomically per project** on each pass
 (`replace_similarity_groups_for_session` in one transaction), so a group set
 always reflects that project's current hashes — partial state is impossible.
-`similarity_group_photos` is the join with composite
-PK; up to the first 4 member ids (by id order) are surfaced as `cover_photos`
-by the list query for UI cover strips.
+`similarity_group_photos` is the join with composite PK. Up to the first four
+members in chronological capture order are surfaced as `cover_photos` by the
+list query. The same query reports possible-blink, closed-eye-candidate, and
+unevaluated-eye counts without storing denormalized group verdicts.
 
 ### file_operations
 Audit log for every completed rename/move/copy/trash/permanent-delete item:
@@ -362,12 +376,19 @@ post-scan face pass auto-run, it never forces inference).
 - `hashed_photos_for_session(session_id)` — hashed rows for the active
   project only, returning `(id, hash, session_id, capture_datetime)`.
 - `list_similarity_groups(limit)` — current groups, bursts first then by
-  size (stable by `id`), each with ≤4 `cover_photos`.
-- `group_photos(group_id, offset, limit)` — a group's photographs as
-  `PhotoSummary` pages ordered by capture time (an empty/unknown group is a
-  clean `( [], 0 )`, not an error).
+  size (stable by `id`), each with ≤4 chronological `cover_photos` and the
+  three eye/burst-context aggregate counts.
+- `group_photos(group_id, offset, limit, sort)` — a group's photographs as
+  `PhotoSummary` pages. `sort` is one of chronology, sharpness descending,
+  combined clipping ascending, or eyes-open first; every order has capture
+  time and id tie-breakers. An empty/unknown group is a clean `( [], 0 )`,
+  not an error.
 - `replace_similarity_groups_for_session(session_id, groups) -> count` — one
-  transaction: replace that project's groups and memberships only.
+  transaction: replace that project's groups and memberships only, then
+  recompute contextual blink values before commit.
+- `recompute_possible_blinks_for_session(session_id)` — clear and recompute
+  the nullable contextual result for one project from stored burst membership
+  and current face/eye observations.
 
 ### Local intelligence (Sprint 9)
 
@@ -375,10 +396,14 @@ post-scan face pass auto-run, it never forces inference).
   NULL` or `file_mtime` newer than the `faces_at` stamp, decodable
   extensions only, capture-time order. The mirror of `phash_queue` for the
   face pass (see LOCAL_AI.md).
-- `upsert_faces_with_observations(photo_id, face_count, hashes, source_mtime)` — store one photo's
-  result, idempotent by `photo_id`; creates a face-only analysis row where
-  needed (see the analysis section) and the update path touches only the
-  face columns — never the measurements, never `source_mtime`.
+- `upsert_faces_with_observations(photo_id, face_count, eye aggregates,
+  observations, source_mtime)` — store one photo's result, idempotent by
+  `photo_id`; creates a face-only analysis row where needed (see the analysis
+  section) and replaces per-face hash/eye observations. The face pass batches
+  contextual recomputation once per affected session after these per-photo
+  transactions, avoiding a full burst rescan after every photograph. The update
+  path touches only local-intelligence columns — never deterministic image
+  measurements or their `source_mtime`.
 - `face_observations_for_session(session_id)` — compact local face-crop hashes
   used by the similarity pass's face-appearance candidates.
 - `faces_done()` — count of photos with a stored result (Settings line).

@@ -92,7 +92,7 @@ rewritten. Moving a range handle converts that field to the scrubber's inclusive
 model. Conditions the scrubber cannot express remain visible and removable
 without being silently rewritten.
 
-### Quick views (Sprints 32–33)
+### Quick views (Sprints 32–34)
 
 The Library inspector places one-click presets above the measured controls.
 Sprint 33 adds **Potentially soft** (`sharpness < 40`), **Highlight clipping**
@@ -101,6 +101,13 @@ existing color, brightness, orientation and face-presence shortcuts. They are
 ordinary structured conditions and introduce no alternate query path or
 aesthetic verdict. The first three use deterministic measurements; eye state
 uses the optional local models only when such measurements exist.
+
+Sprint 34 adds **Possible blink**, backed by the nullable contextual
+`analysis.possible_blink` field. The preset and advanced Boolean filter match
+only explicit `true`. An explicit `false` means a complete adjacent-frame
+window was evaluated without the pattern; `NULL` means the burst or local eye
+context was insufficient. SQL keeps those states distinct, so neither a true
+nor false filter silently includes unknown photographs.
 
 Selecting an active preset again removes only that preset. Mutually exclusive
 pairs replace one another (black-and-white/color, dark/bright, and

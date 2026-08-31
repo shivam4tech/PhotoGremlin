@@ -196,6 +196,9 @@ version:
 - `analysis.face_count` + `analysis.faces_at`, and
   `eye_evaluated_count`, `closed_eye_face_count`,
   `max_eye_closure_confidence`, `eye_algorithm_version`, and `eyes_at` (v19).
+- `analysis.possible_blink` (v20) is not another model output. It is a
+  nullable burst-context result derived locally after current eye observations
+  and burst memberships are stored.
 - `face_observations(photo_id, face_index, appearance_hash, source_mtime,
   left_eye_open_prob, right_eye_open_prob)` (v17/v19): replaced
   transactionally with each face result so changed files have no stale
@@ -280,4 +283,16 @@ version:
 - GPU execution providers (ROCm/CUDA/Metal): CPU-inference parity across
   three desktop OSes first; providers are an ort flag away later.
 - Identity / clustering (→ v0.3).
-- Contextual blink inference across neighboring burst frames (Sprint 34).
+
+## Burst-context derivation (Sprint 34)
+
+The database/similarity layer derives `possible_blink`; `src-tauri/src/ml/`
+still owns only face and per-eye measurements. For an interior burst frame,
+the derivation requires complete, current observations for the previous,
+current, and next frames. It matches the current face-crop dHash to each
+neighbor at Hamming distance ≤ 10 and requires both current eyes ≤ 0.2 open
+probability while both matched neighboring eyes are ≥ 0.8. A complete
+non-match stores `false`; incomplete, ambiguous, boundary, or stale context
+stores `NULL`. It is recomputed after similarity-group replacement and once
+per affected session after a face/eye pass (including successful writes before
+cancellation), with no network access and no additional model.

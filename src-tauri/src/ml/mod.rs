@@ -23,6 +23,7 @@
 //! If the ONNX Runtime library is missing on a machine, detection reports a
 //! friendly "unavailable" status and every other part of the app works.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -520,6 +521,7 @@ pub fn run_faces_pass(
     let mut closed_eye_faces = 0usize;
     let mut failed = 0usize;
     let mut cancelled = false;
+    let mut affected_sessions = BTreeSet::new();
     let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
     for w in &queue {
         if cancel.load(Ordering::Relaxed) {
@@ -534,6 +536,9 @@ pub fn run_faces_pass(
         match process_one(&db, &detector, &eye_classifier, w) {
             Ok(outcome) => {
                 processed += 1;
+                if let Some(session_id) = w.session_id {
+                    affected_sessions.insert(session_id);
+                }
                 if outcome.face_count > 0 {
                     with_faces += 1;
                 }
@@ -555,6 +560,13 @@ pub fn run_faces_pass(
         progress(
             ProgressPayload::new(total, done, "detecting faces").with_current(filename),
         );
+    }
+
+    // Contextual burst signals depend on adjacent frames. Recompute once per
+    // affected project after all successful writes (including a partial,
+    // cancelled pass), rather than scanning every burst after every photo.
+    for session_id in affected_sessions {
+        db.recompute_possible_blinks_for_session(session_id)?;
     }
 
     let errors = errors

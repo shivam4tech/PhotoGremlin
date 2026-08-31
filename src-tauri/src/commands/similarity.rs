@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tauri::Emitter;
 use tauri::{AppHandle, State};
 
-use crate::database::{PhotoPage, SimilarityGroup};
+use crate::database::{GroupPhotoSort, PhotoPage, SimilarityGroup};
 use crate::error::{AppError, AppResult};
 use crate::events;
 use crate::similarity::{self, SimilaritySummary};
@@ -133,7 +133,10 @@ pub fn group_photos(
     group_id: i64,
     offset: i64,
     limit: i64,
+    sort: Option<GroupPhotoSort>,
 ) -> AppResult<PhotoPage> {
-    let (photos, total) = state.db()?.group_photos(group_id, offset, limit)?;
+    let (photos, total) = state
+        .db()?
+        .group_photos(group_id, offset, limit, sort.unwrap_or_default())?;
     Ok(PhotoPage { photos, total })
 }

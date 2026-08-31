@@ -4,6 +4,8 @@ import { PhotoTile } from "@/components/PhotoTile";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import { CoverThumb } from "@/features/similarity/CoverThumb";
 import {
+  GROUP_SORT_OPTIONS,
+  groupCaptureSignals,
   groupDescription,
   groupsForTab,
   mergeGroupPhotos,
@@ -15,7 +17,7 @@ import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { Viewer } from "@/features/viewer/Viewer";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
-import type { PhotoSummary, SimilarityGroup } from "@/types/api";
+import type { GroupPhotoSort, PhotoSummary, SimilarityGroup } from "@/types/api";
 
 const GROUP_PHOTO_PAGE = 96;
 const TABS: readonly GroupTab[] = ["all", "similar", "burst", "face"];
@@ -38,6 +40,7 @@ export function GroupsView() {
   const setView = useAppStore((state) => state.setView);
   const [tab, setTab] = useState<GroupTab>("all");
   const [openGroup, setOpenGroup] = useState<SimilarityGroup | null>(null);
+  const [groupSort, setGroupSort] = useState<GroupPhotoSort>("chronology");
   const [photos, setPhotos] = useState<PhotoSummary[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -59,11 +62,11 @@ export function GroupsView() {
     void loadGroups();
   }, [activeFolder, loadGroups]);
 
-  function loadGroup(group: SimilarityGroup, offset: number) {
+  function loadGroup(group: SimilarityGroup, offset: number, sort = groupSort) {
     const request = ++requestRef.current;
     setLoading(true);
     setError(null);
-    void api.groupPhotos(group.id, offset, GROUP_PHOTO_PAGE)
+    void api.groupPhotos(group.id, offset, GROUP_PHOTO_PAGE, sort)
       .then((page) => {
         if (request !== requestRef.current) return;
         setPhotos((current) => mergeGroupPhotos(current, page.photos, offset));
@@ -79,14 +82,26 @@ export function GroupsView() {
 
   function open(group: SimilarityGroup) {
     setOpenGroup(group);
+    setGroupSort("chronology");
     setViewerId(null);
     setPhotos([]);
     setTotal(group.photo_count);
-    loadGroup(group, 0);
   }
 
   useEffect(() => {
-    if (openGroup) loadGroup(openGroup, 0);
+    if (!openGroup) return;
+    setPhotos([]);
+    setTotal(openGroup.photo_count);
+    loadGroup(openGroup, 0, groupSort);
+    // A sort change always starts a fresh cursor page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openGroup?.id, groupSort]);
+
+  useEffect(() => {
+    if (openGroup) {
+      setPhotos([]);
+      loadGroup(openGroup, 0, groupSort);
+    }
     // The group id is stable across mark/file invalidations; a rebuilt group
     // set is handled by returning to the overview after the pass completes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -102,7 +117,16 @@ export function GroupsView() {
           <button className="btn btn-sm" onClick={() => { setOpenGroup(null); setViewerId(null); }}>← All groups</button>
           <strong>{groupLabel(openGroup.group_type, total || openGroup.photo_count)}</strong>
           <span className="faint groups-detail-description">{groupDescription(openGroup.group_type)}</span>
+          {groupCaptureSignals(openGroup).map((signal) => <span className="chip" key={signal}>{signal}</span>)}
           <span className="spacer" />
+          <label className="groups-sort">
+            <span>Order</span>
+            <select value={groupSort} onChange={(event) => setGroupSort(event.target.value as GroupPhotoSort)}>
+              {GROUP_SORT_OPTIONS.map((option) => (
+                <option value={option.value} key={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <span className="faint mono tabular-nums">{photos.length.toLocaleString()} of {total.toLocaleString()}</span>
         </div>
         {error && <div className="groups-error" role="alert">{error}</div>}
@@ -123,7 +147,7 @@ export function GroupsView() {
             <VirtualGrid
               itemCount={photos.length}
               onReachEnd={() => {
-                if (!loading && photos.length < total) loadGroup(openGroup, photos.length);
+                if (!loading && photos.length < total) loadGroup(openGroup, photos.length, groupSort);
               }}
               render={(index) => (
                 <PhotoTile
@@ -216,6 +240,11 @@ export function GroupsView() {
                   {group.photo_count > 3 && <span className="cover-more">+{group.photo_count - 3}</span>}
                 </span>
                 <span className="group-card-description">{groupDescription(group.group_type)}</span>
+                {groupCaptureSignals(group).length > 0 && (
+                  <span className="group-card-signals">
+                    {groupCaptureSignals(group).map((signal) => <span className="chip" key={signal}>{signal}</span>)}
+                  </span>
+                )}
               </button>
             ))}
           </div>

@@ -77,6 +77,28 @@ There is no automatic winner, score, or aesthetic language. Limiting the
 surface to four thumbnails keeps memory use predictable on large shoots while
 still covering the adjacent frames needed for a burst or similarity decision.
 
+## Burst-context signals (Sprint 34)
+
+Burst review now includes a nullable **Possible blink** measurement. It does
+not change the fixed three-second burst grouping and never makes or clears a
+review decision. For an interior burst frame, the signal is `true` only when
+a locally measured face has hard-closed eyes in that frame and matching local
+face-crop hashes (Hamming distance ≤ 10) have hard-open eyes in both immediate
+neighbors. Hard-open means both per-eye open probabilities are at least 0.8;
+hard-closed means both are at most 0.2.
+
+The signal is `false` only when the three-frame window is fully evaluated and
+the pattern is absent. Burst boundaries, missing or stale eye results,
+incomplete face observations, and probabilities between the hard thresholds
+stay unknown (`NULL`) rather than being described as no blink. A new Library
+filter matches only `true`; explicit `false` and unknown remain distinct.
+
+Group cards show aggregate counts for possible blinks, closed-eye candidates,
+and photographs without current eye measurements. An open group can be sorted
+by capture time, sharpness descending, combined highlight-plus-shadow clipping
+ascending, or eyes-open first. Tiles, Review, and the viewer show only the
+measured cue; none selects a preferred frame or recommends rejection.
+
 ## Deferred scoring research
 
 The following was explored as a future configurable assistance layer. It is

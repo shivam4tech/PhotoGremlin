@@ -315,6 +315,8 @@ export interface PhotoSummary {
   shadow_clipping: number | null;
   closed_eye_face_count: number | null;
   max_eye_closure_confidence: number | null;
+  /** Contextual burst result; null means adjacent frames were not evaluable. */
+  possible_blink: boolean | null;
 }
 
 export interface PhotoPage {
@@ -411,6 +413,7 @@ export interface PhotoFull {
   max_eye_closure_confidence: number | null;
   eye_algorithm_version: number | null;
   eyes_at: string | null;
+  possible_blink: boolean | null;
   /** Scene classification (Sprint 18): merged product chip + fine label. */
   scene_coarse: string | null;
   scene_fine: string | null;
@@ -519,9 +522,18 @@ export interface SimilarityGroup {
   created_at: string;
   /** Distinct sessions spanned (≥ 2 = cross-session duplicates, Sprint 16). */
   session_count: number;
-  /** Up to 4 photo ids (by id order) for a cover strip. */
+  possible_blink_count: number;
+  closed_eye_candidate_count: number;
+  unevaluated_eye_count: number;
+  /** Up to 4 photo ids in capture chronology for a cover strip. */
   cover_photos: number[];
 }
+
+export type GroupPhotoSort =
+  | "chronology"
+  | "sharpness_desc"
+  | "clipping_asc"
+  | "eyes_open_first";
 
 /** Result of one similarity pass (carried in `similarity-complete`). */
 export interface SimilaritySummary {

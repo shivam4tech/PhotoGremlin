@@ -245,7 +245,8 @@ export const api = {
     groupId: number,
     offset: number,
     limit: number,
-  ): Promise<PhotoPage> => invoke("group_photos", { groupId, offset, limit }),
+    sort: import("@/types/api").GroupPhotoSort = "chronology",
+  ): Promise<PhotoPage> => invoke("group_photos", { groupId, offset, limit, sort }),
 
   // Local intelligence (Sprint 9) — optional; the whole app works with it
   // off and without the ONNX Runtime installed.
