@@ -1,5 +1,6 @@
 //! File operations (Sprint 7): group rename with a template engine, move,
-//! copy, and trash — behind the universal safety protocol (FILE_OPERATIONS.md):
+//! copy, trash, and explicitly-confirmed permanent deletion — behind the
+//! universal safety protocol (FILE_OPERATIONS.md):
 //! verify sources, resolve destinations, detect collisions, preview before
 //! touching disk, execute item-by-item with per-item results, audit everything.
 //!
@@ -23,6 +24,7 @@ pub const OP_RENAME: &str = "rename";
 pub const OP_MOVE: &str = "move";
 pub const OP_COPY: &str = "copy";
 pub const OP_TRASH: &str = "trash";
+pub const OP_DELETE_PERMANENTLY: &str = "delete-permanently";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpKind {
@@ -77,7 +79,7 @@ impl CollisionPolicy {
 pub struct PlanItem {
     pub photo_id: i64,
     pub source: String,
-    /// Where the file would go. `None` for trash (destination is the OS trash).
+    /// Where the file would go. `None` for trash or permanent deletion.
     pub destination: Option<String>,
     /// Per-item note: "ALREADY EXISTS", "file no longer exists", why a plan
     /// was aborted, …
@@ -87,7 +89,7 @@ pub struct PlanItem {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileOpPlan {
-    /// "rename" | "move" | "copy" | "trash"
+    /// "rename" | "move" | "copy" | "trash" | "delete-permanently"
     pub op: &'static str,
     pub items: Vec<PlanItem>,
     /// True when an in-plan collision (two sources onto one name) aborts the
@@ -96,8 +98,8 @@ pub struct FileOpPlan {
     /// Destination directory that does not exist yet (move/copy): the UI
     /// shows it in the preview before anything is created.
     pub will_create_dir: Option<String>,
-    /// Destructive operations (trash) require an explicit confirmation in
-    /// the UI. Everything else proceeds after the preview.
+    /// Destructive operations require an explicit confirmation in the UI.
+    /// Everything else proceeds after the preview.
     pub destructive: bool,
 }
 
@@ -552,6 +554,46 @@ pub fn plan_trash(db: &Db, photo_ids: &[i64]) -> AppResult<FileOpPlan> {
     })
 }
 
+/// Permanent-delete plan: sources only, with no recoverable destination.
+/// The frontend must present this plan and obtain explicit confirmation; the
+/// execution command re-plans from database-backed photo IDs before acting.
+pub fn plan_permanent_delete(db: &Db, photo_ids: &[i64]) -> AppResult<FileOpPlan> {
+    if photo_ids.is_empty() {
+        return Err(AppError::validation(
+            "Nothing selected to delete permanently".to_string(),
+        ));
+    }
+    let photos = load_photos(db, photo_ids)?;
+    let mut items = Vec::with_capacity(photos.len());
+    for p in photos.iter() {
+        let source = Path::new(&p.path);
+        match fs::metadata(source) {
+            Ok(metadata) if metadata.is_file() => items.push(PlanItem {
+                photo_id: p.id,
+                source: p.path.clone(),
+                destination: None,
+                note: Some("cannot be restored from system trash".to_string()),
+                ok: true,
+            }),
+            Ok(_) => items.push(PlanItem {
+                photo_id: p.id,
+                source: p.path.clone(),
+                destination: None,
+                note: Some("not a photo file; directories cannot be deleted".to_string()),
+                ok: false,
+            }),
+            Err(_) => items.push(with_id(missing(&p.path), p.id)),
+        }
+    }
+    Ok(FileOpPlan {
+        op: OP_DELETE_PERMANENTLY,
+        items,
+        aborted: false,
+        will_create_dir: None,
+        destructive: true,
+    })
+}
+
 /// `file.txt` → `file-1.txt`, taking the first free suffix.
 fn suffixed_path(p: &Path) -> PathBuf {
     let name = p
@@ -628,6 +670,7 @@ pub fn run_operation(
             OP_MOVE => exec_move_copy(db, item, OpKind::Move),
             OP_COPY => exec_move_copy(db, item, OpKind::Copy),
             OP_TRASH => exec_trash(db, item),
+            OP_DELETE_PERMANENTLY => exec_permanent_delete(db, item),
             _ => Err(AppError::operation(format!("unknown operation {}", plan.op))),
         };
         processed += 1;
@@ -816,7 +859,7 @@ fn move_one(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Trash (OS trash — never permanent delete)
+// Trash (recoverable OS trash)
 // ---------------------------------------------------------------------------
 
 /// The freedesktop XDG trash directories: `<data>/Trash/files` + `info`.
@@ -911,6 +954,28 @@ fn exec_trash(db: &Db, item: &PlanItem) -> AppResult<Option<String>> {
     db.delete_photos(vec![item.photo_id])?;
     db.record_file_op(OP_TRASH, &item.source, None, "done", None)?;
     tracing::info!(op = OP_TRASH, src = %item.source, "trashed");
+    Ok(None)
+}
+
+fn exec_permanent_delete(db: &Db, item: &PlanItem) -> AppResult<Option<String>> {
+    let src = Path::new(&item.source);
+    let metadata = fs::metadata(src).map_err(|e| AppError::io(e, item.source.clone()))?;
+    if !metadata.is_file() {
+        return Err(AppError::validation(format!(
+            "Permanent deletion only accepts indexed photo files: {}",
+            item.source
+        )));
+    }
+    fs::remove_file(src).map_err(|e| AppError::io(e, item.source.clone()))?;
+    db.delete_photos(vec![item.photo_id])?;
+    db.record_file_op(
+        OP_DELETE_PERMANENTLY,
+        &item.source,
+        None,
+        "done",
+        None,
+    )?;
+    tracing::info!(op = OP_DELETE_PERMANENTLY, src = %item.source, "permanently deleted");
     Ok(None)
 }
 

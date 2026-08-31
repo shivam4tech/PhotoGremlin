@@ -20,7 +20,7 @@ The core loop:
 
 ```
 import folder → analyze locally → filter by measurable traits →
-select → rename/move/copy/trash → save view → read statistics
+select → rename/move/copy/trash or explicitly delete → save view → read statistics
 ```
 
 PhotoGremlin does not decide which photographs are good. It gives
@@ -34,8 +34,9 @@ photographers information and tools that help them decide.
    clipping), visual (monochrome/color/dark/bright), orientation, camera/lens,
    exposure (ISO/aperture/shutter/focal length), date, and local-intelligence
    (faces/smiles) conditions.
-3. **Organize** — selection, group rename (templates), move/copy/trash with
-   safety, saved views (dynamic filters), collections (curated sets).
+3. **Organize** — selection, group rename (templates), move/copy/trash and
+   separately confirmed permanent deletion with safety, saved views (dynamic
+   filters), collections (curated sets).
 4. **Understand** — first-class dashboard: totals, averages, distributions,
    trends, session comparison, camera/lens analytics, selection ratios. The
    dashboard is not an afterthought; the data architecture serves it from day one.

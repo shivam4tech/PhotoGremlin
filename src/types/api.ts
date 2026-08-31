@@ -171,13 +171,13 @@ export interface PlanItem {
 
 /** A full operation plan — everything the UI previews before confirming. */
 export interface FileOpPlan {
-  op: "rename" | "move" | "copy" | "trash";
+  op: "rename" | "move" | "copy" | "trash" | "delete-permanently";
   items: PlanItem[];
   /** In-plan collision (two sources onto one name) aborts the whole plan. */
   aborted: boolean;
   /** Destination directory that does not exist yet (move/copy). */
   will_create_dir: string | null;
-  /** Destructive ops (trash) require explicit confirmation. */
+  /** Destructive ops require explicit confirmation. */
   destructive: boolean;
 }
 

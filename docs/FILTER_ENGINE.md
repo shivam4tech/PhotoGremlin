@@ -91,6 +91,22 @@ rewritten. Moving a range handle converts that field to the scrubber's inclusive
 model. Conditions the scrubber cannot express remain visible and removable
 without being silently rewritten.
 
+### Quick views (Sprint 32)
+
+The Library inspector places seven one-click presets above the measured
+controls: **Black & white**, **Color**, **Dark**, **Bright**, **Landscape**,
+**Portrait**, and **Contains faces**. These are shortcuts over the existing
+structured fields (`monochrome`, `dark`, `bright`, `orientation`, and
+`faces_present`); they introduce no alternate query path or image judgment.
+Dark and bright mean the deterministic analysis flags, and face presence uses
+the optional local model only when such measurements exist.
+
+Selecting an active preset again removes only that preset. Mutually exclusive
+pairs replace one another (black-and-white/color, dark/bright, and
+landscape/portrait), while unrelated conditions such as ISO, lens, review
+state, or sharpness remain intact. The buttons report pressed state and become
+unavailable while the Library is not filterable.
+
 Sprint 24 moves the complete filter surface into the Library's persistent
 right inspector. `FilterBar` inspector mode is always expanded there; active
 chips, quick measured controls, the advanced composer, clear, and save-as-view

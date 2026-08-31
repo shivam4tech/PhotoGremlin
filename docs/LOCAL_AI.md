@@ -4,7 +4,7 @@ Philosophy first: **AI is the smallest possible layer of PhotoGremlin.**
 
 - Optional. The entire core product — scan, thumbnails, EXIF, sharpness,
   brightness/contrast/saturation, clipping, monochrome, filtering,
-  similarity, statistics, rename/move/copy/trash, collections, saved views —
+  similarity, statistics, rename/move/copy/trash/permanent delete, collections, saved views —
   must work with AI completely disabled. That is a hard product requirement,
   not a preference.
 - Local only. No OpenAI API. No RunInfra API. No cloud vision. No remote

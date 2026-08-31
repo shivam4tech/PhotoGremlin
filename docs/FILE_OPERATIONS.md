@@ -1,7 +1,9 @@
 # File Operations
 
-Rename, move, copy, trash. The safety rules are the product: **no silent
-overwrites, no destructive action without confirmation.**
+Rename, move, copy, trash, and explicitly requested permanent deletion. The
+safety rules are the product: **no silent overwrites, no destructive action
+without a preview and confirmation.** Trash remains the recommended removal
+path because it is recoverable.
 
 ## Universal protocol (Sprint 7)
 
@@ -18,7 +20,8 @@ Every operation follows the same pipeline in Rust (`filesystem/`):
    if the user explicitly chose "avoid by renaming".
 4. **Preview + confirm** — before anything touches disk, the UI shows the
    full plan (N items, per-item destination). Destructive operations
-   (trash, and overwrite-adjacent choices) require an explicit confirmation;
+   (trash, permanent deletion, and overwrite-adjacent choices) require an
+   explicit confirmation;
    non-destructive operations (copy) may proceed after preview.
 5. **Execute with transactional bookkeeping** — per-item success/failure; a
    partial failure keeps successful items and reports the rest with
@@ -62,15 +65,21 @@ Rules:
 - Copy: `std::fs::copy`-style staged copy; original is never modified.
 - Destination is created if missing (explicitly shown in the preview).
 
-## Trash — never permanent delete
+## Trash and permanent deletion
 
-V0.1 sends files to the **OS trash** (platform trash API / rfd-style helper;
-Linux: `trash` target directory under `~/.local/share/Trash`). A hard delete
-does not exist in v0.1 at all — the audit log is the only "removal" concept
-besides trash. DB rows are marked/removed only after the filesystem action
-succeeds (or on a later rescan discovering the file is gone — the scanner
-reconciles and flags missing files to the user rather than silently dropping
-rows).
+**Trash is the default.** On Linux it uses the freedesktop trash location
+under `~/.local/share/Trash` (or `$XDG_DATA_HOME/Trash`) and retains recovery
+metadata. The corresponding catalog row is removed only after the filesystem
+action succeeds.
+
+Sprint 32 adds permanent deletion as a separate, visibly dangerous action for
+photographers who explicitly choose it. It accepts indexed photo IDs only,
+shows the exact local path in a preview, states that the file cannot be
+restored, and requires a second native confirmation immediately before start.
+Execution re-resolves the IDs and paths, rejects missing paths and
+directories, removes only the planned file, then removes its catalog row and
+writes the audit entry. It never runs as a consequence of Reject, a filter, a
+collection change, or a trash action.
 
 ## Progress & errors
 
@@ -95,6 +104,8 @@ synchronous **plan** (preview) and a background **start** (execute):
 | `start_move_copy(photo_ids, dest_dir, op, on_collision)` | bg | |
 | `plan_trash(photo_ids)` | sync | `destructive: true` |
 | `start_trash(photo_ids)` | bg | |
+| `plan_permanent_delete(photo_ids)` | sync | `destructive: true`; exact source paths and irreversible note |
+| `start_permanent_delete(photo_ids)` | bg | re-plans, confirms separately in the UI, then deletes files |
 | `stop_operation()` | sync | cooperative cancel between items |
 | `set_selection` / `set_selections` / `clear_selection` / `clear_selections` | sync | culling state |
 | `list_selections()` | sync | current culling map |
@@ -139,7 +150,7 @@ destination directory is reported in the preview (`will_create_dir`) and
 created at execution. Collisions follow the user's policy: `skip` (block the
 item) or `avoid-by-renaming` (`IMG_0001-1.jpg`, first free suffix).
 
-### Trash (never permanent delete)
+### Trash
 
 Linux uses the freedesktop **XDG trash**: `~/.local/share/Trash/{files,info}`
 (or `$XDG_DATA_HOME/Trash`), with a `.trashinfo` sidecar recording the original
@@ -148,12 +159,22 @@ The source is moved (cross-device staged copy→verify→delete if needed). Only
 after the filesystem action succeeds is the DB row deleted (FK cascade removes
 its analysis + selection rows) and an audit row written. On non-Linux
 platforms v0.1 returns a friendly per-item failure ("OS trash is only
-available on Linux in v0.1 — use Move instead"); hard delete does not exist
-anywhere in v0.1.
+available on Linux in v0.1 — use Move instead").
+
+### Permanent deletion (Sprint 32)
+
+`plan_permanent_delete` resolves every requested photo through the catalog and
+returns the source path with no destination. `start_permanent_delete` builds a
+fresh plan so a stale preview cannot substitute another path. Execution uses
+filesystem metadata to require a file (never a directory), calls
+`remove_file`, and only then deletes the photo row (FK cascade removes its
+analysis, membership, and selection rows) and appends a
+`delete-permanently` audit record. A missing or changed source is an itemized
+failure; other items may still complete.
 
 ### Bookkeeping & safety
 
-- Every executed/attempted item appends to `file_operations`
+- Every successfully executed item appends to `file_operations`
   (`op_type, source_path, dest_path, status ∈ done|failed, detail, created_at`).
 - Rename/move update `photos.path/filename/size_bytes/file_mtime` per item in
   the same window; pixels are unchanged so the analysis row stays valid.
@@ -169,9 +190,13 @@ anywhere in v0.1.
 
 `features/fileops/FileOpsPanel.tsx` (driven by the photographs marked
 "selected" in culling mode): pick rename pattern / move or copy destination +
-collision policy / trash, **Preview** → inspect the per-item plan (blocked items
-flagged, `will_create_dir` noted, aborted plans shown red) → confirm (trash
-asks a native warning dialog) → execute, with a live progress line, a Stop
-button, and a results summary of anything not `done`. Culling (keep/reject per
-tile) is in `components/PhotoTile.tsx` + `stores/appStore.ts`
+collision policy / trash / permanent delete, **Preview** → inspect the
+per-item plan (blocked items flagged, `will_create_dir` noted, aborted plans
+shown red) → confirm (trash and permanent deletion use distinct native warning
+dialogs) → execute, with a live progress line, a Stop button, and a results
+summary of anything not `done`. The Library, similarity/burst groups,
+collections, and viewer also expose per-photo Trash and Delete permanently
+actions; each opens the same preview-first dialog rather than touching the
+filesystem directly. Culling (keep/reject per tile) is in
+`components/PhotoTile.tsx` + `stores/appStore.ts`
 (`selections`, `selectionMode`, persisted to the `selections` table).

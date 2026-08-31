@@ -65,6 +65,7 @@ management.
 | 29 | Photographer comparison + beta finish — on-demand side-by-side sequence comparison, premium interaction/accessibility cleanup and release verification | **done** (2026-08-30) |
 | 30 | Premium theme and installed-build refresh — graphite/champagne system, semantic kept-state color, contrast/performance cleanup and fresh local release installation | **done** (2026-08-30) |
 | 31 | Platform-native UI system — neutral graphite/silver surfaces, restrained cool-blue accent, unified measurement sliders, consistent controls and fresh local release installation | **done** (2026-08-30) |
+| 32 | One-click factual filter views + explicit per-photo permanent deletion with preview, confirmation and audit | **done** (2026-08-31) |
 
 Editor handoff deliberately does not write Lightroom or Capture One catalogs.
 Those formats are private, stateful databases whose direct mutation would put

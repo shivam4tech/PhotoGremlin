@@ -6,9 +6,12 @@ import {
   FILTER_FIELDS,
   FIELD_BY_NAME,
   OPS_BY_KIND,
+  QUICK_FILTER_PRESETS,
   QUICK_RANGE_FIELDS,
   buildCondition,
   chipLabel,
+  isQuickFilterPresetActive,
+  toggleQuickFilterPreset,
 } from "./filterFields";
 import { QuickFilterControls } from "./QuickFilterControls";
 
@@ -347,6 +350,30 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               ))}
             </div>
           )}
+
+          <section className="quick-presets" aria-labelledby="quick-presets-heading">
+            <div className="quick-presets-head">
+              <strong id="quick-presets-heading">Quick views</strong>
+              <span>Measured characteristics and orientation</span>
+            </div>
+            <div className="quick-presets-list">
+              {QUICK_FILTER_PRESETS.map((preset) => {
+                const active = isQuickFilterPresetActive(draft, preset);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={active ? "is-active" : ""}
+                    aria-pressed={active}
+                    disabled={disabled}
+                    onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
           <QuickFilterControls
             draft={draft}

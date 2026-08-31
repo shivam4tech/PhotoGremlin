@@ -9,7 +9,10 @@ import {
   endOfDay,
   quickRangeBounds,
   quickRangeCondition,
+  QUICK_FILTER_PRESETS,
   replaceFieldConditions,
+  isQuickFilterPresetActive,
+  toggleQuickFilterPreset,
   toggleExactFieldCondition,
   STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
@@ -280,6 +283,25 @@ describe("quick filter controls", () => {
     expect(toggleExactFieldCondition([iso], unreviewed)).toEqual([iso, unreviewed]);
     expect(toggleExactFieldCondition([iso, unreviewed], kept)).toEqual([iso, kept]);
     expect(toggleExactFieldCondition([iso, kept], kept)).toEqual([iso]);
+  });
+
+  it("toggles quick presets and clears only mutually exclusive shortcuts", () => {
+    const iso = { field: "iso", operator: "<=", value: 1600 } as const;
+    const dark = QUICK_FILTER_PRESETS.find((preset) => preset.id === "dark")!;
+    const bright = QUICK_FILTER_PRESETS.find((preset) => preset.id === "bright")!;
+
+    const withDark = toggleQuickFilterPreset([iso], dark);
+    expect(isQuickFilterPresetActive(withDark, dark)).toBe(true);
+    expect(toggleQuickFilterPreset(withDark, bright)).toEqual([iso, bright.condition]);
+    expect(toggleQuickFilterPreset([iso, bright.condition], bright)).toEqual([iso]);
+  });
+
+  it("uses the monochrome measurement for paired black-and-white and color views", () => {
+    const monochrome = QUICK_FILTER_PRESETS.find((preset) => preset.id === "monochrome")!;
+    const color = QUICK_FILTER_PRESETS.find((preset) => preset.id === "color")!;
+
+    expect(toggleQuickFilterPreset([], monochrome)).toEqual([monochrome.condition]);
+    expect(toggleQuickFilterPreset([monochrome.condition], color)).toEqual([color.condition]);
   });
 });
 

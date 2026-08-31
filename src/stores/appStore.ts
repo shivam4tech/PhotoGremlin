@@ -41,7 +41,7 @@ interface AppState {
   analyzing: boolean;
   readingMetadata: boolean;
   metadataPaused: boolean;
-  /// A rename/move/copy/trash operation is running.
+  /// A rename/move/copy/trash/permanent-delete operation is running.
   operating: boolean;
   progress: ProgressPayload | null;
   opProgress: ProgressPayload | null;

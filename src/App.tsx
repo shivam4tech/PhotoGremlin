@@ -268,7 +268,9 @@ export default function App() {
           const verb =
             sum.op === "rename" ? "renamed" :
             sum.op === "move" ? "moved" :
-            sum.op === "copy" ? "copied" : "trashed";
+            sum.op === "copy" ? "copied" :
+            sum.op === "trash" ? "trashed" :
+            sum.op === "delete-permanently" ? "permanently deleted" : "processed";
           const bits: string[] = [
             `${sum.succeeded.toLocaleString()} photograph${sum.succeeded === 1 ? "" : "s"} ${verb}`,
             sum.failed > 0 ? `${sum.failed.toLocaleString()} failed` : null,

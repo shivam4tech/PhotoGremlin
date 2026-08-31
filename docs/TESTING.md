@@ -228,8 +228,9 @@ write synthetic folder (N images + EXIF via a tiny writer or sidecar JPEG)
   → analyze → assert rows + version
   → apply filter → assert result set
   → statistics → assert aggregates
-   → plan + execute rename/move/copy/trash (temp dirs) → assert FS, DB sync,
-     audit log, collisions, partial failure   (Sprint 7)
+   → plan + execute rename/move/copy/trash/permanent delete (temp dirs) →
+     assert FS, DB sync, audit log, collisions, partial failure, and that
+     permanent deletion removes only the exact indexed file (Sprints 7, 32)
    → similarity pass on real JPEGs → assert the re-encoded pair forms one
      similar group, a distinct scene stays out, a ≤3s trio bursts and a 30s
      later photo does not, the incremental rule re-queues only the modified

@@ -1,5 +1,5 @@
 //! Integration test: real temp folders → plan + execute rename/move/copy/
-//! trash on real files → verify filesystem, DB sync, and the audit log.
+//! trash/permanent delete on real files → verify filesystem, DB sync, and the audit log.
 //!
 //! This exercises the exact pipeline that ships (FILE_OPERATIONS.md's
 //! universal protocol) against real bytes on disk: collision detection,
@@ -345,6 +345,54 @@ fn trash_moves_to_os_trash_and_removes_db_row() {
     let _ = std::fs::remove_file(trash_files.join("t.jpg"));
     let trash_info = trash_files.join("..").join("info");
     let _ = std::fs::remove_file(trash_info.join("t.jpg.trashinfo"));
+    env.drop();
+}
+
+#[test]
+fn permanent_delete_removes_file_db_row_and_records_audit() {
+    let env = Env::new(&["permanent.jpg"]);
+    let ids = env.ids_for(&["permanent.jpg"]);
+    let source = env.shoot.join("permanent.jpg");
+    let plan = filesystem::plan_permanent_delete(&env.db, &ids).unwrap();
+    assert_eq!(plan.op, filesystem::OP_DELETE_PERMANENTLY);
+    assert!(plan.destructive);
+    assert!(plan.items.iter().all(|item| item.ok));
+
+    let summary = run(&env.db, &plan, &AtomicBool::new(false));
+    assert_eq!(summary.succeeded, 1);
+    assert!(!source.exists(), "permanently deleted file must be absent");
+    assert!(env.ids_for(&["permanent.jpg"]).is_empty());
+    assert!(env.op_rows().iter().any(|(op, src, status)| {
+        op == filesystem::OP_DELETE_PERMANENTLY
+            && src.ends_with("permanent.jpg")
+            && status == "done"
+    }));
+    env.drop();
+}
+
+#[test]
+fn permanent_delete_rejects_a_directory_at_preview() {
+    let env = Env::new(&["directory.jpg"]);
+    let ids = env.ids_for(&["directory.jpg"]);
+    let source = env.shoot.join("directory.jpg");
+    std::fs::remove_file(&source).unwrap();
+    std::fs::create_dir(&source).unwrap();
+
+    let plan = filesystem::plan_permanent_delete(&env.db, &ids).unwrap();
+    assert!(plan.destructive);
+    assert_eq!(plan.items.len(), 1);
+    assert!(!plan.items[0].ok);
+    assert!(plan.items[0]
+        .note
+        .as_deref()
+        .unwrap_or("")
+        .contains("directories cannot be deleted"));
+
+    let summary = run(&env.db, &plan, &AtomicBool::new(false));
+    assert_eq!(summary.succeeded, 0);
+    assert!(source.is_dir(), "directory must remain untouched");
+    assert_eq!(env.ids_for(&["directory.jpg"]), ids);
+    assert!(env.op_rows().is_empty());
     env.drop();
 }
 
