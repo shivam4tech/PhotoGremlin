@@ -30,6 +30,21 @@ All group types need **≥ 2 photos** (`MIN_GROUP_SIZE = 2`); a lone photo
 never forms a group. A photo may appear in more than one group when it is
 both a burst frame and a visual or face-appearance candidate.
 
+## Burst-context measurement (Sprint 34)
+
+The fixed three-second grouping remains unchanged. After burst memberships
+change, or once per affected session after a face/eye pass, the database recomputes nullable
+`analysis.possible_blink` values in chronological order. An interior frame is
+`true` only when a hard-closed face in that frame has a local face-crop hash
+within Hamming distance 10 of a hard-open face in both immediate neighbors.
+Both eye probabilities must be ≥ 0.8 for hard-open or ≤ 0.2 for hard-closed.
+
+A fully measured three-frame window without that pattern is `false`.
+Boundaries, stale algorithms, missing/incomplete observations, and ambiguous
+probabilities stay `NULL`. This preserves unknown evidence instead of turning
+it into a negative result. It is a deterministic contextual use of optional
+local measurements, not identity recognition and not another model.
+
 ## The algorithm (dHash)
 
 A **64-bit difference hash** (`dhash64`):
@@ -105,13 +120,16 @@ helpers retained for old test coverage, not the active UI workflow.
     the similarity pass owns `photos.phash` directly.
 - **Commands** — `src-tauri/src/commands/similarity.rs`:
   `start_similarity` (background), `stop_similarity`, `list_similarity_groups`,
-  `group_photos`.
+  `group_photos` (optional chronology, sharpness-descending,
+  clipping-ascending, or eyes-open-first sort).
 - **Frontend** — the dedicated Groups workspace uses
   `src/features/similarity/CoverThumb.tsx` for cover strips and the existing
   paged `group_photos` command for its virtual grid/viewer path. All/Similar/
   Burst/Face appearance tabs keep matches reachable without placing completed
   group cards above the main Library photographs. Face wording explicitly
-  describes local appearance matching rather than identity.
+  describes local appearance matching rather than identity. Cards also show
+  aggregate possible-blink, closed-eye-candidate, and missing-eye-measurement
+  counts; the same measured cue appears on tiles, in Review, and in the viewer.
 
 ## Incremental re-hash rule
 
@@ -142,7 +160,8 @@ in `AppState`).
    `group_face_appearances`. Capture time affects bursts only, never visual or
    face-appearance candidates.
 3. **Persist**: `replace_similarity_groups_for_session` swaps only that
-   project's group set in one transaction.
+   project's group set and recomputes contextual blink values in one
+   transaction.
 
 **Grouping still runs after a cancel**, over whatever got hashed — so the app
 always ends on a *consistent* group set (never half-groups). Cancellation is

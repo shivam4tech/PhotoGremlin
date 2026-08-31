@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { groupDescription, groupsForTab, mergeGroupPhotos } from "@/features/similarity/groups";
+import {
+  GROUP_SORT_OPTIONS,
+  groupCaptureSignals,
+  groupDescription,
+  groupsForTab,
+  mergeGroupPhotos,
+} from "@/features/similarity/groups";
 import type { PhotoSummary, SimilarityGroup } from "@/types/api";
 
 const groups: SimilarityGroup[] = [
-  { id: 1, hash: "a", group_type: "similar", photo_count: 2, created_at: "", session_count: 1, cover_photos: [] },
-  { id: 2, hash: "b", group_type: "burst", photo_count: 4, created_at: "", session_count: 1, cover_photos: [] },
-  { id: 3, hash: "c", group_type: "face", photo_count: 3, created_at: "", session_count: 2, cover_photos: [] },
+  { id: 1, hash: "a", group_type: "similar", photo_count: 2, created_at: "", session_count: 1, possible_blink_count: 0, closed_eye_candidate_count: 0, unevaluated_eye_count: 2, cover_photos: [] },
+  { id: 2, hash: "b", group_type: "burst", photo_count: 4, created_at: "", session_count: 1, possible_blink_count: 1, closed_eye_candidate_count: 2, unevaluated_eye_count: 0, cover_photos: [] },
+  { id: 3, hash: "c", group_type: "face", photo_count: 3, created_at: "", session_count: 2, possible_blink_count: 0, closed_eye_candidate_count: 0, unevaluated_eye_count: 0, cover_photos: [] },
 ];
 
 describe("Groups workspace helpers", () => {
@@ -26,5 +32,19 @@ describe("Groups workspace helpers", () => {
     expect(groupDescription("similar")).toContain("visual structure");
     expect(groupDescription("burst")).toContain("seconds");
     expect(groupDescription("face")).toContain("not an identity label");
+  });
+
+  it("describes group capture signals and exposes every supported ordering", () => {
+    expect(groupCaptureSignals(groups[1])).toEqual([
+      "1 possible blink",
+      "2 closed-eye candidates",
+    ]);
+    expect(groupCaptureSignals(groups[0])).toEqual(["2 without eye measurements"]);
+    expect(GROUP_SORT_OPTIONS.map((option) => option.value)).toEqual([
+      "chronology",
+      "sharpness_desc",
+      "clipping_asc",
+      "eyes_open_first",
+    ]);
   });
 });

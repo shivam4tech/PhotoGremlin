@@ -13,13 +13,16 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 19;
+pub const CURRENT_SCHEMA_VERSION: i64 = 20;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
 
 /// Version of the local eye-state measurements stored by the face pass.
 pub const EYE_ALGORITHM_VERSION: i64 = 1;
+pub const EYE_OPEN_THRESHOLD: f64 = 0.8;
+pub const EYE_CLOSED_THRESHOLD: f64 = 0.2;
+pub const BLINK_FACE_HASH_DISTANCE: u32 = 10;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -457,6 +460,17 @@ impl Db {
                     )
                     .map_err(db_err("add eye observation column"))?;
                 }
+            }
+
+            // v20 (Sprint 34): a nullable, contextual burst measurement.
+            // NULL means adjacent frames or local eye measurements are not
+            // sufficient to evaluate the photo; 0/1 are explicit results.
+            if !table_has_column(&conn, "analysis", "possible_blink") {
+                conn.execute(
+                    "ALTER TABLE analysis ADD COLUMN possible_blink INTEGER",
+                    [],
+                )
+                .map_err(db_err("add possible blink column"))?;
             }
 
             let current_version: i64 = conn
@@ -939,7 +953,8 @@ impl Db {
                         a.scene_coarse, a.scene_fine, a.scene_conf,
                         a.perceptual_hash, a.algorithm_version, a.analyzed_at,
                         a.eye_evaluated_count, a.closed_eye_face_count,
-                        a.max_eye_closure_confidence, a.eye_algorithm_version, a.eyes_at
+                        a.max_eye_closure_confidence, a.eye_algorithm_version, a.eyes_at,
+                        a.possible_blink
                  FROM photos p
                  LEFT JOIN analysis a ON a.photo_id = p.id
                  WHERE p.id = ?1",
@@ -995,6 +1010,7 @@ impl Db {
                         max_eye_closure_confidence: r.get(46)?,
                         eye_algorithm_version: r.get(47)?,
                         eyes_at: r.get(48)?,
+                        possible_blink: r.get::<_, Option<i64>>(49)?.map(|v| v != 0),
                     })
                 },
             )
@@ -1304,7 +1320,8 @@ pub fn upsert_exif(
                     (a.photo_id IS NOT NULL) AS has_analysis,
                     p.rating, p.flag, p.color_label,
                     a.sharpness, a.highlight_clipping, a.shadow_clipping,
-                    a.closed_eye_face_count, a.max_eye_closure_confidence
+                    a.closed_eye_face_count, a.max_eye_closure_confidence,
+                    a.possible_blink
              {base} {where_sql}
              ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
              LIMIT ? OFFSET ?"
@@ -1331,6 +1348,7 @@ pub fn upsert_exif(
                     shadow_clipping: r.get(15)?,
                     closed_eye_face_count: r.get(16)?,
                     max_eye_closure_confidence: r.get(17)?,
+                    possible_blink: r.get::<_, Option<i64>>(18)?.map(|v| v != 0),
                 })
             })
             .map_err(db_err("query filtered photos"))?;
@@ -1455,7 +1473,8 @@ pub fn upsert_exif(
                         (a.photo_id IS NOT NULL) AS has_analysis,
                         p.rating, p.flag, p.color_label,
                         a.sharpness, a.highlight_clipping, a.shadow_clipping,
-                        a.closed_eye_face_count, a.max_eye_closure_confidence
+                        a.closed_eye_face_count, a.max_eye_closure_confidence,
+                        a.possible_blink
                  FROM photos p LEFT JOIN analysis a ON a.photo_id = p.id
                  WHERE p.session_id = ?1
                  ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
@@ -1482,6 +1501,7 @@ pub fn upsert_exif(
                     shadow_clipping: r.get(15)?,
                     closed_eye_face_count: r.get(16)?,
                     max_eye_closure_confidence: r.get(17)?,
+                    possible_blink: r.get::<_, Option<i64>>(18)?.map(|v| v != 0),
                 })
             })
             .map_err(db_err("query review photos"))?;
@@ -2160,7 +2180,8 @@ pub fn set_review_progress(
                         (a.photo_id IS NOT NULL) AS has_analysis,
                         p.rating, p.flag, p.color_label,
                         a.sharpness, a.highlight_clipping, a.shadow_clipping,
-                        a.closed_eye_face_count, a.max_eye_closure_confidence
+                        a.closed_eye_face_count, a.max_eye_closure_confidence,
+                        a.possible_blink
                  FROM collection_photos cp
                  JOIN photos p ON p.id = cp.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
@@ -2238,6 +2259,7 @@ pub fn set_review_progress(
             shadow_clipping: r.get(15)?,
             closed_eye_face_count: r.get(16)?,
             max_eye_closure_confidence: r.get(17)?,
+            possible_blink: r.get::<_, Option<i64>>(18)?.map(|v| v != 0),
         })
     }
 
@@ -2257,7 +2279,25 @@ pub fn set_review_progress(
                         (SELECT COUNT(DISTINCT p.session_id)
                          FROM similarity_group_photos gp
                          JOIN photos p ON p.id = gp.photo_id
-                         WHERE gp.group_id = g.id) AS session_count
+                         WHERE gp.group_id = g.id) AS session_count,
+                        (SELECT COUNT(*)
+                         FROM similarity_group_photos gp
+                         JOIN analysis a ON a.photo_id = gp.photo_id
+                         WHERE gp.group_id = g.id AND a.possible_blink = 1),
+                        (SELECT COUNT(*)
+                         FROM similarity_group_photos gp
+                         JOIN analysis a ON a.photo_id = gp.photo_id
+                         WHERE gp.group_id = g.id
+                           AND COALESCE(a.closed_eye_face_count, 0) > 0),
+                        (SELECT COUNT(*)
+                         FROM similarity_group_photos gp
+                         LEFT JOIN analysis a ON a.photo_id = gp.photo_id
+                         WHERE gp.group_id = g.id
+                           AND (a.eye_algorithm_version IS NULL
+                                OR a.eye_algorithm_version != ?3
+                                OR a.face_count IS NULL
+                                OR a.eye_evaluated_count IS NULL
+                                OR a.eye_evaluated_count != a.face_count * 2))
                  FROM similarity_groups g
                  WHERE g.session_id = ?1
                  ORDER BY (g.group_type = 'burst') DESC, g.photo_count DESC, g.id
@@ -2265,7 +2305,7 @@ pub fn set_review_progress(
             )
             .map_err(db_err("prepare similarity groups"))?;
         let rows = stmt
-            .query_map(params![session_id, limit], |r| {
+            .query_map(params![session_id, limit, EYE_ALGORITHM_VERSION], |r| {
                 Ok(SimilarityGroup {
                     id: r.get(0)?,
                     hash: r.get(1)?,
@@ -2273,6 +2313,9 @@ pub fn set_review_progress(
                     photo_count: r.get(3)?,
                     created_at: r.get(4)?,
                     session_count: r.get(5)?,
+                    possible_blink_count: r.get(6)?,
+                    closed_eye_candidate_count: r.get(7)?,
+                    unevaluated_eye_count: r.get(8)?,
                     cover_photos: Vec::new(),
                 })
             })
@@ -2284,7 +2327,14 @@ pub fn set_review_progress(
         // Second pass: a small cover strip per group (bounded, keeps this one
         // round-trip per group with a tight LIMIT).
         let mut covers = conn
-            .prepare("SELECT photo_id FROM similarity_group_photos WHERE group_id = ?1 ORDER BY photo_id LIMIT 4")
+            .prepare(
+                "SELECT gp.photo_id
+                 FROM similarity_group_photos gp
+                 JOIN photos p ON p.id = gp.photo_id
+                 WHERE gp.group_id = ?1
+                 ORDER BY (p.capture_datetime IS NULL), p.capture_datetime, p.id
+                 LIMIT 4",
+            )
             .map_err(db_err("prepare group covers"))?;
         for g in groups.iter_mut() {
             let ids = covers
@@ -2302,6 +2352,7 @@ pub fn set_review_progress(
         group_id: i64,
         offset: i64,
         limit: i64,
+        sort: GroupPhotoSort,
     ) -> AppResult<(Vec<PhotoSummary>, i64)> {
         let conn = self.lock()?;
         let limit = limit.clamp(1, 500);
@@ -2321,22 +2372,52 @@ pub fn set_review_progress(
         if total == 0 {
             return Ok((Vec::new(), 0));
         }
-        let mut stmt = conn
-            .prepare(
+        let order_sql = match sort {
+            GroupPhotoSort::Chronology => {
+                "(p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC".to_string()
+            }
+            GroupPhotoSort::SharpnessDesc => {
+                "(a.sharpness IS NULL) ASC, a.sharpness DESC,
+                 (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC".to_string()
+            }
+            GroupPhotoSort::ClippingAsc => {
+                "(a.highlight_clipping IS NULL OR a.shadow_clipping IS NULL) ASC,
+                 (COALESCE(a.highlight_clipping, 0) + COALESCE(a.shadow_clipping, 0)) ASC,
+                 (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC".to_string()
+            }
+            GroupPhotoSort::EyesOpenFirst => {
+                format!("CASE
+                    WHEN a.eye_algorithm_version = {EYE_ALGORITHM_VERSION}
+                         AND COALESCE(a.face_count, 0) > 0
+                         AND a.eye_evaluated_count = a.face_count * 2
+                         AND COALESCE(a.closed_eye_face_count, 0) = 0 THEN 0
+                    WHEN a.eye_algorithm_version = {EYE_ALGORITHM_VERSION}
+                         AND COALESCE(a.face_count, 0) > 0
+                         AND a.eye_evaluated_count = a.face_count * 2
+                         AND COALESCE(a.closed_eye_face_count, 0) > 0 THEN 2
+                    ELSE 1
+                 END ASC,
+                 (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC")
+            }
+        };
+        let sql = format!(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
                         (a.photo_id IS NOT NULL) AS has_analysis,
                         p.rating, p.flag, p.color_label,
                         a.sharpness, a.highlight_clipping, a.shadow_clipping,
-                        a.closed_eye_face_count, a.max_eye_closure_confidence
+                        a.closed_eye_face_count, a.max_eye_closure_confidence,
+                        a.possible_blink
                  FROM similarity_group_photos g
                  JOIN photos p ON p.id = g.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
                  JOIN similarity_groups sg ON sg.id = g.group_id
                  WHERE g.group_id = ?1 AND sg.session_id = ?2
-                 ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
-                 LIMIT ?3 OFFSET ?4",
-            )
+                 ORDER BY {order_sql}
+                 LIMIT ?3 OFFSET ?4"
+        );
+        let mut stmt = conn
+            .prepare(&sql)
             .map_err(db_err("prepare group photos"))?;
         let rows = stmt
             .query_map(params![group_id, session_id, limit, offset], Self::page_row_to_summary)
@@ -2388,8 +2469,138 @@ pub fn set_review_progress(
                 .map_err(db_err("insert group photo"))?;
             }
         }
+        Self::recompute_possible_blinks(&tx, session_id)?;
         tx.commit().map_err(db_err("commit similarity"))?;
         Ok(groups.len())
+    }
+
+    /// Recompute contextual blink measurements for one project. Burst
+    /// boundaries and incomplete/ambiguous local eye measurements stay NULL.
+    pub fn recompute_possible_blinks_for_session(&self, session_id: i64) -> AppResult<()> {
+        let conn = self.lock()?;
+        Self::recompute_possible_blinks(&conn, session_id)
+    }
+
+    fn recompute_possible_blinks(conn: &Connection, session_id: i64) -> AppResult<()> {
+        conn.execute(
+            "UPDATE analysis SET possible_blink = NULL
+             WHERE photo_id IN (SELECT id FROM photos WHERE session_id = ?1)",
+            [session_id],
+        )
+        .map_err(db_err("clear contextual blink measurements"))?;
+
+        let group_ids = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT id FROM similarity_groups
+                     WHERE session_id = ?1 AND group_type = 'burst'",
+                )
+                .map_err(db_err("prepare burst groups for blink analysis"))?;
+            let rows = stmt
+                .query_map([session_id], |r| r.get::<_, i64>(0))
+                .map_err(db_err("query burst groups for blink analysis"))?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(db_err("read burst groups for blink analysis"))?
+        };
+
+        let mut results: HashMap<i64, bool> = HashMap::new();
+        for group_id in group_ids {
+            let frame_rows = {
+                let mut stmt = conn
+                    .prepare(
+                        "SELECT p.id, a.face_count, a.eye_evaluated_count,
+                                a.eye_algorithm_version
+                         FROM similarity_group_photos gp
+                         JOIN photos p ON p.id = gp.photo_id
+                         LEFT JOIN analysis a ON a.photo_id = p.id
+                         WHERE gp.group_id = ?1
+                         ORDER BY (p.capture_datetime IS NULL), p.capture_datetime, p.id",
+                    )
+                    .map_err(db_err("prepare burst frames for blink analysis"))?;
+                let rows = stmt
+                    .query_map([group_id], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, Option<i64>>(1)?,
+                            r.get::<_, Option<i64>>(2)?,
+                            r.get::<_, Option<i64>>(3)?,
+                        ))
+                    })
+                    .map_err(db_err("query burst frames for blink analysis"))?;
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(db_err("read burst frames for blink analysis"))?
+            };
+
+            let mut frames = Vec::with_capacity(frame_rows.len());
+            for (photo_id, face_count, eye_count, eye_version) in frame_rows {
+                let observations = {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT appearance_hash, left_eye_open_prob, right_eye_open_prob
+                             FROM face_observations
+                             WHERE photo_id = ?1 ORDER BY face_index",
+                        )
+                        .map_err(db_err("prepare face observations for blink analysis"))?;
+                    let rows = stmt
+                        .query_map([photo_id], |r| {
+                            Ok((
+                                r.get::<_, i64>(0)? as u64,
+                                r.get::<_, Option<f64>>(1)?,
+                                r.get::<_, Option<f64>>(2)?,
+                            ))
+                        })
+                        .map_err(db_err("query face observations for blink analysis"))?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(db_err("read face observations for blink analysis"))?
+                };
+                frames.push(BlinkFrame::new(
+                    photo_id,
+                    face_count,
+                    eye_count,
+                    eye_version,
+                    observations,
+                ));
+            }
+
+            for index in 1..frames.len().saturating_sub(1) {
+                let previous = &frames[index - 1];
+                let current = &frames[index];
+                let next = &frames[index + 1];
+                if !(previous.fully_evaluable
+                    && current.fully_evaluable
+                    && next.fully_evaluable)
+                {
+                    continue;
+                }
+                let possible = current.faces.iter().any(|face| {
+                    face.state == BlinkEyeState::Closed
+                        && previous.faces.iter().any(|candidate| {
+                            candidate.state == BlinkEyeState::Open
+                                && (candidate.hash ^ face.hash).count_ones()
+                                    <= BLINK_FACE_HASH_DISTANCE
+                        })
+                        && next.faces.iter().any(|candidate| {
+                            candidate.state == BlinkEyeState::Open
+                                && (candidate.hash ^ face.hash).count_ones()
+                                    <= BLINK_FACE_HASH_DISTANCE
+                        })
+                });
+                results
+                    .entry(current.photo_id)
+                    .and_modify(|old| *old |= possible)
+                    .or_insert(possible);
+            }
+        }
+
+        let mut update = conn
+            .prepare("UPDATE analysis SET possible_blink = ?1 WHERE photo_id = ?2")
+            .map_err(db_err("prepare contextual blink update"))?;
+        for (photo_id, possible) in results {
+            update
+                .execute(params![possible, photo_id])
+                .map_err(db_err("store contextual blink measurement"))?;
+        }
+        Ok(())
     }
 
     /// All currently hashed photos for one project/session. The similarity
@@ -2503,7 +2714,7 @@ pub fn set_review_progress(
         if let Some(sid) = active_sid {
             let mut stmt = conn
                 .prepare(
-                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime
+                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime, p.session_id
                      FROM photos p
                      LEFT JOIN analysis a ON a.photo_id = p.id
                      WHERE p.session_id = ?1
@@ -2524,6 +2735,7 @@ pub fn set_review_progress(
                         width: r.get(2)?,
                         height: r.get(3)?,
                         file_mtime: r.get(4)?,
+                        session_id: r.get(5)?,
                     })
                 }).map_err(db_err("query faces queue"))? {
                 out.push(row.map_err(db_err("read face work row"))?);
@@ -2531,7 +2743,7 @@ pub fn set_review_progress(
         } else {
             let mut stmt = conn
                 .prepare(
-                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime
+                    "SELECT p.id, p.path, p.width, p.height, p.file_mtime, p.session_id
                      FROM photos p
                      LEFT JOIN analysis a ON a.photo_id = p.id
                      WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
@@ -2551,6 +2763,7 @@ pub fn set_review_progress(
                         width: r.get(2)?,
                         height: r.get(3)?,
                         file_mtime: r.get(4)?,
+                        session_id: r.get(5)?,
                     })
                 }).map_err(db_err("query faces queue"))? {
                 out.push(row.map_err(db_err("read face work row"))?);
@@ -2727,7 +2940,7 @@ pub fn set_review_progress(
                     observation.right_eye_open_prob
                 ],
             )
-            .map_err(db_err("insert face observation"))?;
+                .map_err(db_err("insert face observation"))?;
         }
         tx.commit().map_err(db_err("commit face observations"))?;
         Ok(())
@@ -2774,6 +2987,65 @@ pub fn set_review_progress(
 // Sprint 8 row types (saved views, collections, similarity, phash)
 // ---------------------------------------------------------------------------
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BlinkEyeState {
+    Open,
+    Closed,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BlinkFace {
+    hash: u64,
+    state: BlinkEyeState,
+}
+
+#[derive(Debug)]
+struct BlinkFrame {
+    photo_id: i64,
+    fully_evaluable: bool,
+    faces: Vec<BlinkFace>,
+}
+
+impl BlinkFrame {
+    fn new(
+        photo_id: i64,
+        face_count: Option<i64>,
+        eye_count: Option<i64>,
+        eye_version: Option<i64>,
+        observations: Vec<(u64, Option<f64>, Option<f64>)>,
+    ) -> Self {
+        let expected_faces = face_count.filter(|count| *count >= 0);
+        let counts_complete = expected_faces.is_some_and(|count| {
+            eye_count == Some(count * 2) && observations.len() as i64 == count
+        });
+        let mut faces = Vec::with_capacity(observations.len());
+        let measurements_complete = observations.into_iter().all(|(hash, left, right)| {
+            let state = match (left, right) {
+                (Some(left), Some(right))
+                    if left >= EYE_OPEN_THRESHOLD && right >= EYE_OPEN_THRESHOLD =>
+                {
+                    BlinkEyeState::Open
+                }
+                (Some(left), Some(right))
+                    if left <= EYE_CLOSED_THRESHOLD && right <= EYE_CLOSED_THRESHOLD =>
+                {
+                    BlinkEyeState::Closed
+                }
+                _ => return false,
+            };
+            faces.push(BlinkFace { hash, state });
+            true
+        });
+        Self {
+            photo_id,
+            fully_evaluable: eye_version == Some(EYE_ALGORITHM_VERSION)
+                && counts_complete
+                && measurements_complete,
+            faces,
+        }
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SavedView {
     pub id: i64,
@@ -2803,8 +3075,26 @@ pub struct SimilarityGroup {
     /// Distinct sessions spanned (1 = within one shoot; ≥ 2 = cross-session,
     /// Sprint 16 — photos were imported into different sessions).
     pub session_count: i64,
-    /// Up to 4 photo ids (by id order) for a UI cover strip.
+    /// Photos in this group whose adjacent burst context indicates a
+    /// matching face changed from open to closed and back to open.
+    pub possible_blink_count: i64,
+    /// Photos with at least one locally measured closed-eye face.
+    pub closed_eye_candidate_count: i64,
+    /// Photos without a current local eye-state result.
+    pub unevaluated_eye_count: i64,
+    /// Up to 4 photo ids in capture chronology for a UI cover strip.
     pub cover_photos: Vec<i64>,
+}
+
+/// Fixed, SQL-whitelisted orders for a similarity group's photo page.
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum GroupPhotoSort {
+    #[default]
+    Chronology,
+    SharpnessDesc,
+    ClippingAsc,
+    EyesOpenFirst,
 }
 
 #[derive(Debug, Clone)]
@@ -2822,6 +3112,7 @@ pub struct FaceWork {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub file_mtime: Option<String>,
+    pub session_id: Option<i64>,
 }
 
 /// Compact per-face measurements stored by the unified local face/eye pass.
@@ -2984,6 +3275,9 @@ pub struct PhotoSummary {
     pub shadow_clipping: Option<f64>,
     pub closed_eye_face_count: Option<i64>,
     pub max_eye_closure_confidence: Option<f64>,
+    /// Contextual burst result: NULL is not evaluable, false is evaluated
+    /// without the pattern, true is a possible blink.
+    pub possible_blink: Option<bool>,
 }
 
 /// `PhotoPage` is what `list_photos` returns over IPC.
@@ -3085,6 +3379,7 @@ pub struct PhotoFull {
     pub max_eye_closure_confidence: Option<f64>,
     pub eye_algorithm_version: Option<i64>,
     pub eyes_at: Option<String>,
+    pub possible_blink: Option<bool>,
     pub scene_coarse: Option<String>,
     pub scene_fine: Option<String>,
     pub scene_conf: Option<f64>,
@@ -3176,6 +3471,7 @@ mod tests {
                 "max_eye_closure_confidence",
                 "eye_algorithm_version",
                 "eyes_at",
+                "possible_blink",
             ] {
                 assert!(
                     table_has_column(&conn, "analysis", column),

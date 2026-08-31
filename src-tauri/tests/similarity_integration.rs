@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use photogremlin_lib::{
-    database::{Db, PhotoUpsert},
+    database::{Db, FaceObservationInput, GroupPhotoSort, PhotoUpsert},
     events::ProgressPayload,
     filters,
     similarity,
@@ -470,7 +470,10 @@ fn similarity_group_photos_page_like_the_grid() {
         .iter()
         .find(|g| g.group_type == "similar" && g.photo_count >= 2)
         .expect("a + a2 must form a group");
-    let (page, total) = env.db.group_photos(g.id, 0, 50).unwrap();
+    let (page, total) = env
+        .db
+        .group_photos(g.id, 0, 50, GroupPhotoSort::Chronology)
+        .unwrap();
     assert_eq!(total, g.photo_count);
     assert_eq!(page.len(), g.photo_count as usize);
     // Covers are bounded by 4 and always reference real group members.
@@ -479,8 +482,136 @@ fn similarity_group_photos_page_like_the_grid() {
         assert!(group_contains(&env.db, g.id, *c));
     }
     // Empty group pages are a clean (0, 0), not an error.
-    let (none, none_total) = env.db.group_photos(9999, 0, 10).unwrap();
+    let (none, none_total) = env
+        .db
+        .group_photos(9999, 0, 10, GroupPhotoSort::Chronology)
+        .unwrap();
     assert!(none.is_empty() && none_total == 0);
+}
+
+#[test]
+fn burst_context_preserves_unknowns_and_supports_review_sorts() {
+    let env = Env::new(&[
+        ("f1.jpg", "ramp"),
+        ("f2.jpg", "ramp"),
+        ("f3.jpg", "ramp"),
+        ("f4.jpg", "ramp"),
+        ("f5.jpg", "ramp"),
+        ("f6.jpg", "ramp"),
+    ]);
+    let session_id = env.one_i64("SELECT id FROM sessions ORDER BY id LIMIT 1");
+    let ids = env.ids_for(&[
+        "f1.jpg", "f2.jpg", "f3.jpg", "f4.jpg", "f5.jpg", "f6.jpg",
+    ]);
+    for (index, photo_id) in ids.iter().enumerate() {
+        env.raw(&format!(
+            "UPDATE photos SET capture_datetime = '2026-08-31T10:00:0{index}Z' WHERE id = {photo_id}"
+        ));
+    }
+    env.db
+        .replace_similarity_groups_for_session(
+            session_id,
+            &[("burst:test".into(), "burst".into(), ids.clone())],
+        )
+        .unwrap();
+
+    let store_eye_state = |photo_id: i64, open_probability: f64| {
+        let closed = i64::from(open_probability <= 0.2);
+        env.db
+            .upsert_faces_with_observations(
+                photo_id,
+                1,
+                2,
+                closed,
+                if closed == 1 { Some(1.0 - open_probability) } else { None },
+                &[FaceObservationInput {
+                    appearance_hash: 0xA5A5_A5A5_A5A5_A5A5,
+                    left_eye_open_prob: Some(open_probability),
+                    right_eye_open_prob: Some(open_probability),
+                }],
+                Some("2026-01-01T00:00:00Z"),
+            )
+            .unwrap();
+    };
+    store_eye_state(ids[0], 0.95);
+    store_eye_state(ids[1], 0.05);
+    store_eye_state(ids[2], 0.95);
+    store_eye_state(ids[3], 0.95);
+    // f5 intentionally has no eye measurements, so f4 remains unknown.
+    store_eye_state(ids[5], 0.95);
+    env.db
+        .recompute_possible_blinks_for_session(session_id)
+        .unwrap();
+
+    assert_eq!(env.db.get_photo_full(ids[0]).unwrap().possible_blink, None);
+    assert_eq!(env.db.get_photo_full(ids[1]).unwrap().possible_blink, Some(true));
+    assert_eq!(env.db.get_photo_full(ids[2]).unwrap().possible_blink, Some(false));
+    assert_eq!(env.db.get_photo_full(ids[3]).unwrap().possible_blink, None);
+    assert_eq!(env.db.get_photo_full(ids[4]).unwrap().possible_blink, None);
+    assert_eq!(env.db.get_photo_full(ids[5]).unwrap().possible_blink, None);
+
+    for (index, photo_id) in ids.iter().enumerate() {
+        if index == 4 {
+            continue;
+        }
+        env.raw(&format!(
+            "UPDATE analysis SET sharpness = {}, highlight_clipping = {}, shadow_clipping = 0 WHERE photo_id = {photo_id}",
+            [10, 80, 60, 40, 0, 20][index],
+            [8, 6, 4, 2, 0, 0][index]
+        ));
+    }
+
+    let group = env
+        .db
+        .list_similarity_groups(50)
+        .unwrap()
+        .into_iter()
+        .find(|group| group.group_type == "burst")
+        .unwrap();
+    assert_eq!(group.possible_blink_count, 1);
+    assert_eq!(group.closed_eye_candidate_count, 1);
+    assert_eq!(group.unevaluated_eye_count, 1);
+
+    let sorted_ids = |sort| {
+        env.db
+            .group_photos(group.id, 0, 50, sort)
+            .unwrap()
+            .0
+            .into_iter()
+            .map(|photo| photo.id)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sorted_ids(GroupPhotoSort::Chronology), ids);
+    assert_eq!(
+        sorted_ids(GroupPhotoSort::SharpnessDesc),
+        vec![ids[1], ids[2], ids[3], ids[5], ids[0], ids[4]]
+    );
+    assert_eq!(
+        sorted_ids(GroupPhotoSort::ClippingAsc),
+        vec![ids[5], ids[3], ids[2], ids[1], ids[0], ids[4]]
+    );
+    assert_eq!(
+        sorted_ids(GroupPhotoSort::EyesOpenFirst),
+        vec![ids[0], ids[2], ids[3], ids[5], ids[4], ids[1]]
+    );
+
+    let possible = filters::parse_filter(
+        r#"{"operator":"AND","conditions":[{"field":"possible_blink","operator":"=","value":true}]}"#,
+    )
+    .unwrap();
+    let (where_sql, params) = filters::build_where(&possible).unwrap();
+    let (photos, total) = env.db.photos_where(&where_sql, params, 0, 50).unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(photos[0].id, ids[1]);
+
+    let not_possible = filters::parse_filter(
+        r#"{"operator":"AND","conditions":[{"field":"possible_blink","operator":"=","value":false}]}"#,
+    )
+    .unwrap();
+    let (where_sql, params) = filters::build_where(&not_possible).unwrap();
+    let (photos, total) = env.db.photos_where(&where_sql, params, 0, 50).unwrap();
+    assert_eq!(total, 1, "NULL context must not be treated as false");
+    assert_eq!(photos[0].id, ids[2]);
 }
 
 #[test]

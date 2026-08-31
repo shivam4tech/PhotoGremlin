@@ -278,6 +278,9 @@ export function Viewer({
                 <Metric label="Saturation" value={full.saturation?.toFixed(2) ?? "—"} />
                 <Metric label="Highlight clipping" value={full.highlight_clipping == null ? "—" : `${full.highlight_clipping.toFixed(1)}%`} />
                 <Metric label="Shadow clipping" value={full.shadow_clipping == null ? "—" : `${full.shadow_clipping.toFixed(1)}%`} />
+                {full.possible_blink === true && (
+                  <Metric label="Burst context" value="Possible blink · matching face has open eyes in adjacent frames" />
+                )}
                 {full.face_count != null && <Metric label="Faces" value={full.face_count} />}
                 {full.eye_evaluated_count != null && <Metric label="Eyes evaluated" value={full.eye_evaluated_count} />}
                 {(full.closed_eye_face_count ?? 0) > 0 && (

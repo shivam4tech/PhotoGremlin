@@ -58,6 +58,7 @@ function ReviewThumb({ photo, active, state, onFocus }: {
 function measurementLabel(full: PhotoFull | null): string | null {
   if (!full) return null;
   const parts: string[] = [];
+  if (full.possible_blink === true) parts.push("possible blink in burst context");
   if (full.sharpness != null) parts.push(`sharpness ${Math.round(full.sharpness)}`);
   if (full.highlight_clipping != null && full.highlight_clipping >= 5) parts.push(`highlights ${full.highlight_clipping.toFixed(1)}%`);
   if (full.shadow_clipping != null && full.shadow_clipping >= 5) parts.push(`shadows ${full.shadow_clipping.toFixed(1)}%`);

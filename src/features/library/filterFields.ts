@@ -27,6 +27,7 @@ export const FILTER_FIELDS: FieldDef[] = [
   { field: "shadow_clipping", label: "Shadow clipping", kind: "real", area: "Technical" },
   { field: "eye_closure_confidence", label: "Eye closure confidence", kind: "real", area: "Faces & eyes (local models)" },
   { field: "closed_eye_candidate", label: "Closed-eye candidate", kind: "bool", area: "Faces & eyes (local models)" },
+  { field: "possible_blink", label: "Possible blink", kind: "bool", area: "Burst context" },
   { field: "monochrome", label: "Monochrome", kind: "bool", area: "Visual" },
   { field: "color", label: "Color", kind: "bool", area: "Visual" },
   { field: "dark", label: "Dark photo", kind: "bool", area: "Visual" },
@@ -164,6 +165,12 @@ export const QUICK_FILTER_PRESETS: readonly QuickFilterPreset[] = [
     label: "Closed-eye candidate",
     condition: { field: "closed_eye_candidate", operator: "=", value: true },
     exclusiveFields: ["closed_eye_candidate"],
+  },
+  {
+    id: "possible-blink",
+    label: "Possible blink",
+    condition: { field: "possible_blink", operator: "=", value: true },
+    exclusiveFields: ["possible_blink"],
   },
   {
     id: "monochrome",

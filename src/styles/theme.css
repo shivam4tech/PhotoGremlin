@@ -2623,6 +2623,31 @@ li.is-bad .preview-note {
 .group-card-head { display: grid; gap: 5px; }
 .group-card-head .chip { width: fit-content; padding: 2px 6px; font-size: 9.5px; }
 .group-card-description { color: var(--text-dim); font-size: 10.5px; line-height: 1.35; text-wrap: pretty; }
+.group-card-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.group-card-signals .chip {
+  padding: 2px 6px;
+  font-size: 9.5px;
+}
+.groups-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+.groups-sort select {
+  min-width: 132px;
+  padding: 4px 22px 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
+}
 .group-card-skeleton {
   cursor: default;
   background: var(--bg-elevated);

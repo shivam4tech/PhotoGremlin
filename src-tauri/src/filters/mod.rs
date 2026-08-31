@@ -126,6 +126,7 @@ const FACES_PRESENT: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.face_coun
 const FACE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.face_count", negate_bool: false };
 const CLOSED_EYE_CANDIDATE: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.closed_eye_face_count IS NOT NULL AND a.closed_eye_face_count > 0)", negate_bool: false };
 const EYE_CLOSURE_CONFIDENCE: FieldDef = FieldDef { kind: Kind::Real, expr: "a.max_eye_closure_confidence", negate_bool: false };
+const POSSIBLE_BLINK: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.possible_blink", negate_bool: false };
 const SMILING: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.smile_count IS NOT NULL AND a.smile_count > 0)", negate_bool: false };
 const SMILE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.smile_count", negate_bool: false };
 const RATING: FieldDef = FieldDef { kind: Kind::Int, expr: "p.rating", negate_bool: false };
@@ -169,6 +170,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "face_count" => &FACE_COUNT,
         "closed_eye_candidate" => &CLOSED_EYE_CANDIDATE,
         "eye_closure_confidence" => &EYE_CLOSURE_CONFIDENCE,
+        "possible_blink" => &POSSIBLE_BLINK,
         "smiling" => &SMILING,
         "smile_count" => &SMILE_COUNT,
         "rating" => &RATING,
@@ -608,6 +610,10 @@ mod tests {
             "WHERE (a.closed_eye_face_count IS NOT NULL AND a.closed_eye_face_count > 0) = ? AND a.max_eye_closure_confidence >= ?"
         );
         assert_eq!(params, vec![SqlParam::Bool(true), SqlParam::Real(80.0)]);
+
+        let (sql, params) = build_conds(vec![cond("possible_blink", "=", json!(false))]);
+        assert_eq!(sql, "WHERE a.possible_blink = ?");
+        assert_eq!(params, vec![SqlParam::Bool(false)]);
     }
 
     #[test]

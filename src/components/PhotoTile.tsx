@@ -78,6 +78,7 @@ export function PhotoTile({
 
   const dims = photo.width && photo.height ? `${photo.width}×${photo.height}` : photo.extension.toUpperCase();
   const captureChecks = [
+    photo.possible_blink === true ? "Possible blink · adjacent burst frames" : null,
     photo.sharpness != null && photo.sharpness < 40
       ? `Sharpness ${Math.round(photo.sharpness)}`
       : null,
