@@ -66,6 +66,8 @@ export interface DbStatus {
   rejected_count: number;
   /** Photos with a local-AI face result (Sprint 9). */
   faces_done: number;
+  /** Photos with a local eye-state result. */
+  eyes_done: number;
   /** Photos with a scene-classification result (Sprint 18). */
   scenes_done: number;
   schema_version: number;
@@ -84,8 +86,11 @@ export interface AiStatus {
   /** The shipped local model, reported as-is for transparency. */
   model: string;
   model_bytes: number;
+  eye_model: string;
+  eye_model_bytes: number;
   /** Photos with a stored face result / photos in the library. */
   faces_done: number;
+  eyes_done: number;
   /** Scene model (Sprint 18): name and size, reported for transparency. */
   scene_model: string;
   scene_model_bytes: number;
@@ -98,6 +103,8 @@ export interface AiStatus {
 export interface FaceSummary {
   processed: number;
   with_faces: number;
+  eyes_evaluated: number;
+  closed_eye_faces: number;
   failed: number;
   cancelled: boolean;
   elapsed_ms: number;
@@ -303,6 +310,11 @@ export interface PhotoSummary {
   flag: boolean;
   /** "red" | "yellow" | "green" | "blue" | "purple" | "gray" | null. */
   color_label: string | null;
+  sharpness: number | null;
+  highlight_clipping: number | null;
+  shadow_clipping: number | null;
+  closed_eye_face_count: number | null;
+  max_eye_closure_confidence: number | null;
 }
 
 export interface PhotoPage {
@@ -324,6 +336,9 @@ export type QuickNumericFilterField =
   | "sharpness"
   | "brightness"
   | "contrast"
+  | "highlight_clipping"
+  | "shadow_clipping"
+  | "eye_closure_confidence"
   | "iso"
   | "focal_length";
 
@@ -391,6 +406,11 @@ export interface PhotoFull {
   is_bright: boolean;
   face_count: number | null;
   smile_count: number | null;
+  eye_evaluated_count: number | null;
+  closed_eye_face_count: number | null;
+  max_eye_closure_confidence: number | null;
+  eye_algorithm_version: number | null;
+  eyes_at: string | null;
   /** Scene classification (Sprint 18): merged product chip + fine label. */
   scene_coarse: string | null;
   scene_fine: string | null;

@@ -276,9 +276,13 @@ export function Viewer({
                 <Metric label="Brightness" value={full.brightness?.toFixed(1) ?? "—"} />
                 <Metric label="Contrast" value={full.contrast?.toFixed(1) ?? "—"} />
                 <Metric label="Saturation" value={full.saturation?.toFixed(2) ?? "—"} />
-                <Metric label="Highlight clipping" value={`${(full.highlight_clipping ?? 0).toFixed(3)}`} />
-                <Metric label="Shadow clipping" value={`${(full.shadow_clipping ?? 0).toFixed(3)}`} />
+                <Metric label="Highlight clipping" value={full.highlight_clipping == null ? "—" : `${full.highlight_clipping.toFixed(1)}%`} />
+                <Metric label="Shadow clipping" value={full.shadow_clipping == null ? "—" : `${full.shadow_clipping.toFixed(1)}%`} />
                 {full.face_count != null && <Metric label="Faces" value={full.face_count} />}
+                {full.eye_evaluated_count != null && <Metric label="Eyes evaluated" value={full.eye_evaluated_count} />}
+                {(full.closed_eye_face_count ?? 0) > 0 && (
+                  <Metric label="Closed-eye candidate" value={`${full.closed_eye_face_count} face${full.closed_eye_face_count === 1 ? "" : "s"}${full.max_eye_closure_confidence == null ? "" : ` · ${full.max_eye_closure_confidence.toFixed(0)}% confidence`}`} />
+                )}
                 {full.scene_coarse != null && full.scene_coarse !== "" && (
                   <Metric
                     label="Scene"

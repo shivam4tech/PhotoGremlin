@@ -5,6 +5,7 @@ import { MoonIcon, ShieldIcon, SunIcon } from "@/components/Icons";
 import {
   formatFaceSummaryLine,
   formatFacesProgressLine,
+  formatEyesProgressLine,
   formatScenesProgressLine,
   formatModelSize,
   runtimeLine,
@@ -292,9 +293,9 @@ function LocalIntelligenceCard() {
         }}
       >
         <div>
-          <div style={{ fontSize: 14 }}>Detect faces in photographs</div>
+          <div style={{ fontSize: 14 }}>Detect faces and eye state in photographs</div>
           <div className="faint" style={{ fontSize: 12.5, marginTop: 2 }}>
-            When on, new photographs are checked for faces automatically after
+            When on, new photographs are checked for faces and eye state automatically after
             each scan; you can also run it on demand below.
           </div>
         </div>
@@ -321,7 +322,14 @@ function LocalIntelligenceCard() {
             never downloaded).
           </div>
           <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
+            Eye-state model: {aiStatus.eye_model} ({formatModelSize(aiStatus.eye_model_bytes)} embedded,
+            never downloaded).
+          </div>
+          <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
             {formatFacesProgressLine(aiStatus)}
+          </div>
+          <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
+            {formatEyesProgressLine(aiStatus)}
           </div>
           <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
             Scene model: {aiStatus.scene_model} ({formatModelSize(aiStatus.scene_model_bytes)}{" "}
@@ -334,7 +342,7 @@ function LocalIntelligenceCard() {
           <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
             {detectingFaces ? (
               <button className="btn btn-sm btn-danger" onClick={() => void stop()}>
-                Stop detection
+                Stop analysis
               </button>
             ) : (
               <button
@@ -344,10 +352,10 @@ function LocalIntelligenceCard() {
                 title={
                   aiStatus.photo_count === 0
                     ? "Add a photo folder first."
-                    : "Run face detection over every photograph that still needs it (re-runs are incremental)."
+                    : "Run local face and eye-state analysis over every photograph that still needs it (re-runs are incremental)."
                 }
               >
-                Detect faces now
+                Analyze faces and eyes now
               </button>
             )}
             {facesProgress && facesProgress.total > 0 && (

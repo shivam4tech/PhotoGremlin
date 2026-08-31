@@ -21,6 +21,11 @@ const photos: PhotoSummary[] = [1, 2, 3, 4, 5].map((id) => ({
   rating: null,
   flag: false,
   color_label: null,
+  sharpness: null,
+  highlight_clipping: null,
+  shadow_clipping: null,
+  closed_eye_face_count: null,
+  max_eye_closure_confidence: null,
 }));
 
 describe("shoot review queue", () => {

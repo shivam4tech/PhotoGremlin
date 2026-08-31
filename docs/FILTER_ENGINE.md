@@ -37,7 +37,7 @@ field lives.
  | exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
  | time | capture_datetime (point, range via `between`) | photos |
  | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
- | local intelligence | faces_present, face_count, smiling, smile_count | analysis (nullable until AI) |
+ | local intelligence | faces_present, face_count, closed_eye_candidate, eye_closure_confidence, smiling, smile_count | analysis (nullable until the relevant local pass) |
 | scene (Sprint 18) | scene_group (`analysis.scene_coarse`, the MERGED product chip from the local scene model; NULL until the pass runs) | analysis |
 | marking (Sprint 13) | rating (int, null = unrated — `is-null`/`not-null` select unrated/rated), flagged (bool, `photos.flag = 1`), color_label (text, fixed enum) | photos (curatorial marks) |
 | review (Sprint 19) | review_state (`selected`, `rejected`, `needs_attention`; `is-null` = unreviewed) | correlated local `selections` row |
@@ -60,13 +60,14 @@ embedded into SQL.
 The Library presents common numeric filters without requiring photographers
 to compose raw operators:
 
-- brightness, sharpness, and contrast use inclusive integer ranges from 0–100;
+- brightness, sharpness, contrast, highlight clipping, shadow clipping and
+  eye-closure confidence use inclusive ranges from 0–100;
 - ISO and focal length use the existing increasing photographic stop lists;
 - leaving both handles at the full domain removes that field, moving only the
   lower handle writes `>=`, moving only the upper handle writes `<=`, and
   moving both writes `between`.
 
-The five dual-ended scrubbers remain visible in the Library inspector, so the
+The measured dual-ended scrubbers remain visible in the Library inspector, so the
 photographer can compare and refine measured ranges without opening rows one at
 a time. Their rounded rails use a low-to-high tonal grade of the single
 interface accent, with a stronger grade marking an active selected interval.
@@ -91,15 +92,15 @@ rewritten. Moving a range handle converts that field to the scrubber's inclusive
 model. Conditions the scrubber cannot express remain visible and removable
 without being silently rewritten.
 
-### Quick views (Sprint 32)
+### Quick views (Sprints 32–33)
 
-The Library inspector places seven one-click presets above the measured
-controls: **Black & white**, **Color**, **Dark**, **Bright**, **Landscape**,
-**Portrait**, and **Contains faces**. These are shortcuts over the existing
-structured fields (`monochrome`, `dark`, `bright`, `orientation`, and
-`faces_present`); they introduce no alternate query path or image judgment.
-Dark and bright mean the deterministic analysis flags, and face presence uses
-the optional local model only when such measurements exist.
+The Library inspector places one-click presets above the measured controls.
+Sprint 33 adds **Potentially soft** (`sharpness < 40`), **Highlight clipping**
+and **Shadow clipping** (each ≥ 5%), and **Closed-eye candidate** to the
+existing color, brightness, orientation and face-presence shortcuts. They are
+ordinary structured conditions and introduce no alternate query path or
+aesthetic verdict. The first three use deterministic measurements; eye state
+uses the optional local models only when such measurements exist.
 
 Selecting an active preset again removes only that preset. Mutually exclusive
 pairs replace one another (black-and-white/color, dark/bright, and
@@ -146,7 +147,10 @@ only `review_state`.
    `(face_count IS NOT NULL AND face_count > 0)` — always false until the
    local-model sprints (9/10) fill those columns. `capture_datetime` is TEXT
    (UTC RFC3339), so comparisons are lexicographic and equal to time order.
-   `session_id` (Sprint 8) is an `Int` on `photos.session_id`: scoping a grid
+   `closed_eye_candidate` is true only when `closed_eye_face_count > 0`;
+   unavailable eye analysis never matches it. `eye_closure_confidence` is the
+   nullable 0–100 aggregate stored by the eye pass. `session_id` (Sprint 8) is
+   an `Int` on `photos.session_id`: scoping a grid
    to one shoot (`= <id>`), to several (`in [..]`), or to unassigned photos
    (`is-null`). It is the engine-level backing for "Open in library" on a
    session (Sessions view) and for saved views that pin a session.

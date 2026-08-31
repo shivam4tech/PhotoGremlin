@@ -12,7 +12,7 @@ legacy upgrade. See `CATALOG_RECOVERY.md`. Every file uses WAL mode,
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 18). Tests assert both expected-table presence and idempotency.
+(currently 19). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -59,6 +59,11 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   focused_photo_id, updated_at)` resumes a shoot at its last review context.
   The row is project-local and cascades with its session; the focused photo is
   validated as belonging to that session before each write.
+- v19 (Sprint 33): adds nullable eye-analysis provenance and aggregates to
+  `analysis` (`eye_evaluated_count`, `closed_eye_face_count`,
+  `max_eye_closure_confidence`, `eye_algorithm_version`, `eyes_at`) and
+  per-eye open probabilities to `face_observations`. Existing rows remain
+  unknown and are re-queued by the eye algorithm version.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
@@ -70,7 +75,7 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
   the v6 analysis rule. Added via `ALTER TABLE`, guarded by the same
   `PRAGMA table_info` probe as v6/v7
 
-## Principal tables (schema v18)
+## Principal tables (schema v19)
 
 ### sessions
 A shoot or imported body of work.
@@ -167,7 +172,10 @@ One row per analyzed photo (`photo_id` PK, FK cascade).
 sharpness, brightness, contrast, saturation (0–100), highlight_clipping,
 shadow_clipping (percent), is_monochrome/is_dark/is_bright (0/1),
 face_count, smile_count (nullable until local AI runs; face_count is
-written by the Sprint 9 face pass, smile_count is v0.2 and stays NULL),
+written by the face pass, smile_count is deferred and stays NULL),
+eye_evaluated_count, closed_eye_face_count, max_eye_closure_confidence,
+eye_algorithm_version, eyes_at (nullable until the Sprint 33 face-and-eye
+pass),
 perceptual_hash (hex, Sprint 8), algorithm_version (INTEGER, see below),
 analyzed_at, source_mtime (v6: RFC3339 mtime of the file the row was
 computed from; NULL on pre-v6 rows), faces_at (v10: the file mtime the

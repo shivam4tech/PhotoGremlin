@@ -124,6 +124,8 @@ const CAPTURE_DATETIME: FieldDef = FieldDef { kind: Kind::DateTime, expr: "p.cap
 const SESSION_ID: FieldDef = FieldDef { kind: Kind::Int, expr: "p.session_id", negate_bool: false };
 const FACES_PRESENT: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.face_count IS NOT NULL AND a.face_count > 0)", negate_bool: false };
 const FACE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.face_count", negate_bool: false };
+const CLOSED_EYE_CANDIDATE: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.closed_eye_face_count IS NOT NULL AND a.closed_eye_face_count > 0)", negate_bool: false };
+const EYE_CLOSURE_CONFIDENCE: FieldDef = FieldDef { kind: Kind::Real, expr: "a.max_eye_closure_confidence", negate_bool: false };
 const SMILING: FieldDef = FieldDef { kind: Kind::Bool, expr: "(a.smile_count IS NOT NULL AND a.smile_count > 0)", negate_bool: false };
 const SMILE_COUNT: FieldDef = FieldDef { kind: Kind::Int, expr: "a.smile_count", negate_bool: false };
 const RATING: FieldDef = FieldDef { kind: Kind::Int, expr: "p.rating", negate_bool: false };
@@ -165,6 +167,8 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "session_id" => &SESSION_ID,
         "faces_present" => &FACES_PRESENT,
         "face_count" => &FACE_COUNT,
+        "closed_eye_candidate" => &CLOSED_EYE_CANDIDATE,
+        "eye_closure_confidence" => &EYE_CLOSURE_CONFIDENCE,
         "smiling" => &SMILING,
         "smile_count" => &SMILE_COUNT,
         "rating" => &RATING,
@@ -594,6 +598,16 @@ mod tests {
             sql,
             "WHERE (a.face_count IS NOT NULL AND a.face_count > 0) = ?"
         );
+
+        let (sql, params) = build_conds(vec![
+            cond("closed_eye_candidate", "=", json!(true)),
+            cond("eye_closure_confidence", ">=", json!(80)),
+        ]);
+        assert_eq!(
+            sql,
+            "WHERE (a.closed_eye_face_count IS NOT NULL AND a.closed_eye_face_count > 0) = ? AND a.max_eye_closure_confidence >= ?"
+        );
+        assert_eq!(params, vec![SqlParam::Bool(true), SqlParam::Real(80.0)]);
     }
 
     #[test]

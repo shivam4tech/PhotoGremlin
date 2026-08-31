@@ -138,19 +138,19 @@ profiles are pure config, not ML.
 | Duplicate/burst grouping + best-of-group | ✅ Sprints 8+16 |
 | Face presence/count | ✅ YuNet (Sprint 9) |
 | Ratings/flags/labels write-back | ✅ Sprint 13 |
-| Eye-state (blink) | ❌ see below |
+| Eye-state candidates | ✅ OCEC-S per detected eye (Sprint 33); burst-context blink follows in Sprint 34 |
 | Blur *type* (motion vs defocus) | ❌ synthetic training, $0 |
 | Subject-region sharpness | ⚙️ existing sharpness inside YuNet box |
 | Smile/expression | ⏳ v0.2 item, pulled into culling scope later |
 | Genre profiles | ⚙️ config only |
 | Personalization | ⚙️ v2: learn from user's own marks |
 
-## Eye-state licensing decision (researched 2026-08-18)
+## Eye-state licensing decision (researched 2026-08-18, implemented Sprint 33)
 
 CEW and RT-BENE are research-only (unusable commercially). Viable paths:
 
-- **A (preferred): OCEC pretrained ONNX model** (PINTO model zoo) — MIT
-  licensed, same integration pattern as YuNet.
+- **A (selected): OCEC-S pretrained ONNX model** (PINTO model zoo) — MIT
+  licensed, embedded locally using the same runtime boundary as YuNet.
 - **B (fallback): train our own** on `MichalMlodawski/closed-open-eyes`
   (HuggingFace, ODC-By v1.0 — attribution-only, commercial-safe).
 - C: MediaPipe face-mesh landmarks + EAR threshold (Apache-2.0) — new runtime
@@ -166,7 +166,7 @@ CEW and RT-BENE are research-only (unusable commercially). Viable paths:
 
 ## Deferred sprint map
 
-- **Future cull engine**: models (blur-type CNN, eye-state via A/B) + Rust core:
+- **Future cull engine**: models (blur-type CNN; eye state is now available) + Rust core:
   group → weighted score → rank → buckets → write ratings/labels (never
   delete). Genre profiles as config.
 - **Future assisted review UI**: genre picker, strictness sliders, survey mode,
