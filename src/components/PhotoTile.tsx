@@ -77,6 +77,24 @@ export function PhotoTile({
   }, [photo.id, photo.extension]);
 
   const dims = photo.width && photo.height ? `${photo.width}×${photo.height}` : photo.extension.toUpperCase();
+  const captureChecks = [
+    photo.sharpness != null && photo.sharpness < 40
+      ? `Sharpness ${Math.round(photo.sharpness)}`
+      : null,
+    photo.highlight_clipping != null && photo.highlight_clipping >= 5
+      ? `Highlights ${photo.highlight_clipping.toFixed(1)}%`
+      : null,
+    photo.shadow_clipping != null && photo.shadow_clipping >= 5
+      ? `Shadows ${photo.shadow_clipping.toFixed(1)}%`
+      : null,
+    (photo.closed_eye_face_count ?? 0) > 0
+      ? `Closed-eye candidate${
+          photo.max_eye_closure_confidence == null
+            ? ""
+            : ` ${Math.round(photo.max_eye_closure_confidence)}%`
+        }`
+      : null,
+  ].filter((check): check is string => check !== null);
 
   const tileClass =
     `tile` +
@@ -100,6 +118,13 @@ export function PhotoTile({
         )}
         {state.kind === "placeholder" && <div className="tile-ph">{state.msg}</div>}
         {state.kind === "error" && <div className="tile-ph tile-ph-err">{state.msg}</div>}
+        {captureChecks.length > 0 && (
+          <span className="tile-capture-checks" aria-label={`Capture checks: ${captureChecks.join(", ")}`}>
+            {captureChecks.map((check) => (
+              <span className="tile-capture-check" key={check}>{check}</span>
+            ))}
+          </span>
+        )}
         <span className="tile-label">
           <span className="tile-name" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {photo.filename}

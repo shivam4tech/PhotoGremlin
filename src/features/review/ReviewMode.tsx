@@ -59,8 +59,9 @@ function measurementLabel(full: PhotoFull | null): string | null {
   if (!full) return null;
   const parts: string[] = [];
   if (full.sharpness != null) parts.push(`sharpness ${Math.round(full.sharpness)}`);
-  if (full.highlight_clipping != null && full.highlight_clipping > 0.01) parts.push(`highlights ${(full.highlight_clipping * 100).toFixed(1)}%`);
-  if (full.shadow_clipping != null && full.shadow_clipping > 0.01) parts.push(`shadows ${(full.shadow_clipping * 100).toFixed(1)}%`);
+  if (full.highlight_clipping != null && full.highlight_clipping >= 5) parts.push(`highlights ${full.highlight_clipping.toFixed(1)}%`);
+  if (full.shadow_clipping != null && full.shadow_clipping >= 5) parts.push(`shadows ${full.shadow_clipping.toFixed(1)}%`);
+  if ((full.closed_eye_face_count ?? 0) > 0) parts.push(`closed-eye candidate${full.max_eye_closure_confidence == null ? "" : ` ${full.max_eye_closure_confidence.toFixed(0)}%`}`);
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 

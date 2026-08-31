@@ -193,9 +193,10 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
    `spawn_blocking`s the pass) / `stop_similarity`; `similarity-progress` +
    `similarity-complete` events carry the `SimilaritySummary { hashed, failed,
    similar_groups, burst_groups, elapsed_ms, cancelled }`.
-- `ml/` (Sprint 9) — local intelligence: face detection behind the
-  isolation boundary (see LOCAL_AI.md). The model (YuNet 2023mar, 232 KB,
-  Apache-2.0) is `include_bytes!`-ed into the binary; the ONNX Runtime is
+- `ml/` (Sprints 9 and 33) — local intelligence: face and eye-state detection
+  behind the isolation boundary (see LOCAL_AI.md). YuNet 2023mar (232 KB,
+  Apache-2.0) and OCEC-S (483 KB, MIT) are `include_bytes!`-ed into the binary;
+  the ONNX Runtime is
   dlopened from the system via ort in `load-dynamic` mode (pinned
   `ort = 2.0.0-rc.9` / `ort-sys = 2.0.0-rc.9` — the details of why are in
   LOCAL_AI.md). `runtime_status()` probes the library with `libloading`
@@ -206,12 +207,13 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   f32) and `decode_detections` (offset-0 anchors, stride-scaled deltas,
   `exp` sizes, `sqrt(cls·obj)` score, NMS IoU 0.3, top-100) plus `iou`/`nms`.
   `run_faces_pass(db, progress, cancel)` = the pass: `faces_queue()` →
-  per-file guards (256 MB / 250 MP) → decode → one shared `ort::Session`
-  (`Send + Sync`, built once per pass) → `upsert_faces` + stamp. Sequential
+  per-file guards (256 MB / 250 MP) → decode → shared face and eye
+  `ort::Session`s (built once per pass) → atomic face observations plus eye
+  aggregates + stamps. Sequential
   by design (independent per-file work; the queue is small because it is
   incremental); cancellation between files.
 - `commands/ai.rs` — `ai_status` (enabled, runtime availability + friendly
-  note, model provenance/size, `faces_done`/`photo_count`), `set_ai_enabled`
+  note, both model provenances/sizes, `faces_done`/`eyes_done`/`photo_count`), `set_ai_enabled`
   (persists the preference; does not start anything), `start_faces`
   (claims the faces slot, `spawn_blocking`s the pass) / `stop_faces`;
   `faces-progress` + `faces-complete` events carry the `FaceSummary

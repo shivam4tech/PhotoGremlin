@@ -46,6 +46,9 @@ const RANGE_SPECS: readonly RangeSpec[] = [
   { field: "brightness", label: "Brightness", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
   { field: "sharpness", label: "Sharpness", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
   { field: "contrast", label: "Contrast", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
+  { field: "highlight_clipping", label: "Highlight clipping", values: MEASURED_VALUES, unit: "%", recordedNoun: "measured", missingNoun: "unmeasured" },
+  { field: "shadow_clipping", label: "Shadow clipping", values: MEASURED_VALUES, unit: "%", recordedNoun: "measured", missingNoun: "unmeasured" },
+  { field: "eye_closure_confidence", label: "Eye closure confidence", values: MEASURED_VALUES, unit: "%", recordedNoun: "evaluated", missingNoun: "not evaluated" },
   { field: "iso", label: "ISO", values: STANDARD_FILTER_STOPS.iso, recordedNoun: "recorded", missingNoun: "not recorded" },
   { field: "focal_length", label: "Focal length", values: STANDARD_FILTER_STOPS.focal_length, unit: " mm", recordedNoun: "recorded", missingNoun: "not recorded" },
 ];
@@ -266,7 +269,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
   }, [sessionId]);
 
   const measurementsUnavailable = statsReady
-    && (["brightness", "sharpness", "contrast"] as const)
+    && (["brightness", "sharpness", "contrast", "highlight_clipping", "shadow_clipping"] as const)
       .every((field) => stats[field]?.recorded_count === 0);
 
   return (
@@ -277,7 +280,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
       </div>
       {measurementsUnavailable && (
         <div className="quick-filter-note">
-          Brightness, sharpness and contrast become available after Analyze photos finishes.
+          Technical measurements become available after Analyze photos finishes. Eye confidence becomes available after the optional local face and eye pass.
         </div>
       )}
       <div className="range-filter-list">

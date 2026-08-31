@@ -23,10 +23,10 @@ ml::runtime_status()        -> Result<(), friendly reason>
 ml::run_faces_pass(db, progress, cancel) -> AppResult<FaceSummary>
 ```
 
-If the module is absent/disabled, `analysis.face_count` and `smile_count`
-remain `NULL`, face/smile statistics stay honest-"unavailable" (not 0,
-not "none"), and everything else is unaffected. The rest of the codebase
-never names `ort` and never knows the model exists.
+If the module is absent/disabled, `analysis.face_count`, the eye-state fields,
+and `smile_count` remain `NULL`; related statistics stay honestly unavailable
+(not 0, not "none"), and everything else is unaffected. The rest of the
+codebase never names `ort` and never knows the models exist.
 
 ## Scope by release
 
@@ -34,7 +34,7 @@ never names `ort` and never knows the model exists.
 |---|---|---|
 | face detection / face_count / faces_present | v0.1 (Sprint 9) | **shipped** — YuNet 2023mar (below) |
 | smile detection / smile_count | v0.1 → **v0.2 if not stable** | **deferred to v0.2**: no small, stable, permissively-licensed local smile model was available; the plan explicitly defers it |
-| eyes-open detection | v0.3 | planned |
+| eye-state candidates | Sprint 33 | **shipped** — OCEC-S, evaluated per detected eye |
 | face-appearance candidates | v0.1 | **shipped** — local detected-face crop dHash; review candidates only, never identity |
 | face grouping (identity) | v0.3 | planned; requires a separate local embedding model and explicit privacy review |
 | scene classification / scene_group filter | v0.2 (Sprint 17–18) | **shipped** — MobileNetV3-Large two-head ONNX trained on CC-BY Open Images corpus; see SCENE_CLASSIFICATION.md and UI_GUIDELINES.md for the honest-confidence display rules |
@@ -45,13 +45,14 @@ justified, it is deferred — never at the expense of core stability.
 
 ## Presenting results
 
-Faces and smiles are **technical measurements** shown alongside sharpness
-and clipping: "faces: 2", "smiling: 1". Filters: "contains faces",
-"smiling photographs". No "happy photo", no "good portrait".
+Faces, eye state and smiles are **technical measurements** shown alongside
+sharpness and clipping: "faces: 2", "closed-eye candidate: 92%", "smiling:
+1". Filters use the same measurable wording. No "bad photo", "happy photo",
+or "good portrait".
 
 ---
 
-# Implementation (Sprint 9)
+# Implementation (Sprints 9 and 33)
 
 ## Model
 
@@ -66,6 +67,16 @@ the binary without changing its size character.
 - SHA-256: `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4`
 - Settings discloses the name, license and size (the "Local intelligence"
   card). The hash is pinned here as the integrity record.
+
+**OCEC-S** — the small Open/Closed Eye Classification model from PINTO0309's
+OCEC release, MIT licensed. It is embedded beside YuNet and uses YuNet's eye
+landmarks; it does not introduce a second image decode.
+
+- Embedded from `src-tauri/models/ocec_s.onnx` via `include_bytes!`.
+- Size: **494,914 bytes**.
+- SHA-256: `9a346a08b256ad70725044cd2aa582858e108c6f45d42a9c3415afc604ba9b64`.
+- Attribution and the complete MIT text are in
+  `src-tauri/models/OCEC_LICENSE.txt`.
 
 ## Runtime: ONNX Runtime via `libloading`
 
@@ -129,8 +140,8 @@ is immaterial).
    rejects other sizes — so the whole pipeline is pinned to it.
 2. **Outputs:** three detection scales (feature maps 80², 40², 20²;
    strides 8, 16, 32), each with objectness `obj`, face classification
-   `cls`, box deltas `bbox (dx,dy,dw,dh)` and keypoints `kps` (decoded as
-   part of the pipeline but not stored — v0.1 counts faces).
+   `cls`, box deltas `bbox (dx,dy,dw,dh)` and keypoints `kps`. The two eye
+   keypoints are back-mapped with each face box for the local eye pass.
 3. **Decode** (the official libfacedetection math, not a re-derivation):
    anchors sit at **cell corners** (`ax = c·stride`, `ay = r·stride`,
    offset 0); center = `delta·stride + anchor`; size = `exp(delta)·stride`;
@@ -149,6 +160,13 @@ is immaterial).
    face pixel or identity embedding is stored. The similarity pass compares
    these hashes only within the active project and presents matches for review
    as “matching face appearances,” never as a named person.
+7. **Eye state:** around each YuNet eye landmark, a crop 72% of the inter-eye
+   distance wide and 65% as high is resized to **40×24**, kept RGB, normalized
+   to 0–1, and laid out CHW for OCEC-S (`images` → `prob_open`). An eye is
+   confidently open at probability ≥ 0.8 and confidently closed at ≤ 0.2;
+   the middle range is uncertain. A face becomes a closed-eye candidate only
+   when both eyes are confidently closed. The photo-level confidence is the
+   maximum `(1 - max(left, right)) × 100` across those candidate faces.
 
 Constants live in `src-tauri/src/ml/mod.rs` (`INPUT_SIZE`, `MEAN_BGR`,
 `FACE_SCORE_THRESHOLD`, `FACE_NMS_THRESHOLD`, `FACE_TOP_K`, `STRIDES`) and
@@ -156,10 +174,12 @@ are pinned by unit tests, including the decode formula itself.
 
 ## Incremental rule + guards
 
-Mirrors the similarity pass, on `analysis.faces_at`:
+Mirrors the similarity pass, on `analysis.faces_at` and the eye algorithm
+version:
 
-- `faces_queue()` = decodable photos where `face_count IS NULL`, or
-  `file_mtime` is newer than the `faces_at` stamp (captured-time order).
+- `faces_queue()` = decodable photos where `face_count IS NULL`, the file is
+  newer than `faces_at`, or the stored eye algorithm version is absent/stale
+  (captured-time order).
 - A run re-detects only those; a re-run over an unchanged library is a
   no-op (integration-tested).
 - **Guards** (v0.1 keeps them simple and documented):
@@ -173,11 +193,13 @@ Mirrors the similarity pass, on `analysis.faces_at`:
 
 ## What is stored, and how it coexists with analysis
 
-- `analysis.face_count` (the count) + `analysis.faces_at` (v10: the file
-  mtime the count was computed from).
-- `face_observations(photo_id, face_index, appearance_hash, source_mtime)`
-  (v17): replaced transactionally with each face result so changed files have
-  no stale face-appearance candidates.
+- `analysis.face_count` + `analysis.faces_at`, and
+  `eye_evaluated_count`, `closed_eye_face_count`,
+  `max_eye_closure_confidence`, `eye_algorithm_version`, and `eyes_at` (v19).
+- `face_observations(photo_id, face_index, appearance_hash, source_mtime,
+  left_eye_open_prob, right_eye_open_prob)` (v17/v19): replaced
+  transactionally with each face result so changed files have no stale
+  appearance or eye-state measurements.
 - A photo that has faces but no measurements yet gets a **face-only
   analysis row**: the face pass must be able to store a count without
   fabricating any measurement. Its `sharpness`/… columns stay `NULL` until
@@ -185,15 +207,14 @@ Mirrors the similarity pass, on `analysis.faces_at`:
   columns and **never clobbers `face_count`/`faces_at`** (integration-
   tested), and the NULL-safe `source_mtime` comparison means a face-only
   row re-enters the analysis queue automatically.
-- `DbStatus.faces_done` (count of rows with `face_count IS NOT NULL`) feeds
-  Settings and the status bar.
+- `DbStatus.faces_done` and `eyes_done` feed Settings and the status bar.
 - **Smile detection (v0.2):** `smile_count` stays `NULL` in v0.1 and
   statistics keep reporting "unavailable" — never 0, never "none".
 
 ## Commands, events, settings
 
-- `ai_status` → `{ enabled, runtime_available, runtime_note, model,
-  model_bytes, faces_done, photo_count }` (the Settings card).
+- `ai_status` reports both embedded model names and sizes plus
+  `faces_done`, `eyes_done`, and `photo_count` (the Settings card).
 - `set_ai_enabled(bool)` — persists the preference (`app_settings` key
   `ai_enabled`, **off by default**). Turning it on starts nothing by itself.
 - `start_faces` / `stop_faces` — claim the **faces** job slot (separate
@@ -220,8 +241,9 @@ Mirrors the similarity pass, on `analysis.faces_at`:
   `facesProgress`, `facesSummary`.
 - Settings → **"Local intelligence"** card (`views/SettingsView.tsx`):
   on/off toggle (disabled + explained when the runtime is missing), runtime
-  line, model provenance + embedded size, "N of M photographs checked for
-  faces", run-now / stop buttons with live progress, last-pass summary, and
+  line, both model provenances + embedded sizes, "N of M photographs checked
+  for faces and eye state", run-now / stop buttons with live progress, and
+  a last-pass summary including evaluated eyes and closed-eye candidates, plus
   one example error when files failed. Pure wording helpers live in
   `src/features/settings/ai.ts` (unit-tested in
   `src/tests/settingsAi.test.ts`); the language is factual
@@ -231,7 +253,8 @@ Mirrors the similarity pass, on `analysis.faces_at`:
 
 ## Tests
 
-- **Unit (Rust, `ml::tests`):** blob layout (CHW/BGR/mean), the decode
+- **Unit (Rust, `ml::tests`):** face blob layout (CHW/BGR/mean), eye blob
+  layout (40×24, CHW/RGB/0–1), eye thresholds, the decode
   formula (offset-0 anchors, stride-scaled deltas, `exp` sizes, `sqrt`
   score), sub-threshold rejection, NMS suppression + determinism, IoU
   bounds, runtime-status consistency.
@@ -257,3 +280,4 @@ Mirrors the similarity pass, on `analysis.faces_at`:
 - GPU execution providers (ROCm/CUDA/Metal): CPU-inference parity across
   three desktop OSes first; providers are an ort flag away later.
 - Identity / clustering (→ v0.3).
+- Contextual blink inference across neighboring burst frames (Sprint 34).

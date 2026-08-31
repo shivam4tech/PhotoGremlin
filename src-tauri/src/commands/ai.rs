@@ -19,6 +19,7 @@ use crate::state::{AppState, Job};
 
 /// The shipped local model, reported as-is for transparency.
 const MODEL_NAME: &str = "YuNet 2023mar (OpenCV Zoo, Apache-2.0)";
+const EYE_MODEL_NAME: &str = "OCEC-S eye state (PINTO0309, MIT)";
 
 /// One row of the Settings "Local intelligence" card.
 #[derive(Debug, serde::Serialize)]
@@ -31,8 +32,11 @@ pub struct AiStatus {
     pub runtime_note: Option<String>,
     pub model: String,
     pub model_bytes: usize,
+    pub eye_model: String,
+    pub eye_model_bytes: usize,
     /// Photos with a stored face result / photos in the library.
     pub faces_done: i64,
+    pub eyes_done: i64,
     /// Scene model (Sprint 18): name, size, and progress line.
     pub scene_model: String,
     pub scene_model_bytes: usize,
@@ -60,7 +64,10 @@ pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
         runtime_note,
         model: MODEL_NAME.to_string(),
         model_bytes: ml::model_bytes(),
+        eye_model: EYE_MODEL_NAME.to_string(),
+        eye_model_bytes: ml::eye_model_bytes(),
         faces_done: status.faces_done,
+        eyes_done: status.eyes_done,
         scene_model: ml::scene::SCENE_MODEL_NAME.to_string(),
         scene_model_bytes: ml::scene::SCENE_MODEL.len(),
         scenes_done: status.scenes_done,

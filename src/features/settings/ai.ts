@@ -28,6 +28,17 @@ export function formatFacesProgressLine(status: AiStatus): string {
   return `${status.faces_done.toLocaleString()} of ${status.photo_count.toLocaleString()} photographs checked for faces.`;
 }
 
+/** Eye-state results are produced by the same local pass as face counts. */
+export function formatEyesProgressLine(status: AiStatus): string {
+  if (status.photo_count === 0) return "No photographs in the library yet.";
+  if (status.eyes_done === 0) {
+    return `${status.photo_count.toLocaleString()} photograph${
+      status.photo_count === 1 ? "" : "s"
+    } in the library, none checked for eye state yet.`;
+  }
+  return `${status.eyes_done.toLocaleString()} of ${status.photo_count.toLocaleString()} photographs checked for eye state.`;
+}
+
 /** One line summarising the last face pass. */
 export function formatFaceSummaryLine(summary: FaceSummary): string {
   const bits: string[] = [];
@@ -37,9 +48,13 @@ export function formatFaceSummaryLine(summary: FaceSummary): string {
     );
   }
   bits.push(`${summary.with_faces.toLocaleString()} with ${summary.with_faces === 1 ? "a face" : "faces"}`);
+  bits.push(`${summary.eyes_evaluated.toLocaleString()} eyes evaluated`);
+  if (summary.closed_eye_faces > 0) {
+    bits.push(`${summary.closed_eye_faces.toLocaleString()} closed-eye face candidate${summary.closed_eye_faces === 1 ? "" : "s"}`);
+  }
   if (summary.failed > 0) bits.push(`${summary.failed.toLocaleString()} unreadable`);
   bits.push(`${(summary.elapsed_ms / 1000).toFixed(1)}s`);
-  return (summary.cancelled ? "Face detection stopped — " : "Face detection complete — ") +
+  return (summary.cancelled ? "Face and eye-state analysis stopped — " : "Face and eye-state analysis complete — ") +
     bits.join(", ") +
     ".";
 }

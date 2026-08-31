@@ -25,6 +25,8 @@ export const FILTER_FIELDS: FieldDef[] = [
   { field: "saturation", label: "Saturation", kind: "real", area: "Technical" },
   { field: "highlight_clipping", label: "Highlight clipping", kind: "real", area: "Technical" },
   { field: "shadow_clipping", label: "Shadow clipping", kind: "real", area: "Technical" },
+  { field: "eye_closure_confidence", label: "Eye closure confidence", kind: "real", area: "Faces & eyes (local models)" },
+  { field: "closed_eye_candidate", label: "Closed-eye candidate", kind: "bool", area: "Faces & eyes (local models)" },
   { field: "monochrome", label: "Monochrome", kind: "bool", area: "Visual" },
   { field: "color", label: "Color", kind: "bool", area: "Visual" },
   { field: "dark", label: "Dark photo", kind: "bool", area: "Visual" },
@@ -101,6 +103,9 @@ export type QuickRangeField =
   | "brightness"
   | "sharpness"
   | "contrast"
+  | "highlight_clipping"
+  | "shadow_clipping"
+  | "eye_closure_confidence"
   | "iso"
   | "focal_length";
 
@@ -108,6 +113,9 @@ export const QUICK_RANGE_FIELDS: readonly QuickRangeField[] = [
   "brightness",
   "sharpness",
   "contrast",
+  "highlight_clipping",
+  "shadow_clipping",
+  "eye_closure_confidence",
   "iso",
   "focal_length",
 ];
@@ -133,6 +141,30 @@ export interface QuickFilterPreset {
 }
 
 export const QUICK_FILTER_PRESETS: readonly QuickFilterPreset[] = [
+  {
+    id: "potentially-soft",
+    label: "Potentially soft",
+    condition: { field: "sharpness", operator: "<", value: 40 },
+    exclusiveFields: ["sharpness"],
+  },
+  {
+    id: "highlight-clipping",
+    label: "Highlight clipping",
+    condition: { field: "highlight_clipping", operator: ">=", value: 5 },
+    exclusiveFields: ["highlight_clipping"],
+  },
+  {
+    id: "shadow-clipping",
+    label: "Shadow clipping",
+    condition: { field: "shadow_clipping", operator: ">=", value: 5 },
+    exclusiveFields: ["shadow_clipping"],
+  },
+  {
+    id: "closed-eye-candidate",
+    label: "Closed-eye candidate",
+    condition: { field: "closed_eye_candidate", operator: "=", value: true },
+    exclusiveFields: ["closed_eye_candidate"],
+  },
   {
     id: "monochrome",
     label: "Black & white",

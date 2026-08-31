@@ -13,10 +13,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 18;
+pub const CURRENT_SCHEMA_VERSION: i64 = 19;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
 pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
+
+/// Version of the local eye-state measurements stored by the face pass.
+pub const EYE_ALGORITHM_VERSION: i64 = 1;
 
 pub struct Db {
     conn: Mutex<Connection>,
@@ -428,6 +431,34 @@ impl Db {
             )
             .map_err(db_err("create review progress"))?;
 
+            // v19 (Sprint 33): measurable eye-state results from the optional
+            // local face pass. Nullable columns keep libraries analysed before
+            // this migration explicitly unknown until the pass runs again.
+            for (column, sql_type) in [
+                ("eye_evaluated_count", "INTEGER"),
+                ("closed_eye_face_count", "INTEGER"),
+                ("max_eye_closure_confidence", "REAL"),
+                ("eye_algorithm_version", "INTEGER"),
+                ("eyes_at", "TEXT"),
+            ] {
+                if !table_has_column(&conn, "analysis", column) {
+                    conn.execute(
+                        &format!("ALTER TABLE analysis ADD COLUMN {column} {sql_type}"),
+                        [],
+                    )
+                    .map_err(db_err("add eye analysis column"))?;
+                }
+            }
+            for column in ["left_eye_open_prob", "right_eye_open_prob"] {
+                if !table_has_column(&conn, "face_observations", column) {
+                    conn.execute(
+                        &format!("ALTER TABLE face_observations ADD COLUMN {column} REAL"),
+                        [],
+                    )
+                    .map_err(db_err("add eye observation column"))?;
+                }
+            }
+
             let current_version: i64 = conn
                 .query_row("SELECT COALESCE(MAX(version), 0) FROM schema_version", [], |r| {
                     r.get(0)
@@ -640,6 +671,22 @@ impl Db {
                 )
                 .map_err(db_err("count faces done"))?,
         };
+        let eyes_done: i64 = match active_sid {
+            Some(sid) => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis a JOIN photos p ON p.id = a.photo_id WHERE a.eye_algorithm_version IS NOT NULL AND p.session_id = ?1",
+                    params![sid],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count eye results"))?,
+            None => conn
+                .query_row(
+                    "SELECT COUNT(*) FROM analysis WHERE eye_algorithm_version IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(db_err("count eye results"))?,
+        };
         let scenes_done: i64 = match active_sid {
             Some(sid) => conn
                 .query_row(
@@ -664,6 +711,7 @@ impl Db {
             selected_count,
             rejected_count,
             faces_done,
+            eyes_done,
             scenes_done,
             schema_version: version,
         })
@@ -889,7 +937,9 @@ impl Db {
                         a.highlight_clipping, a.shadow_clipping, a.is_monochrome, a.is_dark,
                         a.is_bright, a.face_count, a.smile_count,
                         a.scene_coarse, a.scene_fine, a.scene_conf,
-                        a.perceptual_hash, a.algorithm_version, a.analyzed_at
+                        a.perceptual_hash, a.algorithm_version, a.analyzed_at,
+                        a.eye_evaluated_count, a.closed_eye_face_count,
+                        a.max_eye_closure_confidence, a.eye_algorithm_version, a.eyes_at
                  FROM photos p
                  LEFT JOIN analysis a ON a.photo_id = p.id
                  WHERE p.id = ?1",
@@ -940,6 +990,11 @@ impl Db {
                         perceptual_hash: r.get(41)?,
                         algorithm_version: r.get(42)?,
                         analyzed_at: r.get(43)?,
+                        eye_evaluated_count: r.get(44)?,
+                        closed_eye_face_count: r.get(45)?,
+                        max_eye_closure_confidence: r.get(46)?,
+                        eye_algorithm_version: r.get(47)?,
+                        eyes_at: r.get(48)?,
                     })
                 },
             )
@@ -1247,7 +1302,9 @@ pub fn upsert_exif(
             "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                     p.orientation, p.capture_datetime, p.session_id,
                     (a.photo_id IS NOT NULL) AS has_analysis,
-                    p.rating, p.flag, p.color_label
+                    p.rating, p.flag, p.color_label,
+                    a.sharpness, a.highlight_clipping, a.shadow_clipping,
+                    a.closed_eye_face_count, a.max_eye_closure_confidence
              {base} {where_sql}
              ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC
              LIMIT ? OFFSET ?"
@@ -1269,6 +1326,11 @@ pub fn upsert_exif(
                     rating: r.get(10)?,
                     flag: r.get::<_, i64>(11)? != 0,
                     color_label: r.get(12)?,
+                    sharpness: r.get(13)?,
+                    highlight_clipping: r.get(14)?,
+                    shadow_clipping: r.get(15)?,
+                    closed_eye_face_count: r.get(16)?,
+                    max_eye_closure_confidence: r.get(17)?,
                 })
             })
             .map_err(db_err("query filtered photos"))?;
@@ -1352,6 +1414,9 @@ pub fn upsert_exif(
             "sharpness" => "a.sharpness",
             "brightness" => "a.brightness",
             "contrast" => "a.contrast",
+            "highlight_clipping" => "a.highlight_clipping",
+            "shadow_clipping" => "a.shadow_clipping",
+            "eye_closure_confidence" => "a.max_eye_closure_confidence",
             "iso" => "p.iso",
             "focal_length" => "p.focal_length",
             _ => {
@@ -1388,7 +1453,9 @@ pub fn upsert_exif(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
                         (a.photo_id IS NOT NULL) AS has_analysis,
-                        p.rating, p.flag, p.color_label
+                        p.rating, p.flag, p.color_label,
+                        a.sharpness, a.highlight_clipping, a.shadow_clipping,
+                        a.closed_eye_face_count, a.max_eye_closure_confidence
                  FROM photos p LEFT JOIN analysis a ON a.photo_id = p.id
                  WHERE p.session_id = ?1
                  ORDER BY (p.capture_datetime IS NULL) ASC, p.capture_datetime ASC, p.id ASC",
@@ -1410,6 +1477,11 @@ pub fn upsert_exif(
                     rating: r.get(10)?,
                     flag: r.get::<_, i64>(11)? != 0,
                     color_label: r.get(12)?,
+                    sharpness: r.get(13)?,
+                    highlight_clipping: r.get(14)?,
+                    shadow_clipping: r.get(15)?,
+                    closed_eye_face_count: r.get(16)?,
+                    max_eye_closure_confidence: r.get(17)?,
                 })
             })
             .map_err(db_err("query review photos"))?;
@@ -2086,7 +2158,9 @@ pub fn set_review_progress(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
                         (a.photo_id IS NOT NULL) AS has_analysis,
-                        p.rating, p.flag, p.color_label
+                        p.rating, p.flag, p.color_label,
+                        a.sharpness, a.highlight_clipping, a.shadow_clipping,
+                        a.closed_eye_face_count, a.max_eye_closure_confidence
                  FROM collection_photos cp
                  JOIN photos p ON p.id = cp.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
@@ -2159,6 +2233,11 @@ pub fn set_review_progress(
             rating: r.get(10)?,
             flag: r.get::<_, i64>(11)? != 0,
             color_label: r.get(12)?,
+            sharpness: r.get(13)?,
+            highlight_clipping: r.get(14)?,
+            shadow_clipping: r.get(15)?,
+            closed_eye_face_count: r.get(16)?,
+            max_eye_closure_confidence: r.get(17)?,
         })
     }
 
@@ -2247,7 +2326,9 @@ pub fn set_review_progress(
                 "SELECT p.id, p.filename, p.extension, p.size_bytes, p.width, p.height,
                         p.orientation, p.capture_datetime, p.session_id,
                         (a.photo_id IS NOT NULL) AS has_analysis,
-                        p.rating, p.flag, p.color_label
+                        p.rating, p.flag, p.color_label,
+                        a.sharpness, a.highlight_clipping, a.shadow_clipping,
+                        a.closed_eye_face_count, a.max_eye_closure_confidence
                  FROM similarity_group_photos g
                  JOIN photos p ON p.id = g.photo_id
                  LEFT JOIN analysis a ON a.photo_id = p.id
@@ -2428,13 +2509,15 @@ pub fn set_review_progress(
                      WHERE p.session_id = ?1
                        AND p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
                        AND (a.face_count IS NULL
+                            OR a.eye_algorithm_version IS NULL
+                            OR a.eye_algorithm_version < ?2
                             OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
                                 AND a.faces_at < p.file_mtime))
                      ORDER BY (p.capture_datetime IS NULL) ASC,
                               COALESCE(p.capture_datetime, p.indexed_at), p.id",
                 )
                 .map_err(db_err("prepare faces queue"))?;
-            for row in stmt.query_map(params![sid], |r| {
+            for row in stmt.query_map(params![sid, EYE_ALGORITHM_VERSION], |r| {
                     Ok(FaceWork {
                         photo_id: r.get(0)?,
                         path: r.get(1)?,
@@ -2453,13 +2536,15 @@ pub fn set_review_progress(
                      LEFT JOIN analysis a ON a.photo_id = p.id
                      WHERE p.extension IN ('jpg', 'jpeg', 'png', 'webp', 'tif', 'tiff')
                        AND (a.face_count IS NULL
+                            OR a.eye_algorithm_version IS NULL
+                            OR a.eye_algorithm_version < ?1
                             OR (p.file_mtime IS NOT NULL AND a.faces_at IS NOT NULL
                                 AND a.faces_at < p.file_mtime))
                      ORDER BY (p.capture_datetime IS NULL) ASC,
                               COALESCE(p.capture_datetime, p.indexed_at), p.id",
                 )
                 .map_err(db_err("prepare faces queue"))?;
-            for row in stmt.query_map([], |r| {
+            for row in stmt.query_map(params![EYE_ALGORITHM_VERSION], |r| {
                     Ok(FaceWork {
                         photo_id: r.get(0)?,
                         path: r.get(1)?,
@@ -2580,7 +2665,7 @@ pub fn set_review_progress(
         face_count: i64,
         source_mtime: Option<&str>,
     ) -> AppResult<()> {
-        self.upsert_faces_with_observations(photo_id, face_count, &[], source_mtime)
+        self.upsert_faces_with_observations(photo_id, face_count, 0, 0, None, &[], source_mtime)
     }
 
     /// Store a face count and compact local appearance signatures together.
@@ -2591,27 +2676,56 @@ pub fn set_review_progress(
         &self,
         photo_id: i64,
         face_count: i64,
-        appearance_hashes: &[u64],
+        eye_evaluated_count: i64,
+        closed_eye_face_count: i64,
+        max_eye_closure_confidence: Option<f64>,
+        observations: &[FaceObservationInput],
         source_mtime: Option<&str>,
     ) -> AppResult<()> {
         let conn = self.lock()?;
         let tx = conn.unchecked_transaction().map_err(db_err("face observations tx"))?;
         tx.execute(
-            "INSERT INTO analysis (photo_id, face_count, faces_at, analyzed_at, algorithm_version)
-             VALUES (?1, ?2, ?3, ?4, 1)
+            "INSERT INTO analysis (
+                photo_id, face_count, faces_at, eye_evaluated_count,
+                closed_eye_face_count, max_eye_closure_confidence,
+                eye_algorithm_version, eyes_at, analyzed_at, algorithm_version
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8, 1)
              ON CONFLICT(photo_id) DO UPDATE SET
                 face_count = excluded.face_count,
-                faces_at = excluded.faces_at",
-            params![photo_id, face_count, source_mtime, crate::time::now_utc()],
+                faces_at = excluded.faces_at,
+                eye_evaluated_count = excluded.eye_evaluated_count,
+                closed_eye_face_count = excluded.closed_eye_face_count,
+                max_eye_closure_confidence = excluded.max_eye_closure_confidence,
+                eye_algorithm_version = excluded.eye_algorithm_version,
+                eyes_at = excluded.eyes_at",
+            params![
+                photo_id,
+                face_count,
+                source_mtime,
+                eye_evaluated_count,
+                closed_eye_face_count,
+                max_eye_closure_confidence,
+                EYE_ALGORITHM_VERSION,
+                crate::time::now_utc()
+            ],
         )
         .map_err(db_err("upsert faces"))?;
         tx.execute("DELETE FROM face_observations WHERE photo_id = ?1", [photo_id])
             .map_err(db_err("clear face observations"))?;
-        for (face_index, hash) in appearance_hashes.iter().enumerate() {
+        for (face_index, observation) in observations.iter().enumerate() {
             tx.execute(
-                "INSERT INTO face_observations (photo_id, face_index, appearance_hash, source_mtime)
-                 VALUES (?1, ?2, ?3, ?4)",
-                params![photo_id, face_index as i64, *hash as i64, source_mtime],
+                "INSERT INTO face_observations (
+                    photo_id, face_index, appearance_hash, source_mtime,
+                    left_eye_open_prob, right_eye_open_prob
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    photo_id,
+                    face_index as i64,
+                    observation.appearance_hash as i64,
+                    source_mtime,
+                    observation.left_eye_open_prob,
+                    observation.right_eye_open_prob
+                ],
             )
             .map_err(db_err("insert face observation"))?;
         }
@@ -2710,6 +2824,14 @@ pub struct FaceWork {
     pub file_mtime: Option<String>,
 }
 
+/// Compact per-face measurements stored by the unified local face/eye pass.
+#[derive(Debug, Clone)]
+pub struct FaceObservationInput {
+    pub appearance_hash: u64,
+    pub left_eye_open_prob: Option<f64>,
+    pub right_eye_open_prob: Option<f64>,
+}
+
 /// One queued unit of scene-classification work (Sprint 18): a decodable
 /// photo missing a scene result, or whose file changed since the last run.
 pub struct SceneWork {
@@ -2758,6 +2880,8 @@ pub struct DbStatus {
     pub rejected_count: i64,
     /// Photos with a local-AI face result (Sprint 9; `face_count` set).
     pub faces_done: i64,
+    /// Photos evaluated by the local eye-state model.
+    pub eyes_done: i64,
     /// Photos with a scene-classification result (Sprint 18).
     pub scenes_done: i64,
     pub schema_version: i64,
@@ -2855,6 +2979,11 @@ pub struct PhotoSummary {
     pub rating: Option<i64>,
     pub flag: bool,
     pub color_label: Option<String>,
+    pub sharpness: Option<f64>,
+    pub highlight_clipping: Option<f64>,
+    pub shadow_clipping: Option<f64>,
+    pub closed_eye_face_count: Option<i64>,
+    pub max_eye_closure_confidence: Option<f64>,
 }
 
 /// `PhotoPage` is what `list_photos` returns over IPC.
@@ -2951,6 +3080,11 @@ pub struct PhotoFull {
     pub is_bright: bool,
     pub face_count: Option<i64>,
     pub smile_count: Option<i64>,
+    pub eye_evaluated_count: Option<i64>,
+    pub closed_eye_face_count: Option<i64>,
+    pub max_eye_closure_confidence: Option<f64>,
+    pub eye_algorithm_version: Option<i64>,
+    pub eyes_at: Option<String>,
     pub scene_coarse: Option<String>,
     pub scene_fine: Option<String>,
     pub scene_conf: Option<f64>,
@@ -3024,6 +3158,7 @@ mod tests {
             "collections",
             "collection_photos",
             "file_operations",
+            "face_observations",
             "photos",
             "schema_version",
             "sessions",
@@ -3032,6 +3167,27 @@ mod tests {
             "similarity_group_photos",
         ] {
             assert!(tables.contains(&expected.to_string()), "missing table {expected}");
+        }
+        {
+            let conn = db.lock().unwrap();
+            for column in [
+                "eye_evaluated_count",
+                "closed_eye_face_count",
+                "max_eye_closure_confidence",
+                "eye_algorithm_version",
+                "eyes_at",
+            ] {
+                assert!(
+                    table_has_column(&conn, "analysis", column),
+                    "analysis is missing {column}"
+                );
+            }
+            for column in ["left_eye_open_prob", "right_eye_open_prob"] {
+                assert!(
+                    table_has_column(&conn, "face_observations", column),
+                    "face_observations is missing {column}"
+                );
+            }
         }
         let _ = std::fs::remove_file(&db_path);
         let _ = std::fs::remove_dir(&dir);

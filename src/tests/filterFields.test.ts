@@ -40,6 +40,8 @@ describe("filter registry", () => {
     expectField("saturation", "real", "Technical");
     expectField("highlight_clipping", "real", "Technical");
     expectField("shadow_clipping", "real", "Technical");
+    expectField("eye_closure_confidence", "real", "Faces & eyes (local models)");
+    expectField("closed_eye_candidate", "bool", "Faces & eyes (local models)");
     expectField("monochrome", "bool", "Visual");
     expectField("color", "bool", "Visual");
     expectField("orientation", "text", "Orientation");
@@ -294,6 +296,18 @@ describe("quick filter controls", () => {
     expect(isQuickFilterPresetActive(withDark, dark)).toBe(true);
     expect(toggleQuickFilterPreset(withDark, bright)).toEqual([iso, bright.condition]);
     expect(toggleQuickFilterPreset([iso, bright.condition], bright)).toEqual([iso]);
+  });
+
+  it("maps capture-check presets to measurable thresholds", () => {
+    const potentiallySoft = QUICK_FILTER_PRESETS.find((preset) => preset.id === "potentially-soft")!;
+    const highlights = QUICK_FILTER_PRESETS.find((preset) => preset.id === "highlight-clipping")!;
+    const shadows = QUICK_FILTER_PRESETS.find((preset) => preset.id === "shadow-clipping")!;
+    const closedEyes = QUICK_FILTER_PRESETS.find((preset) => preset.id === "closed-eye-candidate")!;
+
+    expect(potentiallySoft.condition).toEqual({ field: "sharpness", operator: "<", value: 40 });
+    expect(highlights.condition).toEqual({ field: "highlight_clipping", operator: ">=", value: 5 });
+    expect(shadows.condition).toEqual({ field: "shadow_clipping", operator: ">=", value: 5 });
+    expect(closedEyes.condition).toEqual({ field: "closed_eye_candidate", operator: "=", value: true });
   });
 
   it("uses the monochrome measurement for paired black-and-white and color views", () => {

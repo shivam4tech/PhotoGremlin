@@ -36,7 +36,7 @@ use ort::value::DynValue;
 
 pub mod scene;
 
-use crate::database::{Db, FaceWork};
+use crate::database::{Db, FaceObservationInput, FaceWork};
 use crate::error::{AppError, AppResult};
 use crate::events::ProgressPayload;
 
@@ -64,6 +64,14 @@ const MAX_REPORTED_ERRORS: usize = 20;
 /// and integrity hash pinned in docs/LOCAL_AI.md).
 const MODEL: &[u8] =
     include_bytes!("../../models/face_detection_yunet_2023mar.onnx");
+
+/// OCEC-S eye-state classifier (MIT), embedded for local-only inference.
+/// It consumes a 40×24 RGB eye crop and emits the probability that it is open.
+const EYE_MODEL: &[u8] = include_bytes!("../../models/ocec_s.onnx");
+const EYE_INPUT_W: u32 = 40;
+const EYE_INPUT_H: u32 = 24;
+pub const EYE_OPEN_THRESHOLD: f32 = 0.8;
+pub const EYE_CLOSED_THRESHOLD: f32 = 0.2;
 
 /// Candidate ONNX Runtime library names, highest priority first. The
 /// canonical soname comes first; on Linux some installs ship only the
@@ -163,6 +171,10 @@ pub fn model_bytes() -> usize {
     MODEL.len()
 }
 
+pub fn eye_model_bytes() -> usize {
+    EYE_MODEL.len()
+}
+
 /// One detected face (x1, y1, w, h, score) in the model's 640² input space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FaceBox {
@@ -171,6 +183,9 @@ pub struct FaceBox {
     pub w: f32,
     pub h: f32,
     pub score: f32,
+    /// YuNet eye landmarks, in the same coordinate space as the box.
+    pub right_eye: (f32, f32),
+    pub left_eye: (f32, f32),
 }
 
 /// Compact local signature for one detected face crop. The crop includes a
@@ -243,6 +258,7 @@ pub fn decode_detections(
     obj: &[&[f32]],
     cls: &[&[f32]],
     bbox: &[&[f32]],
+    kps: &[&[f32]],
     score_threshold: f32,
     nms_threshold: f32,
     top_k: usize,
@@ -269,12 +285,21 @@ pub fn decode_detections(
                 let cy = b1 * s + ay;
                 let w = b2.exp() * s;
                 let h = b3.exp() * s;
+                let kp_base = i * 10;
+                let landmark = |point: usize| {
+                    (
+                        kps[k].get(kp_base + point * 2).copied().unwrap_or(0.0) * s + ax,
+                        kps[k].get(kp_base + point * 2 + 1).copied().unwrap_or(0.0) * s + ay,
+                    )
+                };
                 cand.push(FaceBox {
                     x1: cx - w / 2.0,
                     y1: cy - h / 2.0,
                     w,
                     h,
                     score,
+                    right_eye: landmark(0),
+                    left_eye: landmark(1),
                 });
             }
         }
@@ -339,15 +364,18 @@ impl FaceDetector {
         let mut obj: Vec<Vec<f32>> = vec![Vec::new(); 3];
         let mut cls: Vec<Vec<f32>> = vec![Vec::new(); 3];
         let mut bbox: Vec<Vec<f32>> = vec![Vec::new(); 3];
+        let mut kps: Vec<Vec<f32>> = vec![Vec::new(); 3];
         for (k, stride) in STRIDES.iter().enumerate() {
             obj[k] = head(&format!("obj_{stride}"))?;
             cls[k] = head(&format!("cls_{stride}"))?;
             bbox[k] = head(&format!("bbox_{stride}"))?;
+            kps[k] = head(&format!("kps_{stride}"))?;
         }
         let boxes = decode_detections(
             &[&obj[0], &obj[1], &obj[2]],
             &[&cls[0], &cls[1], &cls[2]],
             &[&bbox[0], &bbox[1], &bbox[2]],
+            &[&kps[0], &kps[1], &kps[2]],
             FACE_SCORE_THRESHOLD,
             FACE_NMS_THRESHOLD,
             FACE_TOP_K,
@@ -363,8 +391,73 @@ impl FaceDetector {
                 w: b.w * sx,
                 h: b.h * sy,
                 score: b.score,
+                right_eye: (b.right_eye.0 * sx, b.right_eye.1 * sy),
+                left_eye: (b.left_eye.0 * sx, b.left_eye.1 * sy),
             })
             .collect())
+    }
+}
+
+/// One OCEC session shared by the pass. Images are still decoded only once;
+/// eye crops come from the RGB buffer already used by YuNet.
+struct EyeClassifier {
+    session: Session,
+}
+
+impl EyeClassifier {
+    fn new() -> AppResult<Self> {
+        let session = Session::builder()
+            .and_then(|b| b.commit_from_memory(EYE_MODEL))
+            .map_err(|e| AppError::operation(format!("the eye-state model could not be loaded: {e}")))?;
+        Ok(Self { session })
+    }
+
+    fn probability_open(&self, rgb: &RgbImage, center: (f32, f32), crop_w: f32) -> AppResult<Option<f32>> {
+        let crop_h = crop_w * 0.65;
+        let left = (center.0 - crop_w / 2.0).max(0.0).floor() as u32;
+        let top = (center.1 - crop_h / 2.0).max(0.0).floor() as u32;
+        let right = (center.0 + crop_w / 2.0).min(rgb.width() as f32).ceil() as u32;
+        let bottom = (center.1 + crop_h / 2.0).min(rgb.height() as f32).ceil() as u32;
+        let width = right.saturating_sub(left);
+        let height = bottom.saturating_sub(top);
+        if width < 4 || height < 4 {
+            return Ok(None);
+        }
+        let crop = crop_imm(rgb, left, top, width, height).to_image();
+        let resized = resize(&crop, EYE_INPUT_W, EYE_INPUT_H, FilterType::Triangle);
+        let plane = (EYE_INPUT_W * EYE_INPUT_H) as usize;
+        let mut blob = vec![0.0f32; plane * 3];
+        for (i, px) in resized.pixels().enumerate() {
+            blob[i] = px[0] as f32 / 255.0;
+            blob[plane + i] = px[1] as f32 / 255.0;
+            blob[plane * 2 + i] = px[2] as f32 / 255.0;
+        }
+        let shape = vec![1_i64, 3, EYE_INPUT_H as i64, EYE_INPUT_W as i64];
+        let input: DynValue = (shape, blob.as_slice())
+            .try_into()
+            .map_err(|e: ort::Error| AppError::operation(format!("eye model input failed: {e}")))?;
+        let inputs = ort::inputs![input]
+            .map_err(|e| AppError::operation(format!("eye model input failed: {e}")))?;
+        let outputs = self.session.run(inputs)
+            .map_err(|e| AppError::operation(format!("eye-state inference failed: {e}")))?;
+        let (_, values) = outputs["prob_open"]
+            .try_extract_raw_tensor::<f32>()
+            .map_err(|e| AppError::operation(format!("reading eye-state result failed: {e}")))?;
+        Ok(values.first().copied().map(|p| p.clamp(0.0, 1.0)))
+    }
+
+    fn face_probabilities(&self, rgb: &RgbImage, face: FaceBox) -> AppResult<(Option<f32>, Option<f32>)> {
+        let dx = face.left_eye.0 - face.right_eye.0;
+        let dy = face.left_eye.1 - face.right_eye.1;
+        let inter_eye = (dx * dx + dy * dy).sqrt();
+        if !inter_eye.is_finite() || inter_eye < 6.0 {
+            return Ok((None, None));
+        }
+        let crop_w = (inter_eye * 0.72).max(8.0);
+        Ok((
+            self.probability_open(rgb, face.left_eye, crop_w)?,
+            self.probability_open(rgb, face.right_eye, crop_w)?,
+        ))
     }
 }
 
@@ -375,6 +468,10 @@ pub struct FaceSummary {
     pub processed: usize,
     /// Photos of those with ≥ 1 detected face.
     pub with_faces: usize,
+    /// Individual eyes that produced a valid local probability.
+    pub eyes_evaluated: usize,
+    /// Faces for which both evaluated eyes were confidently closed.
+    pub closed_eye_faces: usize,
     /// Photos that failed (missing, unreadable, inference error).
     pub failed: usize,
     /// True when the user stopped the run before the queue drained.
@@ -398,6 +495,7 @@ pub fn run_faces_pass(
     // Fail fast with the friendly runtime note (nothing half-processed).
     ensure_runtime()?;
     let detector = FaceDetector::new(MODEL)?;
+    let eye_classifier = EyeClassifier::new()?;
 
     let queue = db.faces_queue()?;
     let total = queue.len();
@@ -406,6 +504,8 @@ pub fn run_faces_pass(
         return Ok(FaceSummary {
             processed: 0,
             with_faces: 0,
+            eyes_evaluated: 0,
+            closed_eye_faces: 0,
             failed: 0,
             cancelled: false,
             elapsed_ms: 0,
@@ -416,6 +516,8 @@ pub fn run_faces_pass(
 
     let mut processed = 0usize;
     let mut with_faces = 0usize;
+    let mut eyes_evaluated = 0usize;
+    let mut closed_eye_faces = 0usize;
     let mut failed = 0usize;
     let mut cancelled = false;
     let errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -429,12 +531,14 @@ pub fn run_faces_pass(
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_default();
-        match process_one(&db, &detector, w) {
-            Ok(count) => {
+        match process_one(&db, &detector, &eye_classifier, w) {
+            Ok(outcome) => {
                 processed += 1;
-                if count > 0 {
+                if outcome.face_count > 0 {
                     with_faces += 1;
                 }
+                eyes_evaluated += outcome.eyes_evaluated;
+                closed_eye_faces += outcome.closed_eye_faces;
             }
             Err(friendly) => {
                 failed += 1;
@@ -462,6 +566,8 @@ pub fn run_faces_pass(
         total,
         processed,
         with_faces,
+        eyes_evaluated,
+        closed_eye_faces,
         failed,
         cancelled,
         "face pass finished"
@@ -469,6 +575,8 @@ pub fn run_faces_pass(
     Ok(FaceSummary {
         processed,
         with_faces,
+        eyes_evaluated,
+        closed_eye_faces,
         failed,
         cancelled,
         elapsed_ms: started.elapsed().as_millis() as u64,
@@ -480,7 +588,13 @@ pub fn run_faces_pass(
 /// (counted + logged by the caller) on any failure; oversize/over-pixel
 /// files are stamped `face_count = 0` and count as processed (the metadata
 /// pass's "stamp it so the queue does not re-attempt forever" rule).
-fn process_one(db: &Db, det: &FaceDetector, w: &FaceWork) -> Result<u32, String> {
+struct FaceOutcome {
+    face_count: u32,
+    eyes_evaluated: usize,
+    closed_eye_faces: usize,
+}
+
+fn process_one(db: &Db, det: &FaceDetector, eyes: &EyeClassifier, w: &FaceWork) -> Result<FaceOutcome, String> {
     let path = Path::new(&w.path);
     let name = || {
         path.file_name()
@@ -504,17 +618,44 @@ fn process_one(db: &Db, det: &FaceDetector, w: &FaceWork) -> Result<u32, String>
     let boxes = det
         .detect(&rgb, dw, dh)
         .map_err(|_| format!("{} — face detection failed", name()))?;
-    let signatures: Vec<u64> = boxes
-        .iter()
-        .filter_map(|face| face_appearance_hash(&rgb, *face))
-        .collect();
+    let mut observations = Vec::new();
+    let mut eyes_evaluated = 0usize;
+    let mut closed_eye_faces = 0usize;
+    let mut max_closure_confidence: Option<f64> = None;
+    for face in &boxes {
+        let (left, right) = eyes.face_probabilities(&rgb, *face)
+            .map_err(|_| format!("{} — eye-state analysis failed", name()))?;
+        eyes_evaluated += usize::from(left.is_some()) + usize::from(right.is_some());
+        if let (Some(l), Some(r)) = (left, right) {
+            if l <= EYE_CLOSED_THRESHOLD && r <= EYE_CLOSED_THRESHOLD {
+                closed_eye_faces += 1;
+                let confidence = (1.0 - l.max(r)) as f64 * 100.0;
+                max_closure_confidence = Some(max_closure_confidence.map_or(confidence, |old| old.max(confidence)));
+            }
+        }
+        if let Some(appearance_hash) = face_appearance_hash(&rgb, *face) {
+            observations.push(FaceObservationInput {
+                appearance_hash,
+                left_eye_open_prob: left.map(f64::from),
+                right_eye_open_prob: right.map(f64::from),
+            });
+        }
+    }
     let count = boxes.len() as u32;
-    db.upsert_faces_with_observations(w.photo_id, count as i64, &signatures, w.file_mtime.as_deref())
+    db.upsert_faces_with_observations(
+        w.photo_id,
+        count as i64,
+        eyes_evaluated as i64,
+        closed_eye_faces as i64,
+        max_closure_confidence,
+        &observations,
+        w.file_mtime.as_deref(),
+    )
         .map_err(|e| {
             tracing::error!(path = %w.path, error = %e, "face result store failed");
             format!("{} — could not store the result", name())
         })?;
-    Ok(count)
+    Ok(FaceOutcome { face_count: count, eyes_evaluated, closed_eye_faces })
 }
 
 fn read_rgb(path: &Path) -> image::ImageResult<RgbImage> {
@@ -528,14 +669,14 @@ fn read_rgb(path: &Path) -> image::ImageResult<RgbImage> {
 }
 
 /// Oversize/over-pixel: stamp `face_count = 0` and count as processed.
-fn guard_stamp(db: &Db, w: &FaceWork, note: &str) -> Result<u32, String> {
+fn guard_stamp(db: &Db, w: &FaceWork, note: &str) -> Result<FaceOutcome, String> {
     tracing::info!(photo = w.photo_id, %note, "face guard: stamped 0 faces");
     db.upsert_faces(w.photo_id, 0, w.file_mtime.as_deref())
         .map_err(|e| {
             tracing::error!(photo = w.photo_id, error = %e, "face guard stamp failed");
             format!("could not store the result")
         })?;
-    Ok(0)
+    Ok(FaceOutcome { face_count: 0, eyes_evaluated: 0, closed_eye_faces: 0 })
 }
 
 #[cfg(test)]
@@ -544,7 +685,15 @@ mod tests {
     use image::{ImageBuffer, Rgb};
 
     fn box_(x: f32, y: f32, w: f32, h: f32, s: f32) -> FaceBox {
-        FaceBox { x1: x, y1: y, w, h, score: s }
+        FaceBox {
+            x1: x,
+            y1: y,
+            w,
+            h,
+            score: s,
+            right_eye: (x + w * 0.35, y + h * 0.4),
+            left_eye: (x + w * 0.65, y + h * 0.4),
+        }
     }
 
     #[test]
@@ -585,6 +734,7 @@ mod tests {
             &[&zero8, &obj16, &zero32],
             &[&zero8, &cls16, &zero32],
             &[&vec![0.0f32; m8 * m8 * 4], &bbox16, &vec![0.0f32; m32 * m32 * 4]],
+            &[&[], &[], &[]],
             FACE_SCORE_THRESHOLD,
             FACE_NMS_THRESHOLD,
             FACE_TOP_K,
@@ -610,6 +760,7 @@ mod tests {
             &[&vec![0.5f32; m8 * m8], &[], &[]],
             &[&vec![0.5f32; m8 * m8], &[], &[]],
             &[&vec![0.0f32; m8 * m8 * 4], &vec![0.0f32; m16 * m16 * 4], &vec![0.0f32; m32 * m32 * 4]],
+            &[&[], &[], &[]],
             FACE_SCORE_THRESHOLD,
             FACE_NMS_THRESHOLD,
             FACE_TOP_K,
