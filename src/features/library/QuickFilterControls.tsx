@@ -64,11 +64,25 @@ function formatValue(value: number, unit = ""): string {
   return `${value.toLocaleString()}${unit}`;
 }
 
-function conditionSummary(condition: FilterCondition | undefined, missingNoun = "unmeasured"): string {
+function conditionSummary(condition: FilterCondition | undefined, spec: RangeSpec): string {
   if (!condition) return "Any";
-  if (condition.operator === "is-null") return `${missingNoun[0].toUpperCase()}${missingNoun.slice(1)} only`;
-  if (condition.operator === "not-null") return "Recorded only";
-  if (condition.operator === "between" || typeof condition.value === "number") return "Range active";
+  if (condition.operator === "is-null") {
+    return `${spec.missingNoun[0].toUpperCase()}${spec.missingNoun.slice(1)} only`;
+  }
+  if (condition.operator === "not-null") {
+    return `${spec.recordedNoun[0].toUpperCase()}${spec.recordedNoun.slice(1)} only`;
+  }
+  if (
+    condition.operator === "between"
+    && Array.isArray(condition.value)
+    && condition.value.length === 2
+    && condition.value.every((value) => typeof value === "number")
+  ) {
+    return `${formatValue(condition.value[0] as number, spec.unit)}–${formatValue(condition.value[1] as number, spec.unit)}`;
+  }
+  if (typeof condition.value === "number") {
+    return `${condition.operator} ${formatValue(condition.value, spec.unit)}`;
+  }
   return "Custom condition";
 }
 
@@ -98,6 +112,7 @@ function RangeFilterRow({
   const initialUpper = Math.max(initialLower, nearestValueIndex(spec.values, parsed.upper));
   const [lowerIndex, setLowerIndex] = useState(initialLower);
   const [upperIndex, setUpperIndex] = useState(initialUpper);
+  const [expanded, setExpanded] = useState(Boolean(condition));
   const [activeHandle, setActiveHandle] = useState<"lower" | "upper" | null>(null);
   const boundsRef = useRef({ lower: initialLower, upper: initialUpper });
   const lastCommitRef = useRef(JSON.stringify(condition ?? null));
@@ -154,20 +169,30 @@ function RangeFilterRow({
   const availability = stats
     ? `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
     : statsReady ? "Values unavailable" : "Checking local values…";
+  const detailId = `range-filter-${spec.field}`;
   return (
     <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
-      <div className="range-filter-heading">
-        <span>{spec.label}</span>
-        <span className={`range-filter-summary mono${condition ? " is-active" : ""}`}>
-          {conditionSummary(condition, spec.missingNoun)}
+      <button
+        type="button"
+        className="range-filter-heading"
+        aria-expanded={expanded}
+        aria-controls={detailId}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span className="range-filter-copy">
+          <strong>{spec.label}</strong>
+          <small title={availability}>{availability}</small>
         </span>
-      </div>
+        <span className="range-filter-state">
+          <span className={`range-filter-summary mono${condition ? " is-active" : ""}`}>
+            {conditionSummary(condition, spec)}
+          </span>
+          <span className="range-filter-chevron" aria-hidden="true">⌄</span>
+        </span>
+      </button>
 
-      <div className="range-filter-detail" id={`range-filter-${spec.field}`}>
-          <div className="range-filter-availability">
-            <span>{availability}</span>
-          </div>
-
+      {expanded && (
+        <div className="range-filter-detail" id={detailId}>
           <div
             className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}
             data-field={spec.field}
@@ -244,7 +269,8 @@ function RangeFilterRow({
               Reset to any
             </button>
           </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -252,7 +278,8 @@ function RangeFilterRow({
 export function QuickFilterControls({ draft, onChange, disabled, sessionId }: QuickFilterControlsProps) {
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
-  const hasActiveRange = QUICK_RANGE_FIELDS.some((field) => draft.some((condition) => condition.field === field));
+  const activeRangeCount = QUICK_RANGE_FIELDS.filter((field) => draft.some((condition) => condition.field === field)).length;
+  const hasActiveRange = activeRangeCount > 0;
   const [expanded, setExpanded] = useState(hasActiveRange);
 
   useEffect(() => {
@@ -289,7 +316,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
       >
         <span>
           <strong id="measured-filter-heading">Measured filters</strong>
-          <small>{hasActiveRange ? "A measured range is active" : "Brightness, sharpness, exposure and more"}</small>
+          <small>{hasActiveRange ? `${activeRangeCount} measured ${activeRangeCount === 1 ? "filter" : "filters"} active` : "Brightness, sharpness, exposure and more"}</small>
         </span>
         <span className="quick-filter-chevron" aria-hidden="true">⌄</span>
       </button>
