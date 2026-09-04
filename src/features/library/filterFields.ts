@@ -7,7 +7,24 @@
  */
 import type { Filter, FilterCondition } from "@/types/api";
 
-export type FieldKind = "real" | "int" | "text" | "bool" | "datetime";
+export type FieldKind = "real" | "int" | "text" | "bool" | "datetime" | "palette";
+
+export const PALETTE_COLORS = [
+  { id: "red", label: "Red" },
+  { id: "orange", label: "Orange" },
+  { id: "yellow", label: "Yellow" },
+  { id: "lime", label: "Lime" },
+  { id: "green", label: "Green" },
+  { id: "teal", label: "Teal" },
+  { id: "cyan", label: "Cyan" },
+  { id: "azure", label: "Azure" },
+  { id: "blue", label: "Blue" },
+  { id: "violet", label: "Violet" },
+  { id: "magenta", label: "Magenta" },
+  { id: "rose", label: "Rose" },
+] as const;
+
+export type PaletteColorId = (typeof PALETTE_COLORS)[number]["id"];
 
 export interface FieldDef {
   field: string;
@@ -32,6 +49,7 @@ export const FILTER_FIELDS: FieldDef[] = [
   { field: "color", label: "Color", kind: "bool", area: "Visual" },
   { field: "dark", label: "Dark photo", kind: "bool", area: "Visual" },
   { field: "bright", label: "Bright photo", kind: "bool", area: "Visual" },
+  { field: "palette_color", label: "Colors in frame", kind: "palette", area: "Visual" },
   {
     field: "orientation",
     label: "Orientation",
@@ -301,6 +319,35 @@ export function replaceFieldConditions(
   return replacement ? [...others, replacement] : others;
 }
 
+const PALETTE_COLOR_IDS = new Set<string>(PALETTE_COLORS.map((color) => color.id));
+
+/** Read a saved palette condition defensively, preserving the wheel's order. */
+export function selectedPaletteColors(conditions: FilterCondition[]): PaletteColorId[] {
+  const condition = conditions.find((item) => item.field === "palette_color");
+  if (condition?.operator !== "in" || !Array.isArray(condition.value)) return [];
+  const selected = new Set(
+    condition.value.filter((value): value is string => typeof value === "string"),
+  );
+  return PALETTE_COLORS.map((color) => color.id).filter((id) => selected.has(id));
+}
+
+/** Replace the palette as one OR-within-color condition. All other fields
+ * remain AND-combined by the existing filter envelope. */
+export function setPaletteColors(
+  conditions: FilterCondition[],
+  selected: readonly PaletteColorId[],
+): FilterCondition[] {
+  const requested = new Set(selected);
+  const ordered = PALETTE_COLORS.map((color) => color.id).filter((id) => requested.has(id));
+  return replaceFieldConditions(
+    conditions,
+    "palette_color",
+    ordered.length > 0
+      ? { field: "palette_color", operator: "in", value: ordered }
+      : null,
+  );
+}
+
 /** Toggle one exact condition while preserving every other field. Used by
  * compact workspace shortcuts such as Review views. */
 export function toggleExactFieldCondition(
@@ -354,6 +401,7 @@ export const OPS_BY_KIND: Record<FieldKind, OpDef[]> = {
     { op: "is-null", label: "not recorded" },
     { op: "not-null", label: "recorded" },
   ],
+  palette: [{ op: "in", label: "includes any" }],
 };
 
 const BOOL_PHRASES: Record<string, string> = {
@@ -396,6 +444,21 @@ export function buildCondition(
   const num = (s: string): number | null =>
     s.trim().length === 0 ? null : Number(s.trim());
   switch (def.kind) {
+    case "palette": {
+      if (op !== "in") return null;
+      const requested = raw
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.length > 0);
+      if (requested.length === 0 || requested.some((value) => !PALETTE_COLOR_IDS.has(value))) {
+        return null;
+      }
+      const unique = new Set(requested);
+      const ordered = PALETTE_COLORS.map((color) => color.id).filter((id) => unique.has(id));
+      return ordered.length > 0
+        ? { field, operator: "in", value: ordered }
+        : null;
+    }
     case "real": {
       if (op === "between") {
         const lo = num(raw);
@@ -486,6 +549,13 @@ export function buildCondition(
 export function chipLabel(c: FilterCondition): string {
   const def = FIELD_BY_NAME[c.field];
   const label = def ? def.label : c.field;
+  if (c.field === "palette_color" && c.operator === "in" && Array.isArray(c.value)) {
+    const values = c.value as unknown[];
+    const names = PALETTE_COLORS
+      .filter((color) => values.includes(color.id))
+      .map((color) => color.label);
+    return names.length > 0 ? `colors: ${names.join(" + ")}` : "colors in frame";
+  }
   if (c.operator === "is-null") return `${label.toLowerCase()}: not recorded`;
   if (c.operator === "not-null") return `${label.toLowerCase()}: recorded`;
   if (c.operator === "in") {

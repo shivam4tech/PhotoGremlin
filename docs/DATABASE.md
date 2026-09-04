@@ -12,7 +12,7 @@ legacy upgrade. See `CATALOG_RECOVERY.md`. Every file uses WAL mode,
 
 Version stored in `schema_version (version, applied_at)`. Migrations are
 idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
-(currently 20). Tests assert both expected-table presence and idempotency.
+(currently 21). Tests assert both expected-table presence and idempotency.
 
 - v1: core tables (sessions, photos, analysis, app_settings)
 - v2: collections
@@ -67,6 +67,11 @@ idempotent batches applied at startup up to `CURRENT_SCHEMA_VERSION`
 - v20 (Sprint 34): adds nullable `analysis.possible_blink`. It is a contextual
   burst measurement recomputed from current face/eye observations and adjacent
   frames; existing rows remain unknown until enough local evidence exists.
+- v21 (Sprint 35): adds nullable `analysis.color_signature INTEGER`.
+  The deterministic analysis pass stores a 12-bit HSV hue-presence mask for
+  local color exploration. Existing rows remain NULL and are re-queued by
+  analysis algorithm version 2, so missing analysis never masquerades as a
+  measured achromatic image.
 - v11 (Sprint 11): `photos.lens_make TEXT`, `photos.software TEXT`,
   `photos.metadata_source TEXT NOT NULL DEFAULT 'none'` — two further EXIF
   fields, and the provenance column recording where a photo's
@@ -174,6 +179,7 @@ One row per analyzed photo (`photo_id` PK, FK cascade).
 
 sharpness, brightness, contrast, saturation (0–100), highlight_clipping,
 shadow_clipping (percent), is_monochrome/is_dark/is_bright (0/1),
+color_signature (nullable 12-bit deterministic hue-presence mask, v21),
 face_count, smile_count (nullable until local AI runs; face_count is
 written by the face pass, smile_count is deferred and stays NULL),
 eye_evaluated_count, closed_eye_face_count, max_eye_closure_confidence,
@@ -185,7 +191,7 @@ computed from; NULL on pre-v6 rows), faces_at (v10: the file mtime the
 face pass stamped `face_count` from; NULL until it runs).
 
 **Versioning + incremental rule:** `algorithm_version` records which math
-produced the row (`ANALYSIS_ALGORITHM_VERSION`, currently 1); bumping it
+produced the row (`ANALYSIS_ALGORITHM_VERSION`, currently 2); bumping it
 makes every stale row re-analyzable. On top of that, `source_mtime` (v6)
 gives per-file incrementality: `analysis_queue` selects a photo iff it has
 no row, `algorithm_version` is older than the current constant, or

@@ -83,6 +83,8 @@ enum Kind {
     Int,
     Text,
     Bool,
+    /// A list of named hue regions compiled into a bitwise mask query.
+    Palette,
     /// Stored as TEXT; comparisons are lexicographic (all values are UTC
     /// RFC3339, so string order == time order).
     DateTime,
@@ -108,6 +110,7 @@ const HIGHLIGHT_CLIPPING: FieldDef = FieldDef { kind: Kind::Real, expr: "a.highl
 const SHADOW_CLIPPING: FieldDef = FieldDef { kind: Kind::Real, expr: "a.shadow_clipping", negate_bool: false };
 const MONOCHROME: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_monochrome", negate_bool: false };
 const COLOR: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_monochrome", negate_bool: true };
+const PALETTE_COLOR: FieldDef = FieldDef { kind: Kind::Palette, expr: "a.color_signature", negate_bool: false };
 const DARK: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_dark", negate_bool: false };
 const BRIGHT: FieldDef = FieldDef { kind: Kind::Bool, expr: "a.is_bright", negate_bool: false };
 const ORIENTATION: FieldDef = FieldDef { kind: Kind::Text, expr: "p.orientation", negate_bool: false };
@@ -154,6 +157,7 @@ fn field_def(name: &str) -> Option<&'static FieldDef> {
         "shadow_clipping" => &SHADOW_CLIPPING,
         "monochrome" => &MONOCHROME,
         "color" => &COLOR,
+        "palette_color" => &PALETTE_COLOR,
         "dark" => &DARK,
         "bright" => &BRIGHT,
         "orientation" => &ORIENTATION,
@@ -277,6 +281,7 @@ fn validate_operator(def: &FieldDef, cond: &FilterCondition) -> AppResult<()> {
         // Flags are derived data: true/false only. (NULL analysis rows never
         // match a flag — a photo we have not measured is not "monochrome".)
         Kind::Bool => &[CondOperator::Eq, CondOperator::Neq],
+        Kind::Palette => &[CondOperator::In],
         Kind::Text => &[
             CondOperator::Eq,
             CondOperator::Neq,
@@ -297,6 +302,44 @@ fn validate_operator(def: &FieldDef, cond: &FilterCondition) -> AppResult<()> {
 
 fn build_clause(def: &FieldDef, cond: &FilterCondition, params: &mut Vec<SqlParam>) -> AppResult<String> {
     let expr = def.expr;
+    if def.kind == Kind::Palette {
+        let arr = value_array(def, cond, "in", "a list of colors")?;
+        if arr.is_empty() || arr.len() > 12 {
+            return Err(AppError::validation(format!(
+                "field `{}`: `in` needs 1..=12 colors",
+                cond.field
+            )));
+        }
+        let mut mask = 0i64;
+        for value in arr {
+            let name = value.as_str().ok_or_else(|| {
+                AppError::validation(format!("field `{}` expects color names", cond.field))
+            })?;
+            let bit = match name {
+                "red" => 0,
+                "orange" => 1,
+                "yellow" => 2,
+                "lime" => 3,
+                "green" => 4,
+                "teal" => 5,
+                "cyan" => 6,
+                "azure" => 7,
+                "blue" => 8,
+                "violet" => 9,
+                "magenta" => 10,
+                "rose" => 11,
+                _ => {
+                    return Err(AppError::validation(format!(
+                        "field `{}` contains an unknown color `{name}`",
+                        cond.field
+                    )))
+                }
+            };
+            mask |= 1 << bit;
+        }
+        params.push(SqlParam::Int(mask));
+        return Ok(format!("({expr} & ?) != 0"));
+    }
     match cond.operator {
         CondOperator::IsNull => Ok(format!("{expr} IS NULL")),
         CondOperator::NotNull => Ok(format!("{expr} IS NOT NULL")),
@@ -405,6 +448,9 @@ fn coerce(def: &FieldDef, v: &serde_json::Value, cond: &FilterCondition) -> AppR
             }
             Ok(SqlParam::Text(s.to_string()))
         }
+        Kind::Palette => Err(AppError::validation(format!(
+            "field `{field}` expects a list of colors"
+        ))),
     }
 }
 
@@ -548,6 +594,26 @@ mod tests {
             params,
             vec![SqlParam::Text("Gr-1".into()), SqlParam::Text("Gr-33".into())]
         );
+    }
+
+    #[test]
+    fn palette_colors_compile_to_one_bitmask() {
+        let (sql, params) = build_conds(vec![cond(
+            "palette_color",
+            "in",
+            json!(["red", "blue", "magenta"]),
+        )]);
+        assert_eq!(sql, "WHERE (a.color_signature & ?) != 0");
+        assert_eq!(params, vec![SqlParam::Int((1 << 0) | (1 << 8) | (1 << 10))]);
+    }
+
+    #[test]
+    fn palette_colors_reject_unknown_names() {
+        let filter = Filter {
+            operator: Operator::And,
+            conditions: vec![cond("palette_color", "in", json!(["infrared"]))],
+        };
+        assert!(build_where(&filter).unwrap_err().to_string().contains("infrared"));
     }
 
     #[test]

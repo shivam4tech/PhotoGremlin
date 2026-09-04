@@ -34,6 +34,15 @@ pub const CONTRAST_SPREAD_SATURATION: f64 = 180.0;
 /// resolution or filter changes and bump ANALYSIS_ALGORITHM_VERSION.
 pub const SHARP_SIGMOID_MU: f64 = 3.5;
 pub const SHARP_SIGMOID_K: f64 = 0.6;
+/// The color explorer divides the hue circle into twelve 30-degree regions.
+/// A bit is set only when that hue occupies a meaningful portion of both the
+/// chromatic pixels and the whole image, which keeps tiny saturated details
+/// from dominating a result.
+pub const PALETTE_HUE_COUNT: usize = 12;
+pub const PALETTE_MIN_SATURATION: f64 = 0.20;
+pub const PALETTE_MIN_VALUE: f64 = 0.08;
+pub const PALETTE_MIN_CHROMATIC_SHARE: f64 = 0.04;
+pub const PALETTE_MIN_IMAGE_SHARE: f64 = 0.01;
 
 /// One photo's technical measurements. Stored 1:1 in the `analysis` table.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
@@ -53,6 +62,9 @@ pub struct Metrics {
     pub is_monochrome: bool,
     pub is_dark: bool,
     pub is_bright: bool,
+    /// Twelve-bit hue presence mask, starting with red and advancing around
+    /// the hue circle in 30-degree steps. Zero means no meaningful color.
+    pub color_signature: u16,
 }
 
 /// Rec. 709 luma, rounded to the nearest gray level.
@@ -89,7 +101,23 @@ fn histogram_percentile(hist: &[u64; 256], p: f64) -> f64 {
 /// Deterministic: same pixels → same metrics, on any platform.
 pub fn measure(rgb: &RgbImage) -> Metrics {
     let n = u64::from(rgb.width()) * u64::from(rgb.height());
+    if n == 0 {
+        return Metrics {
+            sharpness: 0.0,
+            brightness: 0.0,
+            contrast: 0.0,
+            saturation: 0.0,
+            highlight_clipping: 0.0,
+            shadow_clipping: 0.0,
+            is_monochrome: true,
+            is_dark: true,
+            is_bright: false,
+            color_signature: 0,
+        };
+    }
     let mut hist = [0u64; 256];
+    let mut hue_counts = [0u64; PALETTE_HUE_COUNT];
+    let mut chromatic_pixels = 0u64;
     let mut sum_r = 0.0f64;
     let mut sum_g = 0.0f64;
     let mut sum_b = 0.0f64;
@@ -108,6 +136,10 @@ pub fn measure(rgb: &RgbImage) -> Metrics {
         let mn = r.min(g).min(b);
         if mx > 0 {
             sum_sat += (mx - mn) as f64 / f64::from(mx);
+        }
+        if let Some(bin) = palette_hue_bin(px[0], px[1], px[2]) {
+            hue_counts[bin] += 1;
+            chromatic_pixels += 1;
         }
     }
 
@@ -144,6 +176,7 @@ pub fn measure(rgb: &RgbImage) -> Metrics {
         && (mean_g - mean_b).abs() < MONO_CHANNEL_SIM
         && (mean_r - mean_b).abs() < MONO_CHANNEL_SIM;
     let is_monochrome = mean_sat < MONO_SAT_MAX && channel_similar;
+    let color_signature = palette_signature(&hue_counts, chromatic_pixels, n);
 
     Metrics {
         sharpness: sharpness_from_luma(rgb),
@@ -155,7 +188,66 @@ pub fn measure(rgb: &RgbImage) -> Metrics {
         is_monochrome,
         is_dark: brightness < DARK_BELOW,
         is_bright: brightness > BRIGHT_ABOVE,
+        color_signature,
     }
+}
+
+/// Return the nearest of twelve hue regions for a sufficiently colorful
+/// pixel. Hue is computed from HSV; value and saturation gates exclude black,
+/// white and near-gray pixels that do not carry a useful hue signal.
+fn palette_hue_bin(r: u8, g: u8, b: u8) -> Option<usize> {
+    let r = f64::from(r) / 255.0;
+    let g = f64::from(g) / 255.0;
+    let b = f64::from(b) / 255.0;
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let saturation = if max > 0.0 { delta / max } else { 0.0 };
+    if max < PALETTE_MIN_VALUE || saturation < PALETTE_MIN_SATURATION || delta == 0.0 {
+        return None;
+    }
+
+    let hue_sector = if max == r {
+        ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / delta + 2.0
+    } else {
+        (r - g) / delta + 4.0
+    };
+    let hue_degrees = hue_sector * 60.0;
+    Some((((hue_degrees + 15.0) / 30.0).floor() as usize) % PALETTE_HUE_COUNT)
+}
+
+fn palette_signature(
+    hue_counts: &[u64; PALETTE_HUE_COUNT],
+    chromatic_pixels: u64,
+    total_pixels: u64,
+) -> u16 {
+    if chromatic_pixels == 0 || total_pixels == 0 {
+        return 0;
+    }
+    let mut signature = 0u16;
+    for (bin, count) in hue_counts.iter().enumerate() {
+        let chromatic_share = *count as f64 / chromatic_pixels as f64;
+        let image_share = *count as f64 / total_pixels as f64;
+        if chromatic_share >= PALETTE_MIN_CHROMATIC_SHARE
+            && image_share >= PALETTE_MIN_IMAGE_SHARE
+        {
+            signature |= 1 << bin;
+        }
+    }
+
+    // Preserve a single meaningful accent in a mostly neutral photograph.
+    if signature == 0 && chromatic_pixels as f64 / total_pixels as f64 >= PALETTE_MIN_IMAGE_SHARE {
+        let dominant = hue_counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, count)| *count)
+            .map(|(bin, _)| bin)
+            .unwrap_or(0);
+        signature |= 1 << dominant;
+    }
+    signature
 }
 
 /// Variance of the 4-neighbor Laplacian over the image interior.
@@ -241,6 +333,28 @@ mod tests {
         let gray = measure(&solid(16, 16, [128, 128, 128]));
         assert_eq!(gray.saturation, 0.0);
         assert!(gray.is_monochrome);
+        assert_eq!(gray.color_signature, 0);
+    }
+
+    #[test]
+    fn palette_signature_tracks_primary_hues() {
+        let cases = [
+            ([255, 0, 0], 0),
+            ([255, 255, 0], 2),
+            ([0, 255, 0], 4),
+            ([0, 255, 255], 6),
+            ([0, 0, 255], 8),
+            ([255, 0, 255], 10),
+        ];
+        for (rgb, bit) in cases {
+            assert_eq!(measure(&solid(16, 16, rgb)).color_signature, 1 << bit);
+        }
+    }
+
+    #[test]
+    fn palette_signature_can_store_multiple_hues() {
+        let image = from_fn(20, 10, |x, _| if x < 10 { [255, 0, 0] } else { [0, 0, 255] });
+        assert_eq!(measure(&image).color_signature, (1 << 0) | (1 << 8));
     }
 
     #[test]

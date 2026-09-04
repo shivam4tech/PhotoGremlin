@@ -106,6 +106,28 @@ Output: `is_monochrome ∈ {0, 1}`.
 boundaries as the categories above). Filters can use flags or the numeric
 score.
 
+## Color signature (Sprint 35)
+
+Color exploration uses a deterministic 12-bit HSV hue-presence signature;
+it is not a dominant-color name, semantic tag, or aesthetic score. Each
+working-resolution RGB pixel is converted to HSV and assigned to one of twelve
+equal 30° hue bins when saturation is at least 0.20 and value is at least
+0.08. Achromatic and near-black pixels do not influence the hue mask.
+
+A hue is present when it accounts for at least 4% of chromatic pixels and 1%
+of all image pixels. If an image has at least 1% chromatic pixels but no bin
+crosses both thresholds, the largest bin is retained as a conservative
+fallback. The resulting mask is stored in `analysis.color_signature`; it stays
+NULL until the current analysis pass has measured the photo. A
+multi-hue filter performs a bitwise intersection and therefore matches a photo
+containing **any** selected hue. The constants and hue conversion live in
+`analysis/metrics.rs` and are unit-tested against gray, primary-color, and
+multi-hue images.
+
+This addition is analysis algorithm version 2. Existing photos are queued for
+local re-analysis after the schema v21 migration so saved color views become
+complete without a separate indexing service.
+
 ## Perceptual hash (Sprint 8)
 
 aHash/dHash family: downscale to 8×8 grayscale, diff of adjacent pixels →

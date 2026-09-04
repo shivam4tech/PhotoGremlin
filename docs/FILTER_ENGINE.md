@@ -31,7 +31,7 @@ field lives.
  | area | fields | source |
  |---|---|---|
  | technical | sharpness, brightness, contrast, saturation, highlight_clipping, shadow_clipping | analysis |
- | visual | monochrome, color (inverse of monochrome), dark, bright | analysis flags |
+ | visual | monochrome, color (inverse of monochrome), dark, bright, palette_color | analysis flags + local 12-bit hue signature |
  | orientation | landscape, portrait, square | photos (w×h) |
 | camera | camera_model, camera_make, lens | photos (EXIF) |
  | exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
@@ -67,10 +67,13 @@ to compose raw operators:
   lower handle writes `>=`, moving only the upper handle writes `<=`, and
   moving both writes `between`.
 
-The measured dual-ended scrubbers remain visible in the Library inspector, so the
-photographer can compare and refine measured ranges without opening rows one at
-a time. Their rounded rails use a low-to-high tonal grade of the single
-interface accent, with a stronger grade marking an active selected interval.
+The measured dual-ended scrubbers live in a labelled disclosure in the Library
+inspector. It opens automatically whenever one of its ranges is active; at
+rest it stays closed so the color spectrum, rating, quick views, and results
+retain a clear hierarchy. Once open, photographers can compare and refine all
+measured ranges without opening rows one at a time. Their rounded rails use a
+low-to-high tonal grade of the single interface accent, with a stronger grade
+marking an active selected interval.
 The grade communicates numeric position only; it does not imply photo quality.
 The controls do not show persistent endpoint numbers. The exact value appears
 in a handle-attached bubble only while that handle is dragged or adjusted from
@@ -91,6 +94,23 @@ conditions and arbitrary advanced numeric conditions load without being
 rewritten. Moving a range handle converts that field to the scrubber's inclusive
 model. Conditions the scrubber cannot express remain visible and removable
 without being silently rewritten.
+
+### Color explorer (Sprint 35)
+
+The inspector's always-visible 12-hue spectrum writes one ordinary
+`palette_color in [...]` condition. Multiple selected hues use **match any**
+semantics inside that condition; the condition remains AND-composed with
+rating, camera, date, review-state, and measured filters. Selecting no hues
+removes the condition. This makes color exploration immediately reversible
+and means saved views persist the exact same portable filter definition as the
+grid.
+
+Rust lowers the selected hue names to a bound integer mask and evaluates
+`(analysis.color_signature & ?) != 0`. Only the twelve compile-time names are
+accepted and the list is capped at twelve. The signature is calculated from
+pixels by the deterministic local analysis pass (IMAGE_ANALYSIS.md), not from
+labels, a remote service, or an aesthetic model. An unanalyzed photograph has
+no matching measured hue until analysis completes.
 
 ### Quick views (Sprints 32–34)
 
@@ -145,7 +165,8 @@ only `review_state`.
 - Kind rules: `Real`/`Int` accept `= != > >= < <= between in is-null
   not-null`; `DateTime` accepts the order/range ops plus null-ops but not
   `in` (v0.1); `Bool` is `= !=` only; `Text` is `= != in is-null not-null`.
-  `in` lists are capped at 100 items.
+  `in` lists are capped at 100 items. The bespoke `Palette` kind accepts only
+  `in`, validates the 12 hue names, and binds the resulting bitmask.
 - Storage semantics: technical fields read `analysis.*` through a
   `LEFT JOIN`, so **unanalyzed photos never match a technical or flag
   condition** (NULL comparison is false — a photo we have not measured is

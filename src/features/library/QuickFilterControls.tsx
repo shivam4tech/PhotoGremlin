@@ -252,6 +252,12 @@ function RangeFilterRow({
 export function QuickFilterControls({ draft, onChange, disabled, sessionId }: QuickFilterControlsProps) {
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
+  const hasActiveRange = QUICK_RANGE_FIELDS.some((field) => draft.some((condition) => condition.field === field));
+  const [expanded, setExpanded] = useState(hasActiveRange);
+
+  useEffect(() => {
+    if (hasActiveRange) setExpanded(true);
+  }, [hasActiveRange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -274,32 +280,45 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
 
   return (
     <section className="quick-filters" aria-labelledby="measured-filter-heading">
-      <div className="quick-filter-intro">
-        <strong id="measured-filter-heading">Measured filters</strong>
-        <span>Drag either edge to refine the visible photographs</span>
-      </div>
-      {measurementsUnavailable && (
-        <div className="quick-filter-note">
-          Technical measurements become available after Analyze photos finishes. Eye confidence becomes available after the optional local face and eye pass.
+      <button
+        type="button"
+        className="quick-filter-intro"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+        aria-controls="measured-filter-controls"
+      >
+        <span>
+          <strong id="measured-filter-heading">Measured filters</strong>
+          <small>{hasActiveRange ? "A measured range is active" : "Brightness, sharpness, exposure and more"}</small>
+        </span>
+        <span className="quick-filter-chevron" aria-hidden="true">⌄</span>
+      </button>
+      {expanded && (
+        <div className="quick-filter-content" id="measured-filter-controls">
+          {measurementsUnavailable && (
+            <div className="quick-filter-note">
+              Technical measurements become available after Analyze photos finishes. Eye confidence becomes available after the optional local face and eye pass.
+            </div>
+          )}
+          <div className="range-filter-list">
+            {RANGE_SPECS.map((spec) => {
+              const condition = draft.find((item) => item.field === spec.field);
+              return (
+                <RangeFilterRow
+                  key={`${spec.field}-${JSON.stringify(condition ?? null)}`}
+                  spec={spec}
+                  condition={condition}
+                  stats={stats[spec.field]}
+                  statsReady={statsReady}
+                  disabled={disabled}
+                  draft={draft}
+                  onChange={onChange}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
-      <div className="range-filter-list">
-        {RANGE_SPECS.map((spec) => {
-          const condition = draft.find((item) => item.field === spec.field);
-          return (
-            <RangeFilterRow
-              key={`${spec.field}-${JSON.stringify(condition ?? null)}`}
-              spec={spec}
-              condition={condition}
-              stats={stats[spec.field]}
-              statsReady={statsReady}
-              disabled={disabled}
-              draft={draft}
-              onChange={onChange}
-            />
-          );
-        })}
-      </div>
     </section>
   );
 }

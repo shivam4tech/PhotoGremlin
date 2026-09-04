@@ -74,8 +74,14 @@ its own graphite/silver tokens, language, and local-first controls.
 - Rating stars are cumulative: a rating of four illuminates stars one through
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
-- Brightness, sharpness, contrast, ISO and focal length are always-visible
-  dual-range controls in the scrollable inspector. Their tracks use one
+- The 12-hue color spectrum is the inspector's primary visual filter. It is
+  always visible, supports multi-selection, communicates **match any**, and
+  shows selected hues as removable text-labelled chips. Hue is deterministic
+  image data, not a color label or aesthetic verdict.
+- Brightness, sharpness, contrast, ISO and focal length are dual-range controls
+  inside a labelled disclosure. The disclosure opens automatically whenever a
+  measured range is active; otherwise it stays closed to keep the inspector
+  calm and progressively reveal precision controls. Their tracks use one
   restrained low-to-high cool-blue tonal ramp, so measurement controls remain
   easy to identify without turning the inspector into a multicolor dashboard.
   This is measurement context, never a red/green quality verdict. Exact values are
@@ -109,9 +115,15 @@ its own graphite/silver tokens, language, and local-first controls.
 - Blur/backdrop-filter never animates on large surfaces (photo grid!);
   `will-change` only during an active animation, then removed.
 - No decorative gradients, no glow-as-affordance, no decorative motion. The
-  five measured range tracks are the sole data-encoding gradient exception.
+  measured range tracks and the functional hue spectrum are the only
+  data-encoding gradient exceptions.
   Large translucent surfaces must not use backdrop blur; an opaque semantic
   overlay is clearer over photographs and cheaper to render.
+- View changes and disclosure entrances follow the Transitions.dev portable
+  CSS pattern: the entering inner surface fades and translates no more than
+  8px with an explicit 180ms ease-out transition. Controls may use the same
+  timing for a small transform/opacity state change. Never use `transition:
+  all`, and never animate the outer layout container.
 
 ## 5. Accessibility (non-negotiable)
 
@@ -168,5 +180,7 @@ its own graphite/silver tokens, language, and local-first controls.
 - baseline-ui — spacing/hierarchy/typography/animation/design baselines
 - fixing-accessibility — §5 checklist priorities
 - fixing-motion-performance — §4 rendering rules (composite vs paint vs layout)
+- [Transitions.dev](https://www.ui-skills.com/skills/jakubantalik/transitions-dev)
+  — portable CSS entrance/state-change patterns and reduced-motion fallbacks
 - improve-ui — evidence-based audit method: findings need contract + runtime
   proof + a single deterministic correction; prefer no finding to a vague one

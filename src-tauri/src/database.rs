@@ -13,10 +13,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 20;
+pub const CURRENT_SCHEMA_VERSION: i64 = 21;
 
 /// Algorithm version for analysis results. Bump when analysis math changes.
-pub const ANALYSIS_ALGORITHM_VERSION: i64 = 1;
+pub const ANALYSIS_ALGORITHM_VERSION: i64 = 2;
 
 /// Version of the local eye-state measurements stored by the face pass.
 pub const EYE_ALGORITHM_VERSION: i64 = 1;
@@ -109,6 +109,7 @@ impl Db {
                     is_monochrome INTEGER NOT NULL DEFAULT 0,
                     is_dark INTEGER NOT NULL DEFAULT 0,
                     is_bright INTEGER NOT NULL DEFAULT 0,
+                    color_signature INTEGER,
                     face_count INTEGER,
                     smile_count INTEGER,
                     perceptual_hash TEXT,
@@ -471,6 +472,16 @@ impl Db {
                     [],
                 )
                 .map_err(db_err("add possible blink column"))?;
+            }
+
+            // v21 (Sprint 35): compact deterministic hue-presence mask used
+            // by the multi-color library explorer. NULL means not yet indexed.
+            if !table_has_column(&conn, "analysis", "color_signature") {
+                conn.execute(
+                    "ALTER TABLE analysis ADD COLUMN color_signature INTEGER",
+                    [],
+                )
+                .map_err(db_err("add color signature column"))?;
             }
 
             let current_version: i64 = conn
@@ -1034,8 +1045,8 @@ impl Db {
             "INSERT INTO analysis (
                 photo_id, sharpness, brightness, contrast, saturation,
                 highlight_clipping, shadow_clipping, is_monochrome, is_dark, is_bright,
-                algorithm_version, analyzed_at, source_mtime
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                color_signature, algorithm_version, analyzed_at, source_mtime
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(photo_id) DO UPDATE SET
                 sharpness = excluded.sharpness,
                 brightness = excluded.brightness,
@@ -1046,6 +1057,7 @@ impl Db {
                 is_monochrome = excluded.is_monochrome,
                 is_dark = excluded.is_dark,
                 is_bright = excluded.is_bright,
+                color_signature = excluded.color_signature,
                 algorithm_version = excluded.algorithm_version,
                 analyzed_at = excluded.analyzed_at,
                 source_mtime = excluded.source_mtime",
@@ -1060,6 +1072,7 @@ impl Db {
                 i64::from(m.is_monochrome),
                 i64::from(m.is_dark),
                 i64::from(m.is_bright),
+                i64::from(m.color_signature),
                 ANALYSIS_ALGORITHM_VERSION,
                 crate::time::now_utc(),
                 source_mtime,
@@ -3705,6 +3718,7 @@ mod tests {
                 is_monochrome: false,
                 is_dark: true,
                 is_bright: false,
+                color_signature: 1,
             },
             None,
         )
