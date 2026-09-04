@@ -1,19 +1,116 @@
 import { useEffect } from "react";
+import type { ErrorInfo } from "react";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { useAppStore } from "@/stores/appStore";
-import { api, toErrorMessage } from "@/lib/ipc";
+import { api, onProgress, toErrorMessage } from "@/lib/ipc";
+import type {
+  AnalysisCompletePayload,
+  FaceCompletePayload,
+  SceneCompletePayload,
+  MetadataCompletePayload,
+  OperationCompletePayload,
+  ProgressPayload,
+  ScanCompletePayload,
+  SimilarityCompletePayload,
+} from "@/types/api";
+import { formatFaceSummaryLine, formatSceneSummaryLine } from "@/features/settings/ai";
+import { isTypingTarget, shortcutFor } from "@/features/shortcuts";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
 import { SessionsView } from "@/views/SessionsView";
 import { CollectionsView } from "@/views/CollectionsView";
+import { GroupsView } from "@/views/GroupsView";
 import { SavedViewsView } from "@/views/SavedViewsView";
 import { SettingsView } from "@/views/SettingsView";
+import { HomeView } from "@/views/HomeView";
 import { VIEW_META } from "@/stores/appStore";
+import { clientErrorReport, escapeGtkMarkupText } from "@/lib/errorReporting";
+
+function reportClientError(source: string, value: unknown) {
+  const report = clientErrorReport(source, value);
+  // Logging must never become another unhandled error if the app is already
+  // shutting down or IPC is unavailable.
+  void api.logClientError(report.source, report.message, report.stack).catch(() => {});
+}
+
+function debugCompletion(kind: string, payload: unknown) {
+  console.debug(`[PhotoGremlin] ${kind} complete`, payload);
+}
+
+function useClientErrorLogging() {
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => reportClientError("window-error", event.error ?? event.message);
+    const onRejection = (event: PromiseRejectionEvent) => reportClientError("unhandled-rejection", event.reason);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+}
+
+/**
+ * Global keyboard shortcuts (Sprint 10): ⌘/Ctrl+O opens a photo folder,
+ * bare 1–6 switch views. The viewer adds Esc/arrows with its own listener
+ * (no key conflict). Never fires while the user is typing.
+ */
+function useAppShortcuts() {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (isTypingTarget(e.target as HTMLElement | null)) return;
+      const action = shortcutFor(e);
+      if (!action) return;
+      e.preventDefault();
+      const s = useAppStore.getState();
+      if (action.kind === "open-folder") {
+        s.openFolder().catch((err) => s.setError(toErrorMessage(err)));
+      } else {
+        s.setView(action.view);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
 
 export default function App() {
   const view = useAppStore((s) => s.view);
+  const activeFolder = useAppStore((s) => s.activeFolder);
   const error = useAppStore((s) => s.error);
+  const notice = useAppStore((s) => s.notice);
+  const setNotice = useAppStore((s) => s.setNotice);
+
+  useClientErrorLogging();
+
+  // First launch or after close: show Home when no project is open
+  useEffect(() => {
+    const s = useAppStore.getState();
+    if (s.activeFolder === null && s.view !== "home" && s.view !== "settings") {
+      // Defer to next tick so refreshStatus has a chance to restore
+      const t = window.setTimeout(() => {
+        const cur = useAppStore.getState();
+        if (cur.activeFolder === null) cur.setView("home");
+      }, 600);
+      return () => window.clearTimeout(t);
+    }
+  }, [activeFolder, view]);
+
+  // Success notices are set by the pass-complete handlers and should be
+  // transient: auto-dismiss after a few seconds, or immediately on ×.
+  // Some Linux webview paths pass rendered text through Pango markup. Keep
+  // notices and errors literal even when a filename contains markup syntax.
+  const safeNotice = notice ? escapeGtkMarkupText(notice) : null;
+  const safeError = error ? escapeGtkMarkupText(error) : null;
+  useEffect(() => {
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [notice, setNotice]);
+
+  useAppShortcuts();
 
   useEffect(() => {
     let cancelled = false;
@@ -35,8 +132,250 @@ export default function App() {
     };
   }, []);
 
+  // Metadata reliability (Sprint 11): a moment after the shell mounts,
+  // drain any EXIF backlog (files never read, or changed on disk since
+  // their last read — the queue itself is incremental). A no-op when the
+  // queue is empty; deliberately delayed so the progress/completion event
+  // listeners above are registered before the pass emits.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      const s = useAppStore.getState();
+      if (cancelled || s.readingMetadata || s.scanning) return;
+      const pending = s.dbStatus?.metadata_pending ?? 0;
+      if (pending <= 0) return;
+      s.setReadingMetadata(true);
+      s.setMetadataPaused(false);
+      s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+      try {
+        await api.startMetadata();
+      } catch {
+        const st = useAppStore.getState();
+        st.setReadingMetadata(false);
+        st.setMetadataPaused(false);
+        st.setProgress(null);
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, []);
+
+  // Scan + analysis progress/completion stream in from the backend at all
+  // times. The UI keeps the two exclusive (buttons disable each other), so
+  // one shared progress field is honest.
+  useEffect(() => {
+    const unlisteners = (async () => {
+      const state = () => useAppStore.getState();
+      const up = await onProgress<ProgressPayload>("scan-progress", (p) => {
+        state().setProgress(p);
+        state().setScanning(true);
+      });
+      const upa = await onProgress<ProgressPayload>("analysis-progress", (p) => {
+        state().setProgress(p);
+        state().setAnalyzing(true);
+      });
+      const upm = await onProgress<ProgressPayload>("metadata-progress", (p) => {
+        state().setProgress(p);
+        state().setReadingMetadata(true);
+      });
+      const ucm = await onProgress<MetadataCompletePayload>("metadata-complete", (p) => {
+        const s = state();
+        s.setReadingMetadata(false);
+        s.setMetadataPaused(false);
+        s.setProgress(null);
+        if (p.summary) {
+          debugCompletion("metadata", p.summary);
+          s.setMetadataSummary(p.summary);
+          if (p.summary.failed > 0 || (p.summary.processed > 0 && !p.summary.cancelled)) {
+            s.setNotice(p.summary.cancelled ? "Metadata reading stopped." : "Metadata ready.");
+            s.setError(null);
+          }
+        } else {
+          s.setMetadataSummary(null);
+          s.setError(p.error ?? "Reading metadata failed.");
+        }
+        void s.refreshStatus();
+      });
+      const uca = await onProgress<AnalysisCompletePayload>("analysis-complete", (p) => {
+        const s = state();
+        s.setAnalyzing(false);
+        s.setProgress(null);
+        if (p.summary) {
+          const sum = p.summary;
+          debugCompletion("analysis", sum);
+          s.setAnalysisSummary(sum);
+          s.setNotice(sum.cancelled ? "Analysis stopped." : "Analysis complete.");
+          s.setError(null);
+        } else {
+          s.setAnalysisSummary(null);
+          s.setError(p.error ?? "Analysis failed.");
+        }
+        void s.refreshStatus();
+      });
+      const uc = await onProgress<ScanCompletePayload>("scan-complete", (p) => {
+        const s = state();
+        s.setScanning(false);
+        s.setProgress(null);
+        if (p.summary) {
+          debugCompletion("scan", p.summary);
+          const msg = p.summary.cancelled ? "Scan stopped." : "Scan complete.";
+          s.setScanSummary(p.summary);
+          s.setNotice(msg);
+          s.setError(null);
+        } else {
+          s.setScanSummary(null);
+          s.setError(p.error ?? "Scan failed.");
+        }
+        void s.refreshStatus();
+        // Pipeline: as soon as a scan lands new photographs, read their
+        // camera metadata in the background (a no-op when nothing is new).
+        if (p.summary && p.summary.indexed > 0) {
+          s.setReadingMetadata(true);
+          s.setMetadataPaused(false);
+          s.setProgress({ total: 0, done: 0, stage: "reading metadata", current: null });
+          api
+            .startMetadata()
+            .catch(() => {
+              const st = useAppStore.getState();
+              st.setReadingMetadata(false);
+              st.setMetadataPaused(false);
+              st.setProgress(null);
+            });
+          // …and, when the user turned local intelligence on, detect faces
+          // in the new photographs too (a no-op when nothing is queued).
+          if (useAppStore.getState().aiEnabled) {
+            api.startFaces().catch(() => {
+              const st = useAppStore.getState();
+              st.setDetectingFaces(false);
+              st.setFacesProgress(null);
+            });
+          }
+        }
+      });
+      const uop = await onProgress<ProgressPayload>("operation-progress", (p) => {
+        const s = state();
+        s.setOperating(true);
+        s.setOpProgress(p);
+      });
+      const uoc = await onProgress<OperationCompletePayload>("operation-complete", (p) => {
+        const s = state();
+        s.setOperating(false);
+        s.setOpProgress(null);
+        if (p.summary) {
+          const sum = p.summary;
+          const verb =
+            sum.op === "rename" ? "renamed" :
+            sum.op === "move" ? "moved" :
+            sum.op === "copy" ? "copied" :
+            sum.op === "trash" ? "trashed" :
+            sum.op === "delete-permanently" ? "permanently deleted" : "processed";
+          const bits: string[] = [
+            `${sum.succeeded.toLocaleString()} photograph${sum.succeeded === 1 ? "" : "s"} ${verb}`,
+            sum.failed > 0 ? `${sum.failed.toLocaleString()} failed` : null,
+            `${(sum.elapsed_ms / 1000).toFixed(1)}s`,
+          ].filter(Boolean) as string[];
+          s.setOpSummary(sum);
+          s.setNotice(
+            sum.cancelled
+              ? `Operation stopped — ${bits.join(", ")}.`
+              : `Operation complete — ${bits.join(", ")}.`,
+          );
+          s.setError(null);
+        } else {
+          s.setOpSummary(null);
+          s.setError(p.error ?? "The file operation failed.");
+        }
+        // Files on disk changed: refresh counts, culling state, audit log,
+        // and the grid (paths changed / rows removed).
+        void s.refreshStatus();
+        void s.loadSelections();
+        void s.refreshRecentOps();
+        s.bumpLibraryVersion();
+      });
+       const usim = await onProgress<ProgressPayload>("similarity-progress", (p) => {
+         const s = state();
+         s.setFindingSimilar(true);
+         s.setSimilarityProgress(p);
+       });
+       const usimc = await onProgress<SimilarityCompletePayload>("similarity-complete", (p) => {
+         const s = state();
+         s.setFindingSimilar(false);
+         s.setSimilarityProgress(null);
+         if (p.summary) {
+           const sum = p.summary;
+           debugCompletion("similarity", sum);
+           s.setSimilaritySummary(sum);
+           s.setNotice(sum.cancelled ? "Group discovery stopped." : "Groups updated.");
+           s.setError(null);
+         } else {
+           s.setSimilaritySummary(null);
+           s.setError(p.error ?? "Finding similar photos failed.");
+         }
+          // The group set changed: refresh it.
+          void s.loadSimilarityGroups();
+        });
+       const uf = await onProgress<ProgressPayload>("faces-progress", (p) => {
+         const s = state();
+         s.setDetectingFaces(true);
+         s.setFacesProgress(p);
+       });
+       const ufc = await onProgress<FaceCompletePayload>("faces-complete", (p) => {
+         const s = state();
+         s.setDetectingFaces(false);
+         s.setFacesProgress(null);
+         if (p.summary) {
+           s.setFacesSummary(p.summary);
+           if (p.summary.processed > 0 || p.summary.failed > 0 || !p.summary.cancelled) {
+             s.setNotice(formatFaceSummaryLine(p.summary));
+             s.setError(null);
+           }
+         } else {
+           s.setFacesSummary(null);
+           s.setError(p.error ?? "Face detection failed.");
+         }
+         void s.refreshStatus();
+         void s.loadAiStatus();
+       });
+       const us = await onProgress<ProgressPayload>("scenes-progress", (p) => {
+         const s = state();
+         s.setClassifyingScenes(true);
+         s.setScenesProgress(p);
+       });
+       const usc = await onProgress<SceneCompletePayload>("scenes-complete", (p) => {
+         const s = state();
+         s.setClassifyingScenes(false);
+         s.setScenesProgress(null);
+         if (p.summary) {
+           s.setScenesSummary(p.summary);
+           if (p.summary.processed > 0 || p.summary.failed > 0 || !p.summary.cancelled) {
+             s.setNotice(formatSceneSummaryLine(p.summary));
+             s.setError(null);
+           }
+         } else {
+           s.setScenesSummary(null);
+           s.setError(p.error ?? "Scene classification failed.");
+         }
+         void s.refreshStatus();
+         void s.loadAiStatus();
+       });
+        return [up, upa, uca, upm, ucm, uc, uop, uoc, usim, usimc, uf, ufc, us, usc];
+    })();
+
+    let alive = true;
+    unlisteners.then((list) => {
+      if (!alive) list.forEach((u) => u());
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const body = (() => {
     switch (view) {
+      case "home":
+        return <HomeView />;
       case "library":
         return <LibraryView />;
       case "dashboard":
@@ -45,6 +384,8 @@ export default function App() {
         return <SessionsView />;
       case "collections":
         return <CollectionsView />;
+      case "groups":
+        return <GroupsView />;
       case "saved-views":
         return <SavedViewsView />;
       case "settings":
@@ -56,20 +397,74 @@ export default function App() {
     <div className="app">
       <Sidebar />
       <main className="main">
-        <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description} />
-        <div className="view-scroll">{body}</div>
-        {error && (
+        <TopBar title={VIEW_META[view].label} subtitle={VIEW_META[view].description}>
+          {view === "library" && activeFolder ? (
+            <button
+              className="btn btn-sm"
+              onClick={() => void useAppStore.getState().closeProject()}
+              aria-label="Close project"
+            >
+              Close project
+            </button>
+          ) : null}
+        </TopBar>
+        <div className={view === "library" ? "view-scroll library-scroll" : view === "groups" ? "view-scroll groups-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>
+          <div key={view} className="view-transition">
+            <ErrorBoundary
+              onError={(viewError: Error, info: ErrorInfo) =>
+                reportClientError(`view-render:${view}`, new Error(`${viewError.message}\n${info.componentStack ?? ""}`))
+              }
+            >
+              {body}
+            </ErrorBoundary>
+          </div>
+        </div>
+        {safeNotice && (
+          <div
+            role="status"
+            style={{
+              padding: "8px 34px 8px 20px",
+              background: "var(--accent-soft)",
+              color: "var(--text)",
+              borderTop: "1px solid var(--accent-border)",
+              fontSize: 12.5,
+              position: "relative",
+            }}
+          >
+            {safeNotice}
+            <button
+              aria-label="Dismiss"
+              onClick={() => setNotice(null)}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "none",
+                border: "none",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 4,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {safeError && (
           <div
             role="alert"
             style={{
-              padding: "8px 20px",
-              background: "var(--danger-soft)",
-              color: "var(--danger)",
-              borderTop: "1px solid rgba(248,113,113,0.3)",
+            padding: "8px 20px",
+            background: "var(--danger-soft)",
+            color: "var(--danger)",
+            borderTop: "1px solid var(--danger-border)",
               fontSize: 12.5,
             }}
           >
-            {error}
+            {safeError}
           </div>
         )}
       </main>

@@ -1,5 +1,33 @@
 //! Tauri commands (the IPC surface). Grouped by domain.
 
+pub mod ai;
+pub mod analysis;
 pub mod app;
+pub mod cache;
+pub mod collections;
+pub mod contact_sheet;
+pub mod fileops;
+pub mod filters;
+pub mod metadata;
+pub mod photos;
+pub mod review;
+pub mod scan;
+pub mod similarity;
+pub mod stats;
+pub mod views;
 
+pub use ai::*;
+pub use analysis::*;
 pub use app::*;
+pub use cache::*;
+pub use collections::*;
+pub use contact_sheet::*;
+pub use fileops::*;
+pub use filters::*;
+pub use metadata::*;
+pub use photos::*;
+pub use review::*;
+pub use scan::*;
+pub use similarity::*;
+pub use stats::*;
+pub use views::*;

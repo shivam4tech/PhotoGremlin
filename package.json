@@ -10,10 +10,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:rust": "node tools/run-resource-guarded.mjs rust-test",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build:app": "tauri build --debug",
-    "build:app:release": "tauri build"
+    "build:app": "node tools/run-resource-guarded.mjs app-debug",
+    "build:app:release": "node tools/run-resource-guarded.mjs app-release"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

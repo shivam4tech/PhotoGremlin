@@ -79,6 +79,17 @@ export const CollectionsIcon = ({ size = 18 }: IconProps) =>
     </>,
   );
 
+export const GroupsIcon = ({ size = 18 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <rect x="3" y="4" width="8" height="8" rx="1.5" />
+      <rect x="13" y="4" width="8" height="8" rx="1.5" />
+      <rect x="8" y="13" width="8" height="8" rx="1.5" />
+      <path d="M7 12v2h3M17 12v2h-3" />
+    </>,
+  );
+
 export const SavedViewsIcon = ({ size = 18 }: IconProps) =>
   svg(
     size,
@@ -116,4 +127,73 @@ export const ShieldIcon = ({ size = 14 }: IconProps) =>
   svg(
     size,
     <path d="M12 3l8 3v6c0 4.5-3.2 7.8-8 9-4.8-1.2-8-4.5-8-9V6z" />,
+  );
+
+export const SunIcon = ({ size = 15 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+    </>,
+  );
+
+export const MoonIcon = ({ size = 15 }: IconProps) =>
+  svg(
+    size,
+    <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3 6.6 6.6 0 0 0 21 12.8z" />,
+  );
+
+export const HomeIcon = ({ size = 18 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1v-5H9v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+    </>,
+  );
+
+export const CloseIcon = ({ size = 14 }: IconProps) =>
+  svg(size, <path d="M6 6l12 12M18 6L6 18" />);
+
+export const MoreIcon = ({ size = 14 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+export const GripIcon = ({ size = 14 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <circle cx="8" cy="7" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="8" cy="17" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="7" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="12" r="1.2" fill="currentColor" stroke="none" />
+      <circle cx="13" cy="17" r="1.2" fill="currentColor" stroke="none" />
+    </>,
+  );
+
+export const EyeIcon = ({ size = 14 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <path d="M1 12s4-5.5 11-5.5S23 12 23 12s-4 5.5-11 5.5S1 12 1 12z" />
+      <circle cx="12" cy="12" r="2.5" />
+    </>,
+  );
+
+export const EyeOffIcon = ({ size = 14 }: IconProps) =>
+  svg(
+    size,
+    <>
+      <path d="M3 3l18 18" />
+      <path d="M10.6 10.6A3 3 0 0 0 12 15a3 3 0 0 0 2.4-4.4" />
+      <path d="M9.9 5.2A10.8 10.8 0 0 1 12 4.5C19 4.5 23 12 23 12a16.8 16.8 0 0 1-3.3 4" />
+      <path d="M14.8 14.8A6.9 6.9 0 0 1 12 17.5C5 17.5 1 12 1 12a16.8 16.8 0 0 1 5.1-5.4" />
+    </>,
   );

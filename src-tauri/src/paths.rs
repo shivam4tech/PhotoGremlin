@@ -54,12 +54,26 @@ impl AppPaths {
         self.log_dir.join("photogremlin.log")
     }
 
+    pub fn catalogs_dir(&self) -> PathBuf {
+        self.data_dir.join("catalogs")
+    }
+
+    pub fn catalog_db_path(&self, slug: &str) -> PathBuf {
+        self.catalogs_dir().join(format!("{slug}.sqlite"))
+    }
+
+    pub fn catalog_backups_dir(&self) -> PathBuf {
+        self.data_dir.join("catalog-backups")
+    }
+
     /// Ensure all directories exist. Returns the first error if any fail.
     pub fn ensure(&self) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.data_dir)?;
         std::fs::create_dir_all(&self.cache_dir)?;
         std::fs::create_dir_all(self.thumbnails_dir())?;
         std::fs::create_dir_all(&self.log_dir)?;
+        std::fs::create_dir_all(self.catalogs_dir())?;
+        std::fs::create_dir_all(self.catalog_backups_dir())?;
         Ok(())
     }
 }

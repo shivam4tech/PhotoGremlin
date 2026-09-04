@@ -1,0 +1,534 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { api } from "@/lib/ipc";
+import type { FilterCondition, FilterValueOptions } from "@/types/api";
+import {
+  AREA_ORDER,
+  FILTER_FIELDS,
+  FIELD_BY_NAME,
+  OPS_BY_KIND,
+  QUICK_FILTER_PRESETS,
+  QUICK_RANGE_FIELDS,
+  buildCondition,
+  chipLabel,
+  isQuickFilterPresetActive,
+  toggleQuickFilterPreset,
+} from "./filterFields";
+import { QuickFilterControls } from "./QuickFilterControls";
+import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
+
+interface FilterBarProps {
+  draft: FilterCondition[];
+  onChange: (conditions: FilterCondition[]) => void;
+  disabled?: boolean;
+  /** Keep EXIF value suggestions relevant to the project/shoot on screen. */
+  sessionId?: number | null;
+  /** Inspector mode is persistently open inside the Library's right rail. */
+  mode?: "bar" | "inspector";
+}
+
+const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
+const BESPOKE_FILTER_FIELDS = new Set<string>([...QUICK_RANGE_FIELDS, "palette_color"]);
+export const ADVANCED_FILTER_FIELDS = FILTER_FIELDS.filter((definition) => !BESPOKE_FILTER_FIELDS.has(definition.field));
+const UNIDENTIFIED = "__photogremlin_unidentified__";
+
+function monthFromDate(value: string): Date {
+  const matched = /^(\d{4})-(\d{2})-\d{2}$/.exec(value);
+  if (matched) return new Date(Date.UTC(Number(matched[1]), Number(matched[2]) - 1, 1));
+  const today = new Date();
+  return new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1));
+}
+
+function isoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Click-only date calendar. Native WebKit date popovers lose selections on
+ * some Linux compositors, so this keeps selection in the React filter state. */
+function CalendarInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() => monthFromDate(value));
+
+  useEffect(() => {
+    if (value) setMonth(monthFromDate(value));
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    function closeOnOutsideClick(event: MouseEvent) {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    }
+    window.addEventListener("mousedown", closeOnOutsideClick);
+    return () => window.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  const year = month.getUTCFullYear();
+  const monthIndex = month.getUTCMonth();
+  const monthName = month.toLocaleString(undefined, { month: "long", timeZone: "UTC" });
+  const firstWeekday = new Date(Date.UTC(year, monthIndex, 1)).getUTCDay();
+  const days = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  const cells = Array.from({ length: firstWeekday + days }, (_, index) => index < firstWeekday ? null : index - firstWeekday + 1);
+
+  function moveMonth(delta: number) {
+    setMonth(new Date(Date.UTC(year, monthIndex + delta, 1)));
+  }
+
+  return (
+    <span className="date-picker" ref={root}>
+      <button
+        className={`date-picker-trigger${value ? " has-value" : ""}`}
+        type="button"
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        aria-label={`Select ${label}`}
+        aria-expanded={open}
+      >
+        {value || "Select date"}
+        <span aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="date-picker-popover" role="dialog" aria-label={`Calendar for ${label}`}>
+          <div className="date-picker-head">
+            <button type="button" onClick={() => moveMonth(-1)} aria-label="Previous month">‹</button>
+            <strong>{monthName} {year}</strong>
+            <button type="button" onClick={() => moveMonth(1)} aria-label="Next month">›</button>
+          </div>
+          <div className="date-picker-weekdays">{["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((day) => <span key={day}>{day}</span>)}</div>
+          <div className="date-picker-days">
+            {cells.map((day, index) => day === null ? <span key={`blank-${index}`} /> : (
+              <button
+                key={day}
+                type="button"
+                className={value === isoDate(year, monthIndex, day) ? "is-selected" : ""}
+                onClick={() => { onChange(isoDate(year, monthIndex, day)); setOpen(false); }}
+              >
+                {day}
+              </button>
+            ))}
+          </div>
+          <div className="date-picker-foot">
+            <button type="button" onClick={() => { onChange(""); setOpen(false); }} disabled={!value}>Clear</button>
+            <button type="button" onClick={() => { const today = new Date(); onChange(isoDate(today.getFullYear(), today.getMonth(), today.getDate())); setOpen(false); }}>Today</button>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
+function ComposerControl({
+  label,
+  children,
+  select = false,
+  wide = false,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  select?: boolean;
+  wide?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={`filter-compose-control${wide ? " is-wide" : ""}${className ? ` ${className}` : ""}`}>
+      <span className="filter-compose-label">{label}</span>
+      <span className={`filter-compose-input${select ? " is-select" : ""}`}>
+        {children}
+        {select && <span className="filter-compose-chevron" aria-hidden="true">⌄</span>}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * The library's active filter, edited as structured conditions (not UI
+ * state): what's rendered here is exactly the object sent to the Rust
+ * engine and (later) stored in saved views. Neutral technical language
+ * throughout (FILTER_ENGINE.md).
+ */
+export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
+  const [open, setOpen] = useState(draft.length > 0);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [field, setField] = useState(ADVANCED_FILTER_FIELDS[0].field);
+  const def = FIELD_BY_NAME[field];
+  const ops = OPS_BY_KIND[def.kind];
+  const [op, setOp] = useState<FilterCondition["operator"]>(ops[0].op);
+  const [raw, setRaw] = useState("");
+  const [raw2, setRaw2] = useState("");
+  const [metadataOptions, setMetadataOptions] = useState<FilterValueOptions | null>(null);
+  const [metadataOptionsLoading, setMetadataOptionsLoading] = useState(false);
+  const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
+
+  // Keep the operator valid when the field's kind changes.
+  useEffect(() => {
+    const allowed = OPS_BY_KIND[FIELD_BY_NAME[field].kind];
+    if (!allowed.some((o) => o.op === op)) setOp(allowed[0].op);
+  }, [field, op]);
+
+  useEffect(() => {
+    if (!hasMetadataOptions) {
+      setMetadataOptions(null);
+      return;
+    }
+    let cancelled = false;
+    setMetadataOptions(null);
+    setMetadataOptionsLoading(true);
+    api.filterValueOptions(field as "camera_make" | "camera_model" | "lens", sessionId)
+      .then((options) => { if (!cancelled) setMetadataOptions(options); })
+      .catch(() => { if (!cancelled) setMetadataOptions(null); })
+      .finally(() => { if (!cancelled) setMetadataOptionsLoading(false); });
+    return () => { cancelled = true; };
+  }, [field, sessionId, hasMetadataOptions]);
+
+  const needsTwoValues = op === "between" && def.kind !== "datetime";
+  const needsValue = !["is-null", "not-null"].includes(op);
+  const valueUsesSelect = needsValue && (
+    def.kind === "bool"
+    || (def.kind === "text" && (hasMetadataOptions || Boolean(def.values)))
+  );
+  const valueUsesPair = needsValue && op === "between";
+  const candidate = raw === UNIDENTIFIED
+    ? { field, operator: "is-null" as const, value: null }
+    : buildCondition(field, op, raw, raw2);
+  const canAdd = candidate !== null;
+  const expanded = mode === "inspector" || open;
+  const otherConditions = draft
+    .map((condition, index) => ({ condition, index }))
+    .filter(({ condition }) => !BESPOKE_FILTER_FIELDS.has(condition.field));
+  const rating = draft.find((condition) => condition.field === "rating");
+  const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
+  const unratedOnly = rating?.operator === "=" && rating.value === 0;
+
+  function setRatingFilter(value: "any" | "unrated" | number) {
+    const withoutRating = draft.filter((condition) => condition.field !== "rating");
+    if (value === "any") onChange(withoutRating);
+    else if (value === "unrated") onChange([...withoutRating, { field: "rating", operator: "=", value: 0 }]);
+    else onChange([...withoutRating, { field: "rating", operator: ">=", value }]);
+  }
+
+  function selectField(f: string) {
+    setField(f);
+    const first = OPS_BY_KIND[FIELD_BY_NAME[f].kind][0].op;
+    setOp(first);
+    setRaw("");
+    setRaw2("");
+  }
+
+  function add() {
+    if (!candidate) return;
+    onChange([...draft, candidate]);
+    setRaw("");
+    setRaw2("");
+  }
+
+  function remove(i: number) {
+    onChange(draft.filter((_, j) => j !== i));
+  }
+
+  function valueInput() {
+    if (!needsValue) return null;
+    switch (def.kind) {
+      case "palette":
+        return null;
+      case "bool":
+        return (
+          <select
+            className="input"
+            value={raw === "false" ? "false" : "true"}
+            onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
+          >
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        );
+      case "text":
+        if (hasMetadataOptions) {
+          return (
+            <select
+              className="input"
+              value={raw}
+              onChange={(e) => {
+                const value = e.target.value;
+                setRaw(value);
+                if (value === UNIDENTIFIED) setOp("is-null");
+                else if (op === "is-null" || op === "not-null") setOp("=");
+              }}
+              disabled={metadataOptionsLoading}
+              aria-label={`${def.label} value`}
+            >
+              <option value="">{metadataOptionsLoading ? "Loading values…" : "— Select from this shoot —"}</option>
+              {metadataOptions?.values.map((option) => (
+                <option key={option.value} value={option.value}>{option.value} ({option.count.toLocaleString()})</option>
+              ))}
+              {(metadataOptions?.unidentified_count ?? 0) > 0 && (
+                <option value={UNIDENTIFIED}>Unidentified ({metadataOptions!.unidentified_count.toLocaleString()})</option>
+              )}
+            </select>
+          );
+        }
+        if (def.values) {
+          return (
+            <select
+              className="input"
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              aria-label={`${def.label} value`}
+            >
+              <option value="">—</option>
+              {def.values.map((v) => (
+                <option key={v} value={v}>
+                  {v}
+                </option>
+              ))}
+            </select>
+          );
+        }
+        return (
+          <input
+            className="input"
+            type="text"
+            placeholder={op === "in" ? "comma-separated values" : "value"}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
+          />
+        );
+      case "datetime":
+        if (op === "between") {
+          return (
+            <>
+              <CalendarInput label="from date" value={raw} onChange={setRaw} />
+              <span className="faint">→</span>
+              <CalendarInput label="to date" value={raw2} onChange={setRaw2} />
+            </>
+          );
+        }
+        return (
+          <CalendarInput label="capture date" value={raw} onChange={setRaw} />
+        );
+      case "real":
+      case "int":
+        if (op === "between") {
+          return (
+            <>
+              <input
+                className="input"
+                type="number"
+                step={def.kind === "int" ? 1 : "any"}
+                aria-label={`${def.label} minimum`}
+                value={raw}
+                onChange={(e) => setRaw(e.target.value)}
+              />
+              <span className="faint">→</span>
+              <input
+                className="input"
+                type="number"
+                step={def.kind === "int" ? 1 : "any"}
+                aria-label={`${def.label} maximum`}
+                value={raw2}
+                onChange={(e) => setRaw2(e.target.value)}
+              />
+            </>
+          );
+        }
+        if (op === "in") {
+          return (
+            <input
+              className="input"
+              type="text"
+              placeholder="comma-separated values"
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              aria-label={`${def.label} value`}
+            />
+          );
+        }
+        return (
+          <input
+            className="input"
+            type="number"
+            step={def.kind === "int" ? 1 : "any"}
+            value={raw}
+            onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
+          />
+        );
+    }
+  }
+
+  return (
+    <div className={`filterbar filterbar-${mode}`}>
+      {mode === "bar" && (
+        <button
+          className={`btn btn-sm ${draft.length > 0 ? "btn-primary" : ""}`}
+          onClick={() => setOpen(!open)}
+          disabled={disabled}
+          aria-expanded={open}
+        >
+          Filters{draft.length > 0 ? ` (${draft.length})` : ""}
+          <span className="faint" style={{ marginLeft: 6 }}>
+            {open ? "▲" : "▼"}
+          </span>
+        </button>
+      )}
+
+      {expanded && (
+        <div className="filterbar-panel">
+          <ColorSpectrumFilter
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+          />
+
+          {otherConditions.length > 0 && (
+            <div className="filterbar-chips">
+              <span className="filterbar-chips-label">Other filters</span>
+              {otherConditions.map(({ condition, index }) => (
+                <span key={`${condition.field}-${index}`} className="chip">
+                  {chipLabel(condition)}
+                  <button
+                    className="chip-x"
+                    onClick={() => remove(index)}
+                    aria-label={`remove filter ${chipLabel(condition)}`}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          <section className="quick-presets" aria-labelledby="quick-presets-heading">
+            <div className="quick-presets-head">
+              <strong id="quick-presets-heading">Quick views</strong>
+              <span>Measured characteristics and orientation</span>
+            </div>
+            <div className="quick-presets-list">
+              {QUICK_FILTER_PRESETS.map((preset) => {
+                const active = isQuickFilterPresetActive(draft, preset);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={active ? "is-active" : ""}
+                    aria-pressed={active}
+                    disabled={disabled}
+                    onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="rating-filter" aria-labelledby="rating-filter-heading">
+            <div className="rating-filter-head">
+              <strong id="rating-filter-heading">Rating</strong>
+              <button type="button" className={!rating ? "is-active" : ""} onClick={() => setRatingFilter("any")}>Any</button>
+              <button type="button" className={unratedOnly ? "is-active" : ""} onClick={() => setRatingFilter("unrated")}>Unrated</button>
+            </div>
+            <div className="rating-filter-stars" aria-label="Minimum rating">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  className={`marks-star${ratingThreshold !== null && ratingThreshold >= star ? " is-on" : ""}`}
+                  aria-pressed={ratingThreshold === star}
+                  aria-label={`${star} stars or more`}
+                  onClick={() => setRatingFilter(ratingThreshold === star ? "any" : star)}
+                >★</button>
+              ))}
+              <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
+            </div>
+          </section>
+
+          <QuickFilterControls
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            sessionId={sessionId}
+          />
+
+          <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
+            <button
+              type="button"
+              className="more-filters-trigger"
+              onClick={() => setAdvancedOpen((current) => !current)}
+              aria-expanded={advancedOpen}
+              aria-controls="advanced-filter-composer"
+            >
+              <span>
+                <strong>More filters</strong>
+                <small>Camera, date, review and other fields</small>
+              </span>
+              <span className="more-filters-meta">
+                <span className={`more-filters-count mono${otherConditions.length > 0 ? " is-active" : ""}`}>
+                  {otherConditions.length > 0 ? `${otherConditions.length} active` : "Optional"}
+                </span>
+                <span className="more-filters-chevron" aria-hidden="true">⌄</span>
+              </span>
+            </button>
+
+            {advancedOpen && (
+              <div className="more-filters-panel" id="advanced-filter-composer">
+                <div className="filterbar-compose">
+                  <ComposerControl label="Field" select className="filter-compose-control-field">
+                    <select
+                      className="input"
+                      value={field}
+                      onChange={(e) => selectField(e.target.value)}
+                      aria-label="Filter field"
+                    >
+                      {AREA_ORDER.map((area) => (
+                        <optgroup key={area} label={area}>
+                          {ADVANCED_FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
+                            <option key={f.field} value={f.field}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </ComposerControl>
+                  <ComposerControl label="Condition" select>
+                    <select
+                      className="input"
+                      value={op}
+                      onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+                      aria-label="Filter condition"
+                    >
+                      {ops.map((o) => (
+                        <option key={o.op} value={o.op}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </ComposerControl>
+                  {needsValue && (
+                    <ComposerControl
+                      label="Value"
+                      select={valueUsesSelect}
+                      wide={valueUsesPair}
+                      className="filter-compose-control-value"
+                    >
+                      {valueInput()}
+                    </ComposerControl>
+                  )}
+                  <button type="button" className="btn btn-sm filterbar-compose-add" onClick={add} disabled={!canAdd || disabled}>
+                    Add filter
+                  </button>
+                </div>
+                {needsTwoValues && (
+                  <div className="faint mono more-filters-hint">
+                    between: two values, min → max
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

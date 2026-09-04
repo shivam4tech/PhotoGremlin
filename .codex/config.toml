@@ -1,0 +1,5 @@
+# This repository contains large ignored corpora and produces a substantial
+# Rust target tree. Compact long project sessions before retained tool output
+# can exhaust a 16 GB workstation.
+model_auto_compact_token_limit = 60000
+model_auto_compact_token_limit_scope = "total"

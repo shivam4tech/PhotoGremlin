@@ -42,7 +42,7 @@ SQLite.
 11. **Cross-platform.** Windows, macOS, Linux. One codebase via Tauri. No
     platform-specific branching unless unavoidable, and never at the
     architecture level.
-12. **Run tests after every modification** (`cargo test` in `src-tauri`,
+12. **Run tests after every modification** (`npm run test:rust` and
     `npm test` at the root). **Build before finishing a sprint**
     (`npm run build:app` — debug bundle; release build at the final sprint).
 13. **Update documentation** in `docs/` when you change architecture, schema,
@@ -54,6 +54,12 @@ SQLite.
 15. **Git discipline:** meaningful conventional commits after each sprint
     (`feat: add photo scanner`). Never `git reset --hard` to "fix" problems;
     never discard working code.
+16. **Data policy:** training corpora (e.g. Places365), tar files, downloaded
+    image collections, real-file fixture samples, and training checkpoints
+    are NEVER committed or pushed (see `.gitignore`: `ml-corpus/`,
+    `testdata/`, `tools/train/...`). Training scripts (dev-time Python) may
+    be committed; only the final small model artifacts under
+    `src-tauri/models/` ever enter the repo.
 
 ## Environment notes (this machine)
 
@@ -64,6 +70,20 @@ SQLite.
   `source /home/shivam/pg-env.sh`
   (exports `PATH`, `PKG_CONFIG_PATH`, `LD_LIBRARY_PATH`, include paths).
 - Frontend toolchain: Node 22 + npm.
+
+## Agent resource guard (this machine)
+
+- `.codex/config.toml` compacts project sessions at 60,000 total tokens. Do
+  not raise or disable this guard on the 16 GB development workstation.
+- Broad searches and inventory commands must exclude ignored bulk paths:
+  `ml-corpus/`, `tools/train/.venv/`, `tools/train/runs/`, `src-tauri/target/`,
+  `node_modules/` and `dist/`. Inspect one only when the task directly concerns
+  it.
+- Keep shell/tool output targeted and capped at roughly 12,000 tokens. Do not
+  retain repeated full diffs, logs, screenshots or binary/image output in one
+  agent session.
+- Run test, Cargo and Tauri build stages sequentially. Do not overlap them
+  with corpus collection, training or another development server.
 
 ## Repository layout
 
@@ -88,12 +108,37 @@ src-tauri/src/
 docs/                 Engineering documentation (source of truth for design)
 ```
 
+## Branching model (gitflow-lite)
+
+- `main` — stable. Never commit sprint work here. The owner merges
+  `develop` → `main` on their own schedule.
+- `develop` — integration branch. Feature branches start here.
+- Every sprint lives on its own branch: `feat/sprint-N-<slug>`
+  (created **from `develop`**). All sprint work lands there.
+- When a sprint passes its acceptance checks, merge the feature branch
+  **into `develop`** (no fast-forward surprises: use `--no-ff` so each
+  sprint stays visible in history).
+- Do **not** delete feature branches after merging — the owner deletes
+  them later. They are the tracking record of each sprint.
+- No force-pushes. No commits to `main` from agent work, ever.
+
+Example sequence for Sprint N:
+
+```
+git checkout develop && git pull
+git checkout -b feat/sprint-N-slug
+… work, test, build, commit …
+git checkout develop
+git merge --no-ff feat/sprint-N-slug
+git push origin develop
+```
+
 ## Sprint workflow
 
 1. Read this file and the relevant `docs/` pages.
 2. Inspect existing code before modifying it.
 3. Implement the sprint's scope only.
-4. `cargo test` (in `src-tauri`) and `npm test` (root).
+4. `npm run test:rust` and `npm test` (root).
 5. `npm run typecheck` and `npm run build` (frontend).
 6. `npm run build:app` (full Tauri bundle — verify it produces an app).
 7. Fix failures; do not move on with a red build.

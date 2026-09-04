@@ -1,0 +1,782 @@
+{
+  "airport terminal": {
+    "coarse": "public_transport",
+    "mid": "/m/026smn",
+    "oi_name": "Airport terminal",
+    "score": 1.0
+  },
+  "alley": {
+    "coarse": "urban",
+    "mid": "/m/01lwf0",
+    "oi_name": "Alley",
+    "score": 1.0
+  },
+  "amusement park": {
+    "coarse": "sports",
+    "mid": "/m/010jjr",
+    "oi_name": "Amusement park",
+    "score": 1.0
+  },
+  "aquarium": {
+    "coarse": "nature",
+    "mid": "/m/0149r",
+    "oi_name": "Aquarium",
+    "score": 1.0
+  },
+  "aqueduct": {
+    "coarse": "historic",
+    "mid": "/m/09qhk",
+    "oi_name": "Aqueduct",
+    "score": 1.0
+  },
+  "arcade": {
+    "coarse": "urban",
+    "mid": "/m/01jf71",
+    "oi_name": "Arcade",
+    "score": 1.0
+  },
+  "arch": {
+    "coarse": "nature",
+    "mid": "/m/0dpvm",
+    "oi_name": "Arch",
+    "score": 1.0
+  },
+  "archive": {
+    "coarse": "indoor_cultural",
+    "mid": "/m/01tygv",
+    "oi_name": "Archive",
+    "score": 1.0
+  },
+  "art gallery": {
+    "coarse": "indoor_cultural",
+    "mid": "/m/0hhbr",
+    "oi_name": "Art gallery",
+    "score": 1.0
+  },
+  "attic": {
+    "coarse": "indoor_home",
+    "mid": "/m/08l60s",
+    "oi_name": "Attic",
+    "score": 1.0
+  },
+  "auditorium": {
+    "coarse": "indoor_cultural",
+    "mid": "/m/039l3v",
+    "oi_name": "Auditorium",
+    "score": 1.0
+  },
+  "auto factory": {
+    "coarse": "industrial",
+    "mid": "/m/0168g6",
+    "oi_name": "Factory",
+    "score": 0.737
+  },
+  "badlands": {
+    "coarse": "nature",
+    "mid": "/m/01jnvt",
+    "oi_name": "Badlands",
+    "score": 1.0
+  },
+  "ball pit": {
+    "coarse": "sports",
+    "mid": "/m/06h2ct",
+    "oi_name": "Ball pit",
+    "score": 1.0
+  },
+  "ballroom": {
+    "coarse": "hotel",
+    "mid": "/m/04bvzm",
+    "oi_name": "Ballroom",
+    "score": 1.0
+  },
+  "banquet hall": {
+    "coarse": "other",
+    "mid": "/m/03ft6m",
+    "oi_name": "Banquet",
+    "score": 0.737
+  },
+  "bar": {
+    "coarse": "food_dining",
+    "mid": "/m/01nz0z",
+    "oi_name": "Bar",
+    "score": 1.0
+  },
+  "barn": {
+    "coarse": "nature",
+    "mid": "/m/0vllx",
+    "oi_name": "Barn",
+    "score": 1.0
+  },
+  "baseball field": {
+    "coarse": "sports",
+    "mid": "/m/03v7tf",
+    "oi_name": "Baseball field",
+    "score": 1.0
+  },
+  "basement": {
+    "coarse": "indoor_home",
+    "mid": "/m/02q_2q",
+    "oi_name": "Basement",
+    "score": 1.0
+  },
+  "bathroom": {
+    "coarse": "indoor_home",
+    "mid": "/m/01j2bj",
+    "oi_name": "Bathroom",
+    "score": 1.0
+  },
+  "beach": {
+    "coarse": "nature",
+    "mid": "/m/0b3yr",
+    "oi_name": "Beach",
+    "score": 1.0
+  },
+  "bedroom": {
+    "coarse": "indoor_home",
+    "mid": "/m/02_58j",
+    "oi_name": "Bedroom",
+    "score": 1.0
+  },
+  "boardwalk": {
+    "coarse": "urban",
+    "mid": "/m/03y3sg",
+    "oi_name": "Boardwalk",
+    "score": 1.0
+  },
+  "boathouse": {
+    "coarse": "nature",
+    "mid": "/m/0df2hk",
+    "oi_name": "Boathouse",
+    "score": 1.0
+  },
+  "botanical garden": {
+    "coarse": "other",
+    "mid": "/m/0j2hg",
+    "oi_name": "Botanical garden",
+    "score": 1.0
+  },
+  "boxing ring": {
+    "coarse": "other",
+    "mid": "/m/0j0w6",
+    "oi_name": "Boxing ring",
+    "score": 1.0
+  },
+  "bridge": {
+    "coarse": "urban",
+    "mid": "/m/015kr",
+    "oi_name": "Bridge",
+    "score": 1.0
+  },
+  "bullring": {
+    "coarse": "sports_stadium",
+    "mid": "/m/06dsww",
+    "oi_name": "Bullring",
+    "score": 1.0
+  },
+  "butte": {
+    "coarse": "nature",
+    "mid": "/m/01xqrf",
+    "oi_name": "Butte",
+    "score": 1.0
+  },
+  "cafeteria": {
+    "coarse": "food_dining",
+    "mid": "/m/02pdnx",
+    "oi_name": "Cafeteria",
+    "score": 1.0
+  },
+  "campus": {
+    "coarse": "urban",
+    "mid": "/m/01_x9",
+    "oi_name": "Campus",
+    "score": 1.0
+  },
+  "canyon": {
+    "coarse": "nature",
+    "mid": "/m/0kh8w",
+    "oi_name": "Canyon",
+    "score": 1.0
+  },
+  "castle": {
+    "coarse": "historic",
+    "mid": "/m/0d5gx",
+    "oi_name": "Castle",
+    "score": 1.0
+  },
+  "cemetery": {
+    "coarse": "urban",
+    "mid": "/m/0h36z",
+    "oi_name": "Cemetery",
+    "score": 1.0
+  },
+  "church": {
+    "coarse": "religious",
+    "mid": "/m/01wb7",
+    "oi_name": "Church",
+    "score": 1.0
+  },
+  "city": {
+    "coarse": "urban",
+    "mid": "/m/01n32",
+    "oi_name": "City",
+    "score": 1.0
+  },
+  "classroom": {
+    "coarse": "education",
+    "mid": "/m/04hyxm",
+    "oi_name": "Classroom",
+    "score": 1.0
+  },
+  "cliff": {
+    "coarse": "nature",
+    "mid": "/m/018vpr",
+    "oi_name": "Cliff",
+    "score": 1.0
+  },
+  "closet": {
+    "coarse": "indoor_home",
+    "mid": "/m/0d4w1",
+    "oi_name": "Closet",
+    "score": 1.0
+  },
+  "coast": {
+    "coarse": "nature",
+    "mid": "/m/01lxd",
+    "oi_name": "Coast",
+    "score": 1.0
+  },
+  "cockpit": {
+    "coarse": "transport_vehicle",
+    "mid": "/m/0158_5",
+    "oi_name": "Cockpit",
+    "score": 1.0
+  },
+  "conference room": {
+    "coarse": "other",
+    "mid": "/m/02q60ls",
+    "oi_name": "Conference hall",
+    "score": 0.733
+  },
+  "cottage": {
+    "coarse": "residential",
+    "mid": "/m/03nxtz",
+    "oi_name": "Cottage",
+    "score": 1.0
+  },
+  "courthouse": {
+    "coarse": "workplace",
+    "mid": "/m/0g02q",
+    "oi_name": "Courthouse",
+    "score": 1.0
+  },
+  "courtyard": {
+    "coarse": "urban",
+    "mid": "/m/0lf0n",
+    "oi_name": "Courtyard",
+    "score": 1.0
+  },
+  "creek": {
+    "coarse": "nature",
+    "mid": "/m/03ybsm",
+    "oi_name": "Creek",
+    "score": 1.0
+  },
+  "dam": {
+    "coarse": "nature",
+    "mid": "/m/0dl8m",
+    "oi_name": "Dam",
+    "score": 1.0
+  },
+  "delicatessen": {
+    "coarse": "food_dining",
+    "mid": "/m/01_6hg",
+    "oi_name": "Delicatessen",
+    "score": 1.0
+  },
+  "desert": {
+    "coarse": "nature",
+    "mid": "/m/0284w",
+    "oi_name": "Desert",
+    "score": 1.0
+  },
+  "dining room": {
+    "coarse": "indoor_home",
+    "mid": "/m/03d2wd",
+    "oi_name": "Dining room",
+    "score": 1.0
+  },
+  "downtown": {
+    "coarse": "urban",
+    "mid": "/m/01l7t2",
+    "oi_name": "Downtown",
+    "score": 1.0
+  },
+  "driveway": {
+    "coarse": "residential",
+    "mid": "/m/04w8xt",
+    "oi_name": "Driveway",
+    "score": 1.0
+  },
+  "farm": {
+    "coarse": "nature",
+    "mid": "/m/0g8p9",
+    "oi_name": "Farm",
+    "score": 1.0
+  },
+  "flea market indoor": {
+    "coarse": "other",
+    "mid": "/m/02kj24",
+    "oi_name": "Flea market",
+    "score": 0.759
+  },
+  "food court": {
+    "coarse": "food_dining",
+    "mid": "/m/03sx2d",
+    "oi_name": "Food court",
+    "score": 1.0
+  },
+  "fountain": {
+    "coarse": "urban",
+    "mid": "/m/0220r2",
+    "oi_name": "Fountain",
+    "score": 1.0
+  },
+  "glacier": {
+    "coarse": "nature",
+    "mid": "/m/038jz",
+    "oi_name": "Glacier",
+    "score": 1.0
+  },
+  "golf course": {
+    "coarse": "sports",
+    "mid": "/m/02vk5tw",
+    "oi_name": "Golf course",
+    "score": 1.0
+  },
+  "greenhouse indoor": {
+    "coarse": "nature",
+    "mid": "/m/0lyf_",
+    "oi_name": "Greenhouse",
+    "score": 0.741
+  },
+  "harbor": {
+    "coarse": "nature",
+    "mid": "/m/03htg",
+    "oi_name": "Harbor",
+    "score": 1.0
+  },
+  "highway": {
+    "coarse": "urban",
+    "mid": "/m/0cz_0",
+    "oi_name": "Highway",
+    "score": 1.0
+  },
+  "hospital": {
+    "coarse": "healthcare",
+    "mid": "/m/0hpnr",
+    "oi_name": "Hospital",
+    "score": 1.0
+  },
+  "house": {
+    "coarse": "residential",
+    "mid": "/m/03jm5",
+    "oi_name": "House",
+    "score": 1.0
+  },
+  "iceberg": {
+    "coarse": "nature",
+    "mid": "/m/012mqx",
+    "oi_name": "Iceberg",
+    "score": 1.0
+  },
+  "islet": {
+    "coarse": "nature_water",
+    "mid": "/m/01jyr1",
+    "oi_name": "Islet",
+    "score": 1.0
+  },
+  "kitchen": {
+    "coarse": "indoor_home",
+    "mid": "/m/0d4wf",
+    "oi_name": "Kitchen",
+    "score": 1.0
+  },
+  "lagoon": {
+    "coarse": "nature_water",
+    "mid": "/m/0l154",
+    "oi_name": "Lagoon",
+    "score": 1.0
+  },
+  "lawn": {
+    "coarse": "nature",
+    "mid": "/m/01v327",
+    "oi_name": "Lawn",
+    "score": 1.0
+  },
+  "lighthouse": {
+    "coarse": "nature",
+    "mid": "/m/04h7h",
+    "oi_name": "Lighthouse",
+    "score": 1.0
+  },
+  "living room": {
+    "coarse": "indoor_home",
+    "mid": "/m/03f6tq",
+    "oi_name": "Living room",
+    "score": 1.0
+  },
+  "lobby": {
+    "coarse": "indoor",
+    "mid": "/m/027dwg0",
+    "oi_name": "Lobby",
+    "score": 1.0
+  },
+  "mansion": {
+    "coarse": "residential",
+    "mid": "/m/02pvbb",
+    "oi_name": "Mansion",
+    "score": 1.0
+  },
+  "marsh": {
+    "coarse": "nature",
+    "mid": "/m/016nsr",
+    "oi_name": "Marsh",
+    "score": 1.0
+  },
+  "mausoleum": {
+    "coarse": "historic",
+    "mid": "/m/01hmml",
+    "oi_name": "Mausoleum",
+    "score": 1.0
+  },
+  "mountain": {
+    "coarse": "nature",
+    "mid": "/m/09d_r",
+    "oi_name": "Mountain",
+    "score": 1.0
+  },
+  "nursery": {
+    "coarse": "indoor_home",
+    "mid": "/m/02pv0pf",
+    "oi_name": "Nursery",
+    "score": 1.0
+  },
+  "ocean": {
+    "coarse": "nature_water",
+    "mid": "/m/05kq4",
+    "oi_name": "Ocean",
+    "score": 1.0
+  },
+  "office": {
+    "coarse": "workplace",
+    "mid": "/m/021sj1",
+    "oi_name": "Office",
+    "score": 1.0
+  },
+  "pagoda": {
+    "coarse": "religious",
+    "mid": "/m/01q4vl",
+    "oi_name": "Pagoda",
+    "score": 1.0
+  },
+  "palace": {
+    "coarse": "historic",
+    "mid": "/m/05zp8",
+    "oi_name": "Palace",
+    "score": 1.0
+  },
+  "pantry": {
+    "coarse": "indoor_home",
+    "mid": "/m/02p413",
+    "oi_name": "Pantry",
+    "score": 1.0
+  },
+  "park": {
+    "coarse": "nature",
+    "mid": "/m/0166ls",
+    "oi_name": "Park",
+    "score": 1.0
+  },
+  "parking lot": {
+    "coarse": "urban",
+    "mid": "/m/02jxn5",
+    "oi_name": "Parking lot",
+    "score": 1.0
+  },
+  "pasture": {
+    "coarse": "nature",
+    "mid": "/m/01gd91",
+    "oi_name": "Pasture",
+    "score": 1.0
+  },
+  "patio": {
+    "coarse": "residential",
+    "mid": "/m/02p8qh",
+    "oi_name": "Patio",
+    "score": 1.0
+  },
+  "pavilion": {
+    "coarse": "urban",
+    "mid": "/m/04wjqw",
+    "oi_name": "Pavilion",
+    "score": 1.0
+  },
+  "pharmacy": {
+    "coarse": "indoor_retail",
+    "mid": "/m/01rfps",
+    "oi_name": "Pharmacy",
+    "score": 1.0
+  },
+  "pier": {
+    "coarse": "nature",
+    "mid": "/m/01phq4",
+    "oi_name": "Pier",
+    "score": 1.0
+  },
+  "playground": {
+    "coarse": "sports",
+    "mid": "/m/01h_1n",
+    "oi_name": "Playground",
+    "score": 1.0
+  },
+  "plaza": {
+    "coarse": "urban",
+    "mid": "/m/01klb9",
+    "oi_name": "Plaza",
+    "score": 1.0
+  },
+  "pond": {
+    "coarse": "nature",
+    "mid": "/m/0184rb",
+    "oi_name": "Pond",
+    "score": 1.0
+  },
+  "porch": {
+    "coarse": "residential",
+    "mid": "/m/04m6gz",
+    "oi_name": "Porch",
+    "score": 1.0
+  },
+  "raft": {
+    "coarse": "nature_water",
+    "mid": "/m/019fyk",
+    "oi_name": "Raft",
+    "score": 1.0
+  },
+  "rainforest": {
+    "coarse": "nature",
+    "mid": "/m/0d8cn",
+    "oi_name": "Rainforest",
+    "score": 1.0
+  },
+  "recreation room": {
+    "coarse": "other",
+    "mid": "/m/03f6tc",
+    "oi_name": "Recreation room",
+    "score": 1.0
+  },
+  "restaurant": {
+    "coarse": "food_dining",
+    "mid": "/m/06l8d",
+    "oi_name": "Restaurant",
+    "score": 1.0
+  },
+  "river": {
+    "coarse": "nature",
+    "mid": "/m/06cnp",
+    "oi_name": "River",
+    "score": 1.0
+  },
+  "rope bridge": {
+    "coarse": "other",
+    "mid": "/m/02wv8fd",
+    "oi_name": "Rope bridge",
+    "score": 1.0
+  },
+  "runway": {
+    "coarse": "public_transport",
+    "mid": "/m/03bxt6z",
+    "oi_name": "Runway",
+    "score": 1.0
+  },
+  "shed": {
+    "coarse": "residential",
+    "mid": "/m/01n6fd",
+    "oi_name": "Shed",
+    "score": 1.0
+  },
+  "shoe shop": {
+    "coarse": "other",
+    "mid": "/m/0h62vyn",
+    "oi_name": "Shoe store",
+    "score": 0.737
+  },
+  "shower": {
+    "coarse": "indoor_home",
+    "mid": "/m/02f9f_",
+    "oi_name": "Shower",
+    "score": 1.0
+  },
+  "ski resort": {
+    "coarse": "hotel",
+    "mid": "/m/02dkrm",
+    "oi_name": "Resort",
+    "score": 0.75
+  },
+  "sky": {
+    "coarse": "nature",
+    "mid": "/m/01bqvp",
+    "oi_name": "Sky",
+    "score": 1.0
+  },
+  "skyscraper": {
+    "coarse": "urban",
+    "mid": "/m/079cl",
+    "oi_name": "Skyscraper",
+    "score": 1.0
+  },
+  "slum": {
+    "coarse": "urban",
+    "mid": "/m/01c778",
+    "oi_name": "Slum",
+    "score": 1.0
+  },
+  "stable": {
+    "coarse": "nature",
+    "mid": "/m/02hxzv",
+    "oi_name": "Stable",
+    "score": 1.0
+  },
+  "street": {
+    "coarse": "urban",
+    "mid": "/m/01c8br",
+    "oi_name": "Street",
+    "score": 1.0
+  },
+  "supermarket": {
+    "coarse": "indoor_retail",
+    "mid": "/m/0dnkv",
+    "oi_name": "Supermarket",
+    "score": 1.0
+  },
+  "swamp": {
+    "coarse": "nature",
+    "mid": "/m/0lvlk",
+    "oi_name": "Swamp",
+    "score": 1.0
+  },
+  "swimming pool outdoor": {
+    "coarse": "sports",
+    "mid": "/m/0b_rs",
+    "oi_name": "Swimming pool",
+    "score": 0.765
+  },
+  "tower": {
+    "coarse": "historic",
+    "mid": "/m/01fdzj",
+    "oi_name": "Tower",
+    "score": 1.0
+  },
+  "train station platform": {
+    "coarse": "public_transport",
+    "mid": "/m/0py27",
+    "oi_name": "Train station",
+    "score": 0.743
+  },
+  "tree house": {
+    "coarse": "other",
+    "mid": "/m/02wg_p",
+    "oi_name": "Tree house",
+    "score": 1.0
+  },
+  "tundra": {
+    "coarse": "nature",
+    "mid": "/m/07k3c",
+    "oi_name": "Tundra",
+    "score": 1.0
+  },
+  "valley": {
+    "coarse": "nature",
+    "mid": "/m/07yxk",
+    "oi_name": "Valley",
+    "score": 1.0
+  },
+  "viaduct": {
+    "coarse": "urban",
+    "mid": "/m/01jnfv",
+    "oi_name": "Viaduct",
+    "score": 1.0
+  },
+  "village": {
+    "coarse": "urban",
+    "mid": "/m/0f0q9",
+    "oi_name": "Village",
+    "score": 1.0
+  },
+  "vineyard": {
+    "coarse": "nature",
+    "mid": "/m/016btq",
+    "oi_name": "Vineyard",
+    "score": 1.0
+  },
+  "volcano": {
+    "coarse": "nature",
+    "mid": "/m/07_9_",
+    "oi_name": "Volcano",
+    "score": 1.0
+  },
+  "waiting room": {
+    "coarse": "indoor",
+    "mid": "/m/025sbr0",
+    "oi_name": "Waiting room",
+    "score": 1.0
+  },
+  "water park": {
+    "coarse": "sports",
+    "mid": "/m/01wt5r",
+    "oi_name": "Water park",
+    "score": 1.0
+  },
+  "water tower": {
+    "coarse": "urban",
+    "mid": "/m/0c7py",
+    "oi_name": "Water tower",
+    "score": 1.0
+  },
+  "waterfall": {
+    "coarse": "nature",
+    "mid": "/m/0j2kx",
+    "oi_name": "Waterfall",
+    "score": 1.0
+  },
+  "wave": {
+    "coarse": "nature_water",
+    "mid": "/m/02p0sll",
+    "oi_name": "Wave",
+    "score": 1.0
+  },
+  "wind farm": {
+    "coarse": "nature",
+    "mid": "/m/03j5zb",
+    "oi_name": "Wind farm",
+    "score": 1.0
+  },
+  "windmill": {
+    "coarse": "nature",
+    "mid": "/m/0bxdx",
+    "oi_name": "Windmill",
+    "score": 1.0
+  },
+  "yard": {
+    "coarse": "residential",
+    "mid": "/m/049_3v",
+    "oi_name": "Yard",
+    "score": 1.0
+  },
+  "zen garden": {
+    "coarse": "nature",
+    "mid": "/m/0bl0l",
+    "oi_name": "Garden",
+    "score": 0.75
+  }
+}

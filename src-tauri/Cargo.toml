@@ -9,7 +9,7 @@ rust-version = "1.77"
 
 [lib]
 name = "photogremlin_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,11 +24,30 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 walkdir = "2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "tiff"] }
 kamadak-exif = "0.6"
+# Camera RAW decode provider (Sprint 15): pure-Rust, content-sniffed, covers
+# every extension in scanner::RAW_EXT (CR2/CR3/NEF/ARW/RAF/DNG/ORF/RW2) plus
+# PEF/3FR/IIQ etc. LGPL-2.1 — see docs/RAW_PREVIEWS.md for the compliance note.
+rawler = "0.7"
+# Pinned exactly: ort 1.x + 2.0.0-alpha are yanked on crates.io, and the
+# `load-dynamic` feature (runtime dlopen of libonnxruntime) was removed
+# after rc.9. ort-sys is pinned too — rc.9→rc.10 changed OrtApiBase bindings
+# (Option<fn> → raw ptrs) and ort rc.9 does not compile against rc.10+.
+# See docs/LOCAL_AI.md.
+ort = { version = "=2.0.0-rc.9", default-features = false, features = ["load-dynamic"] }
+ort-sys = "=2.0.0-rc.9"
+# Direct dep (same version ort's load-dynamic feature uses) so we can probe
+# for the ONNX Runtime library before ort loads it — ort PANICS instead of
+# returning an error when the library is missing, and the app must degrade
+# gracefully without it.
+libloading = "0.8"
+
+[dev-dependencies]
+chrono = { version = "0.4" }
 
 [profile.release]
 codegen-units = 1
@@ -39,3 +58,11 @@ panic = "abort"
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
+codegen-units = 8
+
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+codegen-units = 8
+incremental = false

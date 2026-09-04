@@ -1,0 +1,6 @@
+# Keep local builds inside the 16 GB workstation's safe memory envelope.
+# The Tauri/image/ONNX dependency graph and final linker are large enough that
+# two simultaneous compiler processes can trigger systemd-oomd. Override with
+# Cargo's `--jobs` flag only on a larger machine or CI runner.
+[build]
+jobs = 1
