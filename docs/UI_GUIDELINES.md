@@ -71,25 +71,36 @@ its own graphite/silver tokens, language, and local-first controls.
   open only when requested and retain preview-first safety.
 - Normal Library tiles reveal marks on hover, focus or selection. Cull and
   Collections keep marks visible because they are active decision surfaces.
+- Analysis diagnostics such as sharpness and eye-closure confidence never sit
+  on normal photo cards. They remain available in the filter inspector and
+  detail surfaces, where their meaning and context can be read deliberately.
 - Rating stars are cumulative: a rating of four illuminates stars one through
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
 - The 12-hue color spectrum is the inspector's primary visual filter. It is
   always visible, supports multi-selection, communicates **match any**, and
-  shows selected hues as removable text-labelled chips. Hue is deterministic
-  image data, not a color label or aesthetic verdict.
-- Brightness, sharpness, contrast, ISO and focal length are dual-range controls
-  inside a labelled disclosure. The disclosure opens automatically whenever a
-  measured range is active; otherwise it stays closed to keep the inspector
-  calm and progressively reveal precision controls. Their tracks use one
-  restrained low-to-high cool-blue tonal ramp, so measurement controls remain
-  easy to identify without turning the inspector into a multicolor dashboard.
-  This is measurement context, never a red/green quality verdict. Exact values are
-  hidden at rest and appear in the thumb bubble while the control is being
-  adjusted; screen readers receive the same value through the native range
-  input and `aria-valuetext`.
-- Those five ranges are not offered again by the advanced composer. Legacy
+  shows selected hues as removable text-labelled chips. The wheel center
+  reports the current selection count, and Clear appears only while a selection
+  is active. Hue is deterministic image data, not a color label or aesthetic
+  verdict.
+- Brightness, sharpness, contrast, highlight clipping, shadow clipping, eye
+  closure confidence, ISO and focal length are compact nested disclosure rows
+  inside the measured-filters disclosure. Each row keeps its label, current
+  filter state and local-value availability visible; expanding it reveals the
+  dual-range control and missing-value actions. The parent opens automatically
+  whenever a measured range is active, and active rows start open while
+  inactive rows stay collapsed. Their tracks use one restrained low-to-high
+  cool-blue tonal ramp, so measurement controls remain easy to identify without
+  turning the inspector into a multicolor dashboard. This is measurement
+  context, never a red/green quality verdict. Exact values are hidden at rest
+  and appear in the thumb bubble while the control is being adjusted; screen
+  readers receive the same value through the native range input and
+  `aria-valuetext`.
+- Those eight ranges are not offered again by the advanced composer. Legacy
   saved conditions remain visible and removable without silent rewriting.
+- The advanced composer keeps native select semantics and keyboard behavior,
+  while presenting field, condition and value in labelled compact shells with
+  a consistent chevron and an explicit active-condition count.
 - Similar, burst and local face-appearance results live in Groups, not above
   the Library grid. Group cards use neutral factual descriptions and open into
   the same virtual photo grid and viewer used by other photo surfaces.

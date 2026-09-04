@@ -28,16 +28,19 @@ export function ColorSpectrumFilter({ draft, onChange, disabled }: ColorSpectrum
     <section className="color-spectrum-filter" aria-labelledby="color-spectrum-heading">
       <div className="color-spectrum-head">
         <span>
-          <strong id="color-spectrum-heading">Color explorer</strong>
-          <small>Select one or more hues found in a photograph</small>
+          <strong id="color-spectrum-heading">Colors in frame</strong>
+          <small>Choose one or more hues found in a photograph</small>
         </span>
-        <button
-          type="button"
-          onClick={() => onChange(setPaletteColors(draft, []))}
-          disabled={disabled || selected.length === 0}
-        >
-          Clear
-        </button>
+        {selected.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange(setPaletteColors(draft, []))}
+            disabled={disabled}
+            aria-label={`Clear ${selected.length} selected ${selected.length === 1 ? "color" : "colors"}`}
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       <div className="color-spectrum-layout">
@@ -67,7 +70,7 @@ export function ColorSpectrumFilter({ draft, onChange, disabled }: ColorSpectrum
           })}
           <output className="color-spectrum-count" aria-live="polite">
             <strong>{selected.length || "All"}</strong>
-            <span>{selected.length === 1 ? "hue" : selected.length > 1 ? "hues" : "colors"}</span>
+            <span>{selected.length > 0 ? "selected" : "colors"}</span>
           </output>
         </div>
 
@@ -75,7 +78,7 @@ export function ColorSpectrumFilter({ draft, onChange, disabled }: ColorSpectrum
           {selected.length > 0 ? (
             <>
               <span>Match any selected hue</span>
-              <div aria-label="Selected colors">
+              <div aria-label="Selected colors, match any">
                 {PALETTE_COLORS.filter((color) => selectedSet.has(color.id)).map((color) => (
                   <button
                     key={color.id}
@@ -91,7 +94,7 @@ export function ColorSpectrumFilter({ draft, onChange, disabled }: ColorSpectrum
               </div>
             </>
           ) : (
-            <p>All colors are visible. Choose a hue to narrow the library.</p>
+            <p>All analyzed colors are included. Choose hues to narrow the library.</p>
           )}
         </div>
       </div>

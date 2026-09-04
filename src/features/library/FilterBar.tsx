@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
 import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
@@ -115,6 +115,30 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
   );
 }
 
+function ComposerControl({
+  label,
+  children,
+  select = false,
+  wide = false,
+  className = "",
+}: {
+  label: string;
+  children: ReactNode;
+  select?: boolean;
+  wide?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={`filter-compose-control${wide ? " is-wide" : ""}${className ? ` ${className}` : ""}`}>
+      <span className="filter-compose-label">{label}</span>
+      <span className={`filter-compose-input${select ? " is-select" : ""}`}>
+        {children}
+        {select && <span className="filter-compose-chevron" aria-hidden="true">⌄</span>}
+      </span>
+    </div>
+  );
+}
+
 /**
  * The library's active filter, edited as structured conditions (not UI
  * state): what's rendered here is exactly the object sent to the Rust
@@ -157,6 +181,11 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
   const needsTwoValues = op === "between" && def.kind !== "datetime";
   const needsValue = !["is-null", "not-null"].includes(op);
+  const valueUsesSelect = needsValue && (
+    def.kind === "bool"
+    || (def.kind === "text" && (hasMetadataOptions || Boolean(def.values)))
+  );
+  const valueUsesPair = needsValue && op === "between";
   const candidate = raw === UNIDENTIFIED
     ? { field, operator: "is-null" as const, value: null }
     : buildCondition(field, op, raw, raw2);
@@ -206,6 +235,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             className="input"
             value={raw === "false" ? "false" : "true"}
             onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
           >
             <option value="true">true</option>
             <option value="false">false</option>
@@ -238,7 +268,12 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
         }
         if (def.values) {
           return (
-            <select className="input" value={raw} onChange={(e) => setRaw(e.target.value)}>
+            <select
+              className="input"
+              value={raw}
+              onChange={(e) => setRaw(e.target.value)}
+              aria-label={`${def.label} value`}
+            >
               <option value="">—</option>
               {def.values.map((v) => (
                 <option key={v} value={v}>
@@ -255,6 +290,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             placeholder={op === "in" ? "comma-separated values" : "value"}
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
           />
         );
       case "datetime":
@@ -279,7 +315,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                 className="input"
                 type="number"
                 step={def.kind === "int" ? 1 : "any"}
-                aria-label="minimum"
+                aria-label={`${def.label} minimum`}
                 value={raw}
                 onChange={(e) => setRaw(e.target.value)}
               />
@@ -288,7 +324,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                 className="input"
                 type="number"
                 step={def.kind === "int" ? 1 : "any"}
-                aria-label="maximum"
+                aria-label={`${def.label} maximum`}
                 value={raw2}
                 onChange={(e) => setRaw2(e.target.value)}
               />
@@ -303,6 +339,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               placeholder="comma-separated values"
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
+              aria-label={`${def.label} value`}
             />
           );
         }
@@ -313,6 +350,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             step={def.kind === "int" ? 1 : "any"}
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
+            aria-label={`${def.label} value`}
           />
         );
     }
@@ -422,38 +460,62 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             >
               <span>
                 <strong>More filters</strong>
-                <small>Camera, lens, date and other fields</small>
+                <small>Camera, date, review and other fields</small>
               </span>
-              <span className="more-filters-chevron" aria-hidden="true">⌄</span>
+              <span className="more-filters-meta">
+                <span className={`more-filters-count mono${otherConditions.length > 0 ? " is-active" : ""}`}>
+                  {otherConditions.length > 0 ? `${otherConditions.length} active` : "Optional"}
+                </span>
+                <span className="more-filters-chevron" aria-hidden="true">⌄</span>
+              </span>
             </button>
 
             {advancedOpen && (
               <div className="more-filters-panel" id="advanced-filter-composer">
                 <div className="filterbar-compose">
-                  <select className="input" value={field} onChange={(e) => selectField(e.target.value)}>
-                    {AREA_ORDER.map((area) => (
-                      <optgroup key={area} label={area}>
-                        {ADVANCED_FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
-                          <option key={f.field} value={f.field}>
-                            {f.label}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <select
-                    className="input"
-                    value={op}
-                    onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
-                  >
-                    {ops.map((o) => (
-                      <option key={o.op} value={o.op}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  {valueInput()}
-                  <button className="btn btn-sm" onClick={add} disabled={!canAdd || disabled}>
+                  <ComposerControl label="Field" select className="filter-compose-control-field">
+                    <select
+                      className="input"
+                      value={field}
+                      onChange={(e) => selectField(e.target.value)}
+                      aria-label="Filter field"
+                    >
+                      {AREA_ORDER.map((area) => (
+                        <optgroup key={area} label={area}>
+                          {ADVANCED_FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
+                            <option key={f.field} value={f.field}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </ComposerControl>
+                  <ComposerControl label="Condition" select>
+                    <select
+                      className="input"
+                      value={op}
+                      onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+                      aria-label="Filter condition"
+                    >
+                      {ops.map((o) => (
+                        <option key={o.op} value={o.op}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </ComposerControl>
+                  {needsValue && (
+                    <ComposerControl
+                      label="Value"
+                      select={valueUsesSelect}
+                      wide={valueUsesPair}
+                      className="filter-compose-control-value"
+                    >
+                      {valueInput()}
+                    </ComposerControl>
+                  )}
+                  <button type="button" className="btn btn-sm filterbar-compose-add" onClick={add} disabled={!canAdd || disabled}>
                     Add filter
                   </button>
                 </div>
