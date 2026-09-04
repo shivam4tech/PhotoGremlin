@@ -25,6 +25,7 @@ fn metrics(sharpness: f64, brightness: f64, mono: bool) -> Metrics {
         brightness,
         contrast: 50.0,
         saturation: if mono { 2.0 } else { 60.0 },
+        color_signature: 0,
         highlight_clipping: 0.5,
         shadow_clipping: 0.2,
         is_monochrome: mono,

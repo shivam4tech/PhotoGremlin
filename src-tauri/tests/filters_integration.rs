@@ -18,12 +18,14 @@ fn metrics(
     mono: bool,
     dark: bool,
     bright: bool,
+    color_signature: u16,
 ) -> Metrics {
     Metrics {
         sharpness,
         brightness,
         contrast: 50.0,
         saturation: if mono { 2.0 } else { 60.0 },
+        color_signature,
         highlight_clipping: 0.5,
         shadow_clipping: 0.2,
         is_monochrome: mono,
@@ -159,15 +161,15 @@ fn seed(db: &Db) {
     // Analysis on four of the six (p3 unanalyzed, p5 unanalyzed).
     db.upsert_analysis(
         p1,
-        &metrics(85.0, 55.0, false, false, false),
+        &metrics(85.0, 55.0, false, false, false, (1 << 0) | (1 << 8)),
         Some("2026-08-17T00:00:00Z"),
     )
     .unwrap();
-    db.upsert_analysis(p2, &metrics(40.0, 80.0, true, false, false), Some("2026-08-17T00:00:00Z"))
+    db.upsert_analysis(p2, &metrics(40.0, 80.0, true, false, false, 0), Some("2026-08-17T00:00:00Z"))
         .unwrap();
-    db.upsert_analysis(p4, &metrics(70.0, 66.0, false, false, true), Some("2026-08-17T00:00:00Z"))
+    db.upsert_analysis(p4, &metrics(70.0, 66.0, false, false, true, 1 << 4), Some("2026-08-17T00:00:00Z"))
         .unwrap();
-    db.upsert_analysis(p6, &metrics(69.999, 40.0, false, false, false), Some("2026-08-17T00:00:00Z"))
+    db.upsert_analysis(p6, &metrics(69.999, 40.0, false, false, false, 1 << 8), Some("2026-08-17T00:00:00Z"))
         .unwrap();
 }
 
@@ -310,6 +312,35 @@ fn flags_include_unanalyzed_semantics() {
         10,
     );
     assert_eq!(total, 0);
+}
+
+#[test]
+fn palette_colors_match_any_selected_hue_and_compose_with_other_filters() {
+    let db = db("palette");
+    seed(&db);
+
+    // Red or blue matches p1; blue also matches p6. Monochrome and
+    // unanalyzed rows have no indexed hues and stay out of the result.
+    let (files, total) = run(
+        &db,
+        r#"{"operator":"AND","conditions":[{"field":"palette_color","operator":"in","value":["red","blue"]}]}"#,
+        0,
+        10,
+    );
+    assert_eq!(total, 2);
+    assert!(files.contains(&"p1.jpg".to_string()));
+    assert!(files.contains(&"p6.jpg".to_string()));
+
+    // Palette selection composes with every other condition using AND.
+    let (files, total) = run(
+        &db,
+        r#"{"operator":"AND","conditions":[
+            {"field":"palette_color","operator":"in","value":["green"]},
+            {"field":"sharpness","operator":">=","value":70}]}"#,
+        0,
+        10,
+    );
+    assert_eq!((total, files), (1, vec!["p4.jpg".to_string()]));
 }
 
 #[test]

@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use image::ImageBuffer;
 use photogremlin_lib::analysis::{self, AnalysisSummary};
-use photogremlin_lib::database::Db;
+use photogremlin_lib::database::{Db, ANALYSIS_ALGORITHM_VERSION};
 use photogremlin_lib::events::ProgressPayload;
 use photogremlin_lib::scanner;
 
@@ -136,12 +136,13 @@ fn analysis_measures_decodables_and_is_incremental() {
     assert!(!entries.is_empty());
     assert_eq!(*entries.last().unwrap(), (4, 4)); // final progress drained
 
-    // Rows exist for exactly the 4 decodables, version 1, mtime recorded.
+    // Rows exist for exactly the 4 decodables at the current algorithm
+    // version, with their source mtime recorded.
     let raw = analysis_row(&db, "RAW_0001.CR3");
     assert!(raw.is_none(), "RAW must not get an analysis row: {:?}", raw);
     for name in ["BRIGHT.png", "DARK.png", "SHARP.png", "SMOOTH.png"] {
         let (sharp, bright, ver, mtime, at) = analysis_row(&db, name).unwrap();
-        assert_eq!(ver, 1, "{name} version");
+        assert_eq!(ver, ANALYSIS_ALGORITHM_VERSION, "{name} version");
         assert!(sharp.is_finite() && (0.0..=100.0).contains(&sharp), "{name} sharpness");
         assert!(bright.is_finite() && (0.0..=100.0).contains(&bright), "{name} brightness");
         assert!(mtime.is_some(), "{name} source_mtime recorded");

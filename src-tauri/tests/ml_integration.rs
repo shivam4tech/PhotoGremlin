@@ -163,6 +163,7 @@ fn face_only_row_is_picked_up_by_analysis_and_preserved() {
         brightness: 52.0,
         contrast: 63.0,
         saturation: 22.0,
+        color_signature: 1,
         highlight_clipping: 1.0,
         shadow_clipping: 0.0,
         is_monochrome: false,

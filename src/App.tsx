@@ -409,14 +409,15 @@ export default function App() {
           ) : null}
         </TopBar>
         <div className={view === "library" ? "view-scroll library-scroll" : view === "groups" ? "view-scroll groups-scroll" : view === "home" ? "view-scroll home-scroll" : "view-scroll"}>
-          <ErrorBoundary
-            key={view}
-            onError={(viewError: Error, info: ErrorInfo) =>
-              reportClientError(`view-render:${view}`, new Error(`${viewError.message}\n${info.componentStack ?? ""}`))
-            }
-          >
-            {body}
-          </ErrorBoundary>
+          <div key={view} className="view-transition">
+            <ErrorBoundary
+              onError={(viewError: Error, info: ErrorInfo) =>
+                reportClientError(`view-render:${view}`, new Error(`${viewError.message}\n${info.componentStack ?? ""}`))
+              }
+            >
+              {body}
+            </ErrorBoundary>
+          </div>
         </div>
         {safeNotice && (
           <div

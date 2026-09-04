@@ -3,6 +3,7 @@ import {
   FIELD_BY_NAME,
   FILTER_FIELDS,
   OPS_BY_KIND,
+  PALETTE_COLORS,
   buildCondition,
   chipLabel,
   draftToFilter,
@@ -11,6 +12,8 @@ import {
   quickRangeCondition,
   QUICK_FILTER_PRESETS,
   replaceFieldConditions,
+  selectedPaletteColors,
+  setPaletteColors,
   isQuickFilterPresetActive,
   toggleQuickFilterPreset,
   toggleExactFieldCondition,
@@ -26,6 +29,7 @@ describe("filter registry", () => {
     }
     expect(advanced.has("rating")).toBe(true);
     expect(advanced.has("camera_model")).toBe(true);
+    expect(advanced.has("palette_color")).toBe(false);
   });
   it("mirrors the Rust field registry (names + kinds)", () => {
     const expectField = (field: string, kind: string, area: string) => {
@@ -45,6 +49,7 @@ describe("filter registry", () => {
     expectField("possible_blink", "bool", "Burst context");
     expectField("monochrome", "bool", "Visual");
     expectField("color", "bool", "Visual");
+    expectField("palette_color", "palette", "Visual");
     expectField("orientation", "text", "Orientation");
     expectField("camera_make", "text", "Camera & lens");
     expectField("camera_model", "text", "Camera & lens");
@@ -66,6 +71,7 @@ describe("filter registry", () => {
     expect(OPS_BY_KIND.bool.map((o) => o.op)).toEqual(["=", "!="]);
     expect(OPS_BY_KIND.real.map((o) => o.op)).toContain(">=");
     expect(OPS_BY_KIND.datetime.map((o) => o.op)).toContain("between");
+    expect(OPS_BY_KIND.palette.map((o) => o.op)).toEqual(["in"]);
     // text has no range operators
     expect(OPS_BY_KIND.text.map((o) => o.op)).not.toContain(">");
     // every registered field resolves to a known operator list
@@ -137,6 +143,16 @@ describe("buildCondition", () => {
       value: ["A7", "R5"],
     });
     expect(buildCondition("camera_model", "in", "   ", "")).toBeNull();
+  });
+
+  it("builds palette colors in wheel order and rejects unknown hues", () => {
+    expect(buildCondition("palette_color", "in", "BLUE, red, blue", "")).toEqual({
+      field: "palette_color",
+      operator: "in",
+      value: ["red", "blue"],
+    });
+    expect(buildCondition("palette_color", "in", "red, infrared", "")).toBeNull();
+    expect(PALETTE_COLORS).toHaveLength(12);
   });
 
   it("honors fixed value sets (orientation)", () => {
@@ -225,6 +241,29 @@ describe("chipLabel", () => {
     expect(chipLabel({ field: "camera_model", operator: "in", value: ["A7", "R5"] })).toBe(
       "camera model in {A7, R5}",
     );
+    expect(chipLabel({ field: "palette_color", operator: "in", value: ["red", "blue"] })).toBe(
+      "colors: Red + Blue",
+    );
+  });
+});
+
+describe("palette controls", () => {
+  it("stores one ordered multi-color condition without changing other filters", () => {
+    const rating = { field: "rating", operator: ">=" as const, value: 4 };
+    const next = setPaletteColors([rating], ["blue", "red"]);
+
+    expect(next).toEqual([
+      rating,
+      { field: "palette_color", operator: "in", value: ["red", "blue"] },
+    ]);
+    expect(selectedPaletteColors(next)).toEqual(["red", "blue"]);
+    expect(setPaletteColors(next, [])).toEqual([rating]);
+  });
+
+  it("reads saved palette values defensively", () => {
+    expect(selectedPaletteColors([
+      { field: "palette_color", operator: "in", value: ["blue", "infrared", 7] },
+    ])).toEqual(["blue"]);
   });
 });
 

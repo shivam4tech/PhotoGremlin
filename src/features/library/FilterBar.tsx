@@ -14,6 +14,7 @@ import {
   toggleQuickFilterPreset,
 } from "./filterFields";
 import { QuickFilterControls } from "./QuickFilterControls";
+import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
 
 interface FilterBarProps {
   draft: FilterCondition[];
@@ -26,8 +27,8 @@ interface FilterBarProps {
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
-const QUICK_RANGE_FIELD_SET = new Set<string>(QUICK_RANGE_FIELDS);
-export const ADVANCED_FILTER_FIELDS = FILTER_FIELDS.filter((definition) => !QUICK_RANGE_FIELD_SET.has(definition.field));
+const BESPOKE_FILTER_FIELDS = new Set<string>([...QUICK_RANGE_FIELDS, "palette_color"]);
+export const ADVANCED_FILTER_FIELDS = FILTER_FIELDS.filter((definition) => !BESPOKE_FILTER_FIELDS.has(definition.field));
 const UNIDENTIFIED = "__photogremlin_unidentified__";
 
 function monthFromDate(value: string): Date {
@@ -163,7 +164,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const expanded = mode === "inspector" || open;
   const otherConditions = draft
     .map((condition, index) => ({ condition, index }))
-    .filter(({ condition }) => !QUICK_RANGE_FIELD_SET.has(condition.field));
+    .filter(({ condition }) => !BESPOKE_FILTER_FIELDS.has(condition.field));
   const rating = draft.find((condition) => condition.field === "rating");
   const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
   const unratedOnly = rating?.operator === "=" && rating.value === 0;
@@ -197,6 +198,8 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   function valueInput() {
     if (!needsValue) return null;
     switch (def.kind) {
+      case "palette":
+        return null;
       case "bool":
         return (
           <select
@@ -333,6 +336,12 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
       {expanded && (
         <div className="filterbar-panel">
+          <ColorSpectrumFilter
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+          />
+
           {otherConditions.length > 0 && (
             <div className="filterbar-chips">
               <span className="filterbar-chips-label">Other filters</span>
@@ -375,13 +384,6 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             </div>
           </section>
 
-          <QuickFilterControls
-            draft={draft}
-            onChange={onChange}
-            disabled={disabled}
-            sessionId={sessionId}
-          />
-
           <section className="rating-filter" aria-labelledby="rating-filter-heading">
             <div className="rating-filter-head">
               <strong id="rating-filter-heading">Rating</strong>
@@ -402,6 +404,13 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
             </div>
           </section>
+
+          <QuickFilterControls
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            sessionId={sessionId}
+          />
 
           <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
             <button

@@ -39,6 +39,19 @@
   --range-low: #293542;
   --range-mid: #3975aa;
   --range-high: #69b8ff;
+  /* Functional data-encoding colors shared by the spectrum and its legend. */
+  --hue-red: #e44343;
+  --hue-orange: #ef862f;
+  --hue-yellow: #e4c337;
+  --hue-lime: #9fcf3f;
+  --hue-green: #42b968;
+  --hue-teal: #36ad92;
+  --hue-cyan: #39aec3;
+  --hue-azure: #3d8fd0;
+  --hue-blue: #486bd1;
+  --hue-violet: #7d58d3;
+  --hue-magenta: #c14fc4;
+  --hue-rose: #d94e7b;
   --photo-canvas: #090b0e;
   --dialog-backdrop: rgba(6, 8, 12, 0.78);
   --photo-overlay: rgba(7, 9, 12, 0.9);
@@ -239,6 +252,22 @@ select:focus {
 .groups-scroll {
   overflow: hidden;
   padding: 0;
+}
+
+.view-transition {
+  min-height: 100%;
+  animation: view-enter 180ms ease-out both;
+}
+.library-scroll > .view-transition,
+.groups-scroll > .view-transition {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+@keyframes view-enter {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 /* ---------- Sidebar ---------- */
@@ -923,6 +952,182 @@ select:focus {
 }
 .quick-presets-list button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
 .quick-presets-list button:disabled { cursor: not-allowed; opacity: .5; }
+.color-spectrum-filter {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+.color-spectrum-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+.color-spectrum-head > span {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.color-spectrum-head strong { font-size: 11.5px; }
+.color-spectrum-head small,
+.color-spectrum-note {
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.4;
+  text-wrap: pretty;
+}
+.color-spectrum-head > button {
+  min-height: var(--control-h-sm);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-faint);
+  font: 10px var(--font-ui);
+  cursor: pointer;
+}
+.color-spectrum-head > button:hover:not(:disabled) { color: var(--text); background: var(--bg-hover); }
+.color-spectrum-head > button:disabled { cursor: default; opacity: .36; }
+.color-spectrum-layout {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+.color-spectrum-wheel {
+  position: relative;
+  width: 176px;
+  height: 176px;
+  margin: 0 auto;
+}
+.color-spectrum-ring {
+  position: absolute;
+  inset: 20px;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--hue-red),
+    var(--hue-orange),
+    var(--hue-yellow),
+    var(--hue-lime),
+    var(--hue-green),
+    var(--hue-teal),
+    var(--hue-cyan),
+    var(--hue-azure),
+    var(--hue-blue),
+    var(--hue-violet),
+    var(--hue-magenta),
+    var(--hue-rose),
+    var(--hue-red)
+  );
+  opacity: .34;
+}
+.color-spectrum-ring::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  background: var(--bg-panel);
+}
+.spectrum-red { --spectrum-color: var(--hue-red); }
+.spectrum-orange { --spectrum-color: var(--hue-orange); }
+.spectrum-yellow { --spectrum-color: var(--hue-yellow); }
+.spectrum-lime { --spectrum-color: var(--hue-lime); }
+.spectrum-green { --spectrum-color: var(--hue-green); }
+.spectrum-teal { --spectrum-color: var(--hue-teal); }
+.spectrum-cyan { --spectrum-color: var(--hue-cyan); }
+.spectrum-azure { --spectrum-color: var(--hue-azure); }
+.spectrum-blue { --spectrum-color: var(--hue-blue); }
+.spectrum-violet { --spectrum-color: var(--hue-violet); }
+.spectrum-magenta { --spectrum-color: var(--hue-magenta); }
+.spectrum-rose { --spectrum-color: var(--hue-rose); }
+.spectrum-choice {
+  position: absolute;
+  z-index: 2;
+  top: var(--spectrum-y);
+  left: var(--spectrum-x);
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transform: translate(-50%, -50%) scale(1);
+  transition: transform 160ms ease-out, opacity 160ms ease-out;
+}
+.spectrum-choice > span {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgb(255 255 255 / 40%);
+  border-radius: 50%;
+  background: var(--spectrum-color);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 28%);
+}
+.spectrum-choice:hover:not(:disabled) { transform: translate(-50%, -50%) scale(1.12); }
+.spectrum-choice.is-active { transform: translate(-50%, -50%) scale(1.18); }
+.spectrum-choice.is-active > span { box-shadow: 0 0 0 3px var(--bg-panel), 0 0 0 5px var(--text); }
+.spectrum-choice:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 2px; }
+.spectrum-choice:disabled { cursor: not-allowed; opacity: .45; }
+.color-spectrum-count {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  z-index: 1;
+  display: grid;
+  gap: 0;
+  color: var(--text-faint);
+  text-align: center;
+  transform: translate(-50%, -50%);
+}
+.color-spectrum-count strong { color: var(--text); font: 600 18px var(--font-ui); }
+.color-spectrum-count span { font-size: 9.5px; }
+.color-spectrum-summary {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  align-content: center;
+}
+.color-spectrum-summary > span { color: var(--text-dim); font-size: 10.5px; }
+.color-spectrum-summary > div { display: flex; flex-wrap: wrap; gap: 5px; }
+.color-spectrum-summary button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font: 10.5px var(--font-ui);
+  cursor: pointer;
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+}
+.color-spectrum-summary button:hover:not(:disabled) { transform: translateY(-1px); }
+.color-spectrum-summary button:focus-visible { outline: 2px solid var(--border-focus); outline-offset: 1px; }
+.color-spectrum-summary button:disabled { cursor: not-allowed; opacity: .45; }
+.color-spectrum-summary button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--spectrum-color);
+}
+.color-spectrum-summary button b { color: var(--text-faint); font-weight: 400; }
+.color-spectrum-summary p {
+  max-width: 210px;
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+.color-spectrum-note { margin: 0; }
 .quick-filters {
   display: grid;
   border: 1px solid var(--border-subtle);
@@ -931,12 +1136,32 @@ select:focus {
   overflow: hidden;
 }
 .quick-filter-intro {
-  display: grid;
-  gap: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
   padding: 8px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
 }
+.quick-filter-intro:hover { background: var(--bg-hover); }
+.quick-filter-intro:focus-visible { outline: 2px solid var(--border-focus); outline-offset: -2px; }
+.quick-filter-intro > span:first-child { display: grid; gap: 1px; }
 .quick-filter-intro strong { font-size: 11.5px; }
-.quick-filter-intro span { color: var(--text-faint); font-size: 10px; }
+.quick-filter-intro small { color: var(--text-faint); font-size: 10px; }
+.quick-filter-chevron {
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition: transform 140ms ease-out;
+}
+.quick-filter-intro[aria-expanded="true"] .quick-filter-chevron { transform: rotate(180deg); }
+.quick-filter-content { animation: range-detail-in 160ms ease-out; }
 .quick-filter-note {
   padding: 7px 10px;
   border-top: 1px solid var(--border-subtle);
@@ -1202,6 +1427,9 @@ select:focus {
   gap: 10px;
   padding: 8px;
 }
+.filterbar-inspector .color-spectrum-layout { grid-template-columns: 1fr; gap: 6px; }
+.filterbar-inspector .color-spectrum-summary { justify-items: center; text-align: center; }
+.filterbar-inspector .color-spectrum-summary > div { justify-content: center; }
 .filterbar-inspector .filterbar-chips { display: grid; grid-template-columns: 1fr auto; gap: 4px; }
 .filterbar-chips-label {
   grid-column: 1 / -1;
@@ -1236,8 +1464,12 @@ select:focus {
 .inspector-save-form .input { width: 100%; }
 .inspector-save-form .btn { width: 100%; }
 @media (prefers-reduced-motion: reduce) {
-  .range-filter-chevron,
-  .more-filters-chevron { transition-duration: 1ms; }
+  .quick-filter-chevron,
+  .more-filters-chevron,
+  .spectrum-choice,
+  .color-spectrum-summary button { transition-duration: 1ms; }
+  .view-transition,
+  .quick-filter-content,
   .range-filter-detail,
   .more-filters-panel { animation-duration: 1ms; }
 }
