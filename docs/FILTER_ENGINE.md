@@ -201,6 +201,10 @@ only `review_state`.
 - `useFilteredPhotos.ts` keeps the current grid visible during refresh and
   ignores stale request completions. Pagination is guarded against duplicate
   requests; a reload replaces page zero instead of appending stale pages.
+- Sidebar edits remain live. `AdvancedFiltersDialog.tsx` reuses the same
+  controls with a private condition snapshot. Apply replaces the shared store's
+  conditions once; Cancel/Escape discard the snapshot. Category changes retain
+  draft conditions. No query, operator, analysis or persistence semantics change.
 
 ## Saved views (Sprint 8)
 

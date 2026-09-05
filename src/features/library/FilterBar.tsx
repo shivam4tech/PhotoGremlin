@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
 import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
@@ -15,6 +15,8 @@ import { QuickFilterControls } from "./QuickFilterControls";
 import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
 import { FilterPicker } from "./FilterPicker";
 import { ActiveFilterList } from "./ActiveFilterList";
+import { FILTER_CHOICES } from "./filterDiscovery";
+import { QuickFilterIcon } from "./QuickFilterIcon";
 
 interface FilterBarProps {
   draft: FilterCondition[];
@@ -24,6 +26,9 @@ interface FilterBarProps {
   sessionId?: number | null;
   /** Inspector mode is persistently open inside the Library's right rail. */
   mode?: "bar" | "inspector";
+  /** A category limits presentation only; the complete draft is preserved. */
+  category?: string;
+  onAdvanced?: () => void;
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
@@ -153,7 +158,8 @@ function ComposerControl({
  * engine and (later) stored in saved views. Neutral technical language
  * throughout (FILTER_ENGINE.md).
  */
-export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
+export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar", category, onAdvanced }: FilterBarProps) {
+  const headingId = useId();
   const root = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(draft.length > 0);
@@ -210,6 +216,8 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
     : buildCondition(field, op, raw, raw2);
   const canAdd = candidate !== null;
   const expanded = mode === "inspector" || open;
+  const categoryFields = FILTER_CHOICES.filter((choice) => !choice.preset && choice.category === category && choice.field !== "palette_color");
+  const rangeFields = categoryFields.map((choice) => choice.field).filter((name) => QUICK_RANGE_FIELDS.some((field) => field === name));
   const rating = draft.find((condition) => condition.field === "rating");
   const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
   const unratedOnly = rating?.operator === "=" && rating.value === 0;
@@ -389,11 +397,11 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
       {expanded && (
         <div className="filterbar-panel">
           <div className="filter-discovery">
-            <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />
+            {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
             <FilterPicker draft={draft} disabled={disabled} onSelect={(choice) => {
               if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
               else if (choice.field === "palette_color") {
-                root.current?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
+                (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
               } else selectField(choice.field);
             }} />
           </div>
@@ -444,11 +452,12 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               </div>
             )}
           </div>
-          <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />
+          {!category && <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />}
 
-          <section className="quick-presets" aria-labelledby="quick-presets-heading">
+          {(!category || category === "Quick filters") && <section className="quick-presets" aria-labelledby={`${headingId}-quick`}>
             <div className="quick-presets-head">
-              <strong id="quick-presets-heading">Quick filters</strong>
+              <strong id={`${headingId}-quick`}>Quick filters</strong>
+              {onAdvanced && <button type="button" className="btn btn-ghost btn-sm" onClick={onAdvanced}>See all</button>}
             </div>
             <div className="quick-presets-list">
               {QUICK_FILTER_PRESETS.map((preset) => {
@@ -462,16 +471,17 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                     disabled={disabled}
                     onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
                   >
-                    {preset.label}
+                    {category && <QuickFilterIcon id={preset.id} />}
+                    <span>{preset.label}</span>
                   </button>
                 );
               })}
             </div>
-          </section>
+          </section>}
 
-          <section className="rating-filter" aria-labelledby="rating-filter-heading">
+          {(!category || category === "Rating & review") && <section className="rating-filter" aria-labelledby={`${headingId}-rating`}>
             <div className="rating-filter-head">
-              <strong id="rating-filter-heading">Rating</strong>
+              <strong id={`${headingId}-rating`}>Rating</strong>
               <button type="button" className={!rating ? "is-active" : ""} disabled={disabled} aria-pressed={!rating} onClick={() => setRatingFilter("any")}>Any</button>
               <button type="button" className={unratedOnly ? "is-active" : ""} disabled={disabled} aria-pressed={unratedOnly} onClick={() => setRatingFilter("unrated")}>Unrated</button>
             </div>
@@ -489,14 +499,22 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               ))}
               <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
             </div>
-          </section>
+          </section>}
 
-          <QuickFilterControls
+          {(!category || rangeFields.length > 0) && <QuickFilterControls
             draft={draft}
             onChange={onChange}
             disabled={disabled}
             sessionId={sessionId}
-          />
+            fields={category ? rangeFields : undefined}
+          />}
+          {category && categoryFields.length > 0 && <div className="filter-category-fields">
+            <h4 className="filter-section-title">Specific conditions</h4>
+            {categoryFields.map((choice) => <button key={choice.id} type="button" disabled={disabled}
+              className="filter-category-field" onClick={() => selectField(choice.field)}>
+              <span>{choice.label}</span><span>{draft.some((condition) => condition.field === choice.field) ? "Added" : "Any"} <span aria-hidden="true">›</span></span>
+            </button>)}
+          </div>}
 
 
         </div>

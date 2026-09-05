@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./styles/theme.css";
 import "./styles/library.css";
+import "./styles/advanced-filters.css";
 import { applyTheme, readStoredTheme } from "./lib/theme";
 
 // Apply the stored theme before first paint so the window never flashes

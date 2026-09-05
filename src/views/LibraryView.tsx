@@ -8,6 +8,7 @@ import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
+import { AdvancedFiltersDialog } from "@/features/library/AdvancedFiltersDialog";
 import { CullActionTray } from "@/features/library/CullActionTray";
 import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
 import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
@@ -43,11 +44,12 @@ export function LibraryView() {
   const [reviewMode, setReviewMode] = useState(false);
 
   const [filtersOpen, setFiltersOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 1000);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [tileSize, setTileSize] = useState(180);
   const filterToggle = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
-      if (viewerId !== null || reviewMode || photoFileAction) return;
+      if (viewerId !== null || reviewMode || photoFileAction || advancedFiltersOpen) return;
       if (event.key === "Escape" && filtersOpen && window.innerWidth <= 1000) {
         setFiltersOpen(false); filterToggle.current?.focus(); return;
       }
@@ -60,7 +62,7 @@ export function LibraryView() {
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [viewerId, reviewMode, photoFileAction, filtersOpen]);
+  }, [viewerId, reviewMode, photoFileAction, filtersOpen, advancedFiltersOpen]);
 
   // Saving the current filter as a named view.
   const [saveViewOpen, setSaveViewOpen] = useState(false);
@@ -672,12 +674,17 @@ export function LibraryView() {
           </div>
 
           <>
+              <div className="filter-mode-switch" aria-label="Filter workspace">
+                <button type="button" aria-pressed="true" onClick={() => document.querySelector<HTMLInputElement>(".library-inspector .filter-search")?.focus()}>Simple</button>
+                <button type="button" aria-haspopup="dialog" onClick={() => setAdvancedFiltersOpen(true)}>Advanced</button>
+              </div>
               <FilterBar
                 mode="inspector"
                 draft={filterConditions}
                 onChange={(conditions) => store().setFilterConditions(conditions)}
                 disabled={anyPassRunning}
                 sessionId={sessionId}
+                onAdvanced={() => setAdvancedFiltersOpen(true)}
               />
 
               {filterConditions.length > 0 && (
@@ -722,6 +729,9 @@ export function LibraryView() {
         </aside>
       </div>
 
+      {advancedFiltersOpen && <AdvancedFiltersDialog initialConditions={filterConditions} sessionId={sessionId}
+        disabled={anyPassRunning} onApply={(conditions) => store().setFilterConditions(conditions)}
+        onClose={() => setAdvancedFiltersOpen(false)} />}
       {viewerId !== null && (
         <Viewer
           photoId={viewerId}

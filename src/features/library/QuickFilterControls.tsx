@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "@/lib/ipc";
 import type {
   FilterCondition,
@@ -19,6 +19,7 @@ interface QuickFilterControlsProps {
   onChange: (conditions: FilterCondition[]) => void;
   disabled?: boolean;
   sessionId: number | null;
+  fields?: readonly string[];
 }
 
 interface RangeSpec {
@@ -213,7 +214,7 @@ function RangeFilterRow({
   const availability = stats
     ? `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
     : statsReady ? "Values unavailable" : "Checking local values…";
-  const detailId = `range-filter-${spec.field}`;
+  const detailId = useId();
   return (
     <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
       <button
@@ -332,7 +333,8 @@ function RangeFilterRow({
   );
 }
 
-export function QuickFilterControls({ draft, onChange, disabled, sessionId }: QuickFilterControlsProps) {
+export function QuickFilterControls({ draft, onChange, disabled, sessionId, fields }: QuickFilterControlsProps) {
+  const headingId = useId();
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
   const [expandedField, setExpandedField] = useState<string | null>(null);
@@ -357,16 +359,16 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
       .every((field) => stats[field]?.recorded_count === 0);
 
   return (
-    <section className="quick-filters" aria-labelledby="measured-filter-heading">
-      <h3 className="filter-section-title" id="measured-filter-heading">Image properties</h3>
-        <div className="quick-filter-content" id="measured-filter-controls">
+    <section className="quick-filters" aria-labelledby={headingId}>
+      <h3 className="filter-section-title" id={headingId}>Measured characteristics</h3>
+        <div className="quick-filter-content">
           {measurementsUnavailable && (
             <div className="quick-filter-note">
               Technical measurements become available after Analyze photos finishes. Eye confidence becomes available after the optional local face and eye pass.
             </div>
           )}
           <div className="range-filter-list">
-            {RANGE_SPECS.map((spec) => {
+            {RANGE_SPECS.filter((spec) => !fields || fields.includes(spec.field)).map((spec) => {
               const condition = draft.find((item) => item.field === spec.field);
               return (
                 <RangeFilterRow

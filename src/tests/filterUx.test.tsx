@@ -6,6 +6,7 @@ import { FilterPicker } from "@/features/library/FilterPicker";
 import { ActiveFilterList } from "@/features/library/ActiveFilterList";
 import { QuickFilterControls } from "@/features/library/QuickFilterControls";
 import { ColorSpectrumFilter } from "@/features/library/ColorSpectrumFilter";
+import { AdvancedFiltersDialog } from "@/features/library/AdvancedFiltersDialog";
 import type { FilterCondition } from "@/types/api";
 
 vi.mock("@/lib/ipc", () => ({ api: {
@@ -34,6 +35,49 @@ async function key(input: HTMLElement, value: string) {
 function button(label: string) {
   return container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 }
+
+describe("advanced filter workspace", () => {
+  function textButton(label: string) {
+    return Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((item) => item.textContent?.trim() === label)!;
+  }
+  it("stages colors and only publishes the combined conditions on Apply", async () => {
+    const initial: FilterCondition[] = [{ field: "rating", operator: ">=", value: 4 }];
+    const apply = vi.fn(); const close = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={initial} sessionId={1} onApply={apply} onClose={close} />);
+    expect(container.querySelector("dialog")?.open).toBe(true);
+    await click(button("Yellow"));
+    expect(apply).not.toHaveBeenCalled();
+    expect(initial).toEqual([{ field: "rating", operator: ">=", value: 4 }]);
+    await click(textButton("Camera & date"));
+    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("Yellow");
+    await click(textButton("Apply filters (2)"));
+    expect(apply).toHaveBeenCalledWith([
+      ...initial, { field: "palette_color", operator: "in", value: ["yellow"] },
+    ]);
+    expect(close).toHaveBeenCalledOnce();
+  });
+  it("discards draft edits on Cancel and Escape", async () => {
+    const apply = vi.fn(); const close = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={apply} onClose={close} />);
+    await click(button("Blue")); await click(textButton("Cancel"));
+    expect(apply).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    await act(async () => container.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+    expect(close).toHaveBeenCalledTimes(2);
+    expect(apply).not.toHaveBeenCalled();
+  });
+  it("stages Clear all and applies an empty filter only on confirmation", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[{ field: "iso", operator: ">=", value: 100 }]}
+      sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    await click(textButton("Clear all"));
+    expect(apply).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="Selected filters"]')).toBeNull();
+    await click(textButton("Apply filters"));
+    expect(apply).toHaveBeenCalledWith([]);
+  });
+});
 
 describe("filter control interactions", () => {
   it("searches, selects with the keyboard and closes with Escape", async () => {

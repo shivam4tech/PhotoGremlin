@@ -1,14 +1,15 @@
 import type { FilterCondition } from "@/types/api";
 import { chipLabel, PALETTE_COLORS } from "./filterFields";
 
-export function ActiveFilterList({ draft, onChange, disabled }: {
+export function ActiveFilterList({ draft, onChange, disabled, label = "Active filters" }: {
   draft: FilterCondition[];
   onChange: (conditions: FilterCondition[]) => void;
   disabled?: boolean;
+  label?: string;
 }) {
   if (!draft.length) return null;
-  return <section className="active-filter-list" aria-label="Active filters">
-    <div className="filter-section-heading">Active filters <span>{draft.length}</span></div>
+  return <section className="active-filter-list" aria-label={label}>
+    <div className="filter-section-heading">{label} <span>{draft.length}</span></div>
     <div className="active-filter-chips">
       {draft.flatMap((condition, index) => {
         const colors = condition.field === "palette_color" && condition.operator === "in" && Array.isArray(condition.value)
