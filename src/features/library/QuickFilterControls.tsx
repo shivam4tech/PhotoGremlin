@@ -94,6 +94,29 @@ interface RangeFilterRowProps {
   disabled?: boolean;
   draft: FilterCondition[];
   onChange: (conditions: FilterCondition[]) => void;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+function RangeNumberInput({ label, value, min, max, disabled, onCommit }: {
+  label: string; value: number; min: number; max: number; disabled?: boolean;
+  onCommit: (value: number) => void;
+}) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => setRaw(String(value)), [value]);
+  function commit() {
+    const parsed = Number(raw);
+    if (!raw.trim() || !Number.isFinite(parsed)) { setRaw(String(value)); return; }
+    const bounded = Math.max(min, Math.min(max, parsed));
+    onCommit(bounded);
+    setRaw(String(value));
+  }
+  return <input className="input" type="number" aria-label={label} min={min} max={max} value={raw}
+    disabled={disabled} onChange={(event) => setRaw(event.target.value)} onBlur={commit}
+    onKeyDown={(event) => {
+      if (event.key === "Enter") event.currentTarget.blur();
+      if (event.key === "Escape") { event.stopPropagation(); setRaw(String(value)); }
+    }} />;
 }
 
 function RangeFilterRow({
@@ -104,18 +127,33 @@ function RangeFilterRow({
   disabled,
   draft,
   onChange,
+  expanded,
+  onToggle,
 }: RangeFilterRowProps) {
   const domainLower = spec.values[0];
   const domainUpper = spec.values[spec.values.length - 1];
-  const parsed = quickRangeBounds(condition, domainLower, domainUpper);
+  const bounds = quickRangeBounds(condition, domainLower, domainUpper);
+  // A compact inclusive scrubber cannot faithfully edit strict operators or
+  // values outside its stops. Keep those exact conditions in the composer.
+  const parsed = { ...bounds, editable: bounds.editable
+    && !["<", ">"].includes(condition?.operator ?? "")
+    && spec.values.includes(bounds.lower) && spec.values.includes(bounds.upper) };
   const initialLower = nearestValueIndex(spec.values, parsed.lower);
   const initialUpper = Math.max(initialLower, nearestValueIndex(spec.values, parsed.upper));
   const [lowerIndex, setLowerIndex] = useState(initialLower);
   const [upperIndex, setUpperIndex] = useState(initialUpper);
-  const [expanded, setExpanded] = useState(Boolean(condition));
   const [activeHandle, setActiveHandle] = useState<"lower" | "upper" | null>(null);
   const boundsRef = useRef({ lower: initialLower, upper: initialUpper });
+  const rangeChanged = useRef(false);
   const lastCommitRef = useRef(JSON.stringify(condition ?? null));
+  useEffect(() => {
+    setLowerIndex(initialLower);
+    setUpperIndex(initialUpper);
+    boundsRef.current = { lower: initialLower, upper: initialUpper };
+    rangeChanged.current = false;
+    lastCommitRef.current = JSON.stringify(condition ?? null);
+  }, [initialLower, initialUpper, condition]);
+
   const noRecordedValues = !stats || stats.recorded_count === 0;
   const sliderDisabled = disabled || noRecordedValues || parsed.missingOnly || !parsed.editable;
   const lowerPercent = lowerIndex / (spec.values.length - 1) * 100;
@@ -124,17 +162,23 @@ function RangeFilterRow({
 
   function updateLower(next: number) {
     const lower = Math.min(next, boundsRef.current.upper);
+    rangeChanged.current ||= lower !== boundsRef.current.lower;
     boundsRef.current = { ...boundsRef.current, lower };
     setLowerIndex(lower);
   }
 
   function updateUpper(next: number) {
     const upper = Math.max(next, boundsRef.current.lower);
+    rangeChanged.current ||= upper !== boundsRef.current.upper;
     boundsRef.current = { ...boundsRef.current, upper };
     setUpperIndex(upper);
   }
 
   function commitRange() {
+    // Focusing and leaving a control must not normalize an exact condition
+    // (or remove a not-null filter whose displayed handles span the domain).
+    if (!rangeChanged.current || sliderDisabled) return;
+    rangeChanged.current = false;
     const replacement = quickRangeCondition(
       spec.field,
       spec.values[boundsRef.current.lower],
@@ -177,11 +221,10 @@ function RangeFilterRow({
         className="range-filter-heading"
         aria-expanded={expanded}
         aria-controls={detailId}
-        onClick={() => setExpanded((current) => !current)}
+        onClick={onToggle}
       >
         <span className="range-filter-copy">
           <strong>{spec.label}</strong>
-          <small title={availability}>{availability}</small>
         </span>
         <span className="range-filter-state">
           <span className={`range-filter-summary mono${condition ? " is-active" : ""}`}>
@@ -191,8 +234,9 @@ function RangeFilterRow({
         </span>
       </button>
 
-      {expanded && (
-        <div className="range-filter-detail" id={detailId}>
+      <div className={`range-filter-reveal${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
+        <fieldset className="range-filter-detail" id={detailId} aria-label={`${spec.label} range`} disabled={!expanded || disabled}>
+          <p className="range-filter-note">{availability}</p>
           <div
             className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}
             data-field={spec.field}
@@ -245,8 +289,21 @@ function RangeFilterRow({
             />
           </div>
 
+          <div className="range-numeric-values">
+            <label>Min <RangeNumberInput label={`${spec.label} minimum value`}
+              min={domainLower} max={spec.values[upperIndex]} value={spec.values[lowerIndex]}
+              disabled={sliderDisabled} onCommit={(value) => {
+                updateLower(nearestValueIndex(spec.values, value)); commitRange();
+              }} /></label>
+            <label>Max <RangeNumberInput label={`${spec.label} maximum value`}
+              min={spec.values[lowerIndex]} max={domainUpper} value={spec.values[upperIndex]}
+              disabled={sliderDisabled} onCommit={(value) => {
+                updateUpper(nearestValueIndex(spec.values, value)); commitRange();
+              }} /></label>
+          </div>
+
           {!parsed.editable && !parsed.missingOnly && (
-            <p className="range-filter-note">This custom condition remains unchanged. Edit it in More filters.</p>
+            <p className="range-filter-note">This custom condition remains unchanged. Use Search filters to add an exact condition.</p>
           )}
           <div className="range-filter-actions">
             <button
@@ -269,8 +326,8 @@ function RangeFilterRow({
               Reset to any
             </button>
           </div>
-        </div>
-      )}
+        </fieldset>
+      </div>
     </div>
   );
 }
@@ -278,13 +335,7 @@ function RangeFilterRow({
 export function QuickFilterControls({ draft, onChange, disabled, sessionId }: QuickFilterControlsProps) {
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
-  const activeRangeCount = QUICK_RANGE_FIELDS.filter((field) => draft.some((condition) => condition.field === field)).length;
-  const hasActiveRange = activeRangeCount > 0;
-  const [expanded, setExpanded] = useState(hasActiveRange);
-
-  useEffect(() => {
-    if (hasActiveRange) setExpanded(true);
-  }, [hasActiveRange]);
+  const [expandedField, setExpandedField] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -299,7 +350,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
       }
     })).then(() => { if (!cancelled) setStatsReady(true); });
     return () => { cancelled = true; };
-  }, [sessionId]);
+  }, [sessionId, disabled]);
 
   const measurementsUnavailable = statsReady
     && (["brightness", "sharpness", "contrast", "highlight_clipping", "shadow_clipping"] as const)
@@ -307,20 +358,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
 
   return (
     <section className="quick-filters" aria-labelledby="measured-filter-heading">
-      <button
-        type="button"
-        className="quick-filter-intro"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
-        aria-controls="measured-filter-controls"
-      >
-        <span>
-          <strong id="measured-filter-heading">Measured filters</strong>
-          <small>{hasActiveRange ? `${activeRangeCount} measured ${activeRangeCount === 1 ? "filter" : "filters"} active` : "Brightness, sharpness, exposure and more"}</small>
-        </span>
-        <span className="quick-filter-chevron" aria-hidden="true">⌄</span>
-      </button>
-      {expanded && (
+      <h3 className="filter-section-title" id="measured-filter-heading">Image properties</h3>
         <div className="quick-filter-content" id="measured-filter-controls">
           {measurementsUnavailable && (
             <div className="quick-filter-note">
@@ -332,7 +370,9 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
               const condition = draft.find((item) => item.field === spec.field);
               return (
                 <RangeFilterRow
-                  key={`${spec.field}-${JSON.stringify(condition ?? null)}`}
+                  key={spec.field}
+                  expanded={expandedField === spec.field}
+                  onToggle={() => setExpandedField((current) => current === spec.field ? null : spec.field)}
                   spec={spec}
                   condition={condition}
                   stats={stats[spec.field]}
@@ -345,7 +385,6 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId }: Qu
             })}
           </div>
         </div>
-      )}
     </section>
   );
 }

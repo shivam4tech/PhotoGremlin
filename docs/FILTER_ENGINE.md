@@ -67,20 +67,14 @@ to compose raw operators:
   lower handle writes `>=`, moving only the upper handle writes `<=`, and
   moving both writes `between`.
 
-The measured dual-ended scrubbers live in a labelled disclosure in the Library
-inspector. It opens automatically whenever one of its ranges is active; at
-rest it stays closed so the color spectrum, rating, quick views, and results
-retain a clear hierarchy. Once open, photographers can compare and refine all
-measured ranges without opening rows one at a time. Their rounded rails use a
-low-to-high tonal grade of the single interface accent, with a stronger grade
-marking an active selected interval.
-The grade communicates numeric position only; it does not imply photo quality.
-The controls do not show persistent endpoint numbers. The exact value appears
-in a handle-attached bubble only while that handle is dragged or adjusted from
-the keyboard. Pointer drags update that local value and write the filter once on
-release; keyboard steps write immediately. This avoids issuing a stream of
-SQLite grid queries during a drag. The generic composer remains under **More
-filters**, but does not duplicate these five fields.
+Eight shallow measured rows show their current condition without opening a
+parent accordion. One row expands at a time, revealing two keyboard-accessible
+native range inputs and editable minimum/maximum numbers. ISO and focal length
+numbers snap to the photographic stop lists. Pointer release, keyboard release,
+or blur commits the draft range, avoiding a stream of SQLite queries during a
+drag. The searchable **Add filter** picker also exposes every measured field
+through the exact operator composer; the compact controls are shortcuts, not a
+replacement for the engine's full capabilities.
 
 Every control reports locally recorded and missing counts from
 `numeric_filter_stats`. A numeric range follows SQL NULL semantics
@@ -91,13 +85,14 @@ values are never guessed from filenames, pixels, or neighboring photographs.
 
 Saved views keep the ordinary filter wire format. Legacy strict `<`/`>` quick
 conditions and arbitrary advanced numeric conditions load without being
-rewritten. Moving a range handle converts that field to the scrubber's inclusive
-model. Conditions the scrubber cannot express remain visible and removable
-without being silently rewritten.
+rewritten. Strict bounds, values outside the control domain, and values between
+photographic stops disable the approximate scrubber and direct users to the
+exact composer. All conditions remain visible and removable in the sticky
+active-filter list, even when their measured row is collapsed.
 
 ### Color explorer (Sprint 35)
 
-The inspector's always-visible 12-hue spectrum writes one ordinary
+The inspector's compact grid of twelve labelled hue swatches writes one ordinary
 `palette_color in [...]` condition. Multiple selected hues use **match any**
 semantics inside that condition; the condition remains AND-composed with
 rating, camera, date, review-state, and measured filters. Selecting no hues
@@ -112,7 +107,7 @@ pixels by the deterministic local analysis pass (IMAGE_ANALYSIS.md), not from
 labels, a remote service, or an aesthetic model. An unanalyzed photograph has
 no matching measured hue until analysis completes.
 
-### Quick views (Sprints 32–34)
+### Quick filters (Sprints 32–34)
 
 The Library inspector places one-click presets above the measured controls.
 Sprint 33 adds **Potentially soft** (`sharpness < 40`), **Highlight clipping**
@@ -135,10 +130,14 @@ landscape/portrait), while unrelated conditions such as ISO, lens, review
 state, or sharpness remain intact. The buttons report pressed state and become
 unavailable while the Library is not filterable.
 
-Sprint 24 moves the complete filter surface into the Library's persistent
-right inspector. `FilterBar` inspector mode is always expanded there; active
-chips, quick measured controls, the advanced composer, clear, and save-as-view
-all share that one owner. The left rail's `Unreviewed`, `Kept`, and
+The complete filter surface lives in the Library's collapsible right inspector.
+Its header reports live results and Clear all; the sticky discovery area keeps
+active chips and filter search accessible while the controls scroll. Search
+includes presets and every registered field, with Arrow/Enter/Escape support
+and Added indicators. Selecting a field opens the existing typed operator/value
+composer, not a native field dropdown. Sidebar changes apply live; there is no
+staging or Apply step. Save as view becomes available when conditions exist.
+The left rail's `Unreviewed`, `Kept`, and
 `Needs attention` shortcuts replace only the `review_state` condition, so a
 photographer can change review state while retaining ISO, lens, brightness, or
 other active conditions. Selecting the active review shortcut again clears
@@ -196,6 +195,12 @@ only `review_state`.
   mirrors the registry 1:1 and emits the exact wire object; date pickers send
   bare dates and the upper `between` bound is extended to end-of-day so
   "this day" is inclusive (a visible, stored part of the condition).
+- `filterDiscovery.ts`, `FilterPicker.tsx` and `ActiveFilterList.tsx` are
+  presentation adapters over that registry and the existing presets. Removing
+  a hue chip updates only that hue; removing other chips removes that condition.
+- `useFilteredPhotos.ts` keeps the current grid visible during refresh and
+  ignores stale request completions. Pagination is guarded against duplicate
+  requests; a reload replaces page zero instead of appending stale pages.
 
 ## Saved views (Sprint 8)
 

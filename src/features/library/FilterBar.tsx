@@ -2,19 +2,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
 import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
-  AREA_ORDER,
   FILTER_FIELDS,
   FIELD_BY_NAME,
   OPS_BY_KIND,
   QUICK_FILTER_PRESETS,
   QUICK_RANGE_FIELDS,
   buildCondition,
-  chipLabel,
   isQuickFilterPresetActive,
   toggleQuickFilterPreset,
 } from "./filterFields";
 import { QuickFilterControls } from "./QuickFilterControls";
 import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
+import { FilterPicker } from "./FilterPicker";
+import { ActiveFilterList } from "./ActiveFilterList";
 
 interface FilterBarProps {
   draft: FilterCondition[];
@@ -46,6 +46,7 @@ function isoDate(year: number, month: number, day: number): string {
  * some Linux compositors, so this keeps selection in the React filter state. */
 function CalendarInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const root = useRef<HTMLSpanElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => monthFromDate(value));
 
@@ -74,8 +75,15 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
   }
 
   return (
-    <span className="date-picker" ref={root}>
+    <span className="date-picker" ref={root} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }} onKeyDown={(event) => {
+      if (event.key === "Escape" && open) {
+        event.stopPropagation(); setOpen(false); trigger.current?.focus();
+      }
+    }}>
       <button
+        ref={trigger}
         className={`date-picker-trigger${value ? " has-value" : ""}`}
         type="button"
         onClick={() => setOpen((wasOpen) => !wasOpen)}
@@ -99,15 +107,15 @@ function CalendarInput({ label, value, onChange }: { label: string; value: strin
                 key={day}
                 type="button"
                 className={value === isoDate(year, monthIndex, day) ? "is-selected" : ""}
-                onClick={() => { onChange(isoDate(year, monthIndex, day)); setOpen(false); }}
+                onClick={() => { onChange(isoDate(year, monthIndex, day)); setOpen(false); trigger.current?.focus(); }}
               >
                 {day}
               </button>
             ))}
           </div>
           <div className="date-picker-foot">
-            <button type="button" onClick={() => { onChange(""); setOpen(false); }} disabled={!value}>Clear</button>
-            <button type="button" onClick={() => { const today = new Date(); onChange(isoDate(today.getFullYear(), today.getMonth(), today.getDate())); setOpen(false); }}>Today</button>
+            <button type="button" onClick={() => { onChange(""); setOpen(false); trigger.current?.focus(); }} disabled={!value}>Clear</button>
+            <button type="button" onClick={() => { const today = new Date(); onChange(isoDate(today.getFullYear(), today.getMonth(), today.getDate())); setOpen(false); trigger.current?.focus(); }}>Today</button>
           </div>
         </div>
       )}
@@ -146,6 +154,8 @@ function ComposerControl({
  * throughout (FILTER_ENGINE.md).
  */
 export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar" }: FilterBarProps) {
+  const root = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(draft.length > 0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [field, setField] = useState(ADVANCED_FILTER_FIELDS[0].field);
@@ -157,6 +167,15 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const [metadataOptions, setMetadataOptions] = useState<FilterValueOptions | null>(null);
   const [metadataOptionsLoading, setMetadataOptionsLoading] = useState(false);
   const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
+
+  useEffect(() => {
+    if (advancedOpen) composer.current?.querySelector<HTMLSelectElement>("select")?.focus();
+  }, [advancedOpen, field]);
+
+  function closeEditor() {
+    setAdvancedOpen(false);
+    root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
+  }
 
   // Keep the operator valid when the field's kind changes.
   useEffect(() => {
@@ -191,9 +210,6 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
     : buildCondition(field, op, raw, raw2);
   const canAdd = candidate !== null;
   const expanded = mode === "inspector" || open;
-  const otherConditions = draft
-    .map((condition, index) => ({ condition, index }))
-    .filter(({ condition }) => !BESPOKE_FILTER_FIELDS.has(condition.field));
   const rating = draft.find((condition) => condition.field === "rating");
   const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
   const unratedOnly = rating?.operator === "=" && rating.value === 0;
@@ -206,6 +222,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   }
 
   function selectField(f: string) {
+    setAdvancedOpen(true);
     setField(f);
     const first = OPS_BY_KIND[FIELD_BY_NAME[f].kind][0].op;
     setOp(first);
@@ -216,12 +233,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   function add() {
     if (!candidate) return;
     onChange([...draft, candidate]);
+    closeEditor();
     setRaw("");
     setRaw2("");
-  }
-
-  function remove(i: number) {
-    onChange(draft.filter((_, j) => j !== i));
   }
 
   function valueInput() {
@@ -357,7 +371,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   }
 
   return (
-    <div className={`filterbar filterbar-${mode}`}>
+    <div className={`filterbar filterbar-${mode}`} ref={root}>
       {mode === "bar" && (
         <button
           className={`btn btn-sm ${draft.length > 0 ? "btn-primary" : ""}`}
@@ -374,123 +388,26 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
       {expanded && (
         <div className="filterbar-panel">
-          <ColorSpectrumFilter
-            draft={draft}
-            onChange={onChange}
-            disabled={disabled}
-          />
-
-          {otherConditions.length > 0 && (
-            <div className="filterbar-chips">
-              <span className="filterbar-chips-label">Other filters</span>
-              {otherConditions.map(({ condition, index }) => (
-                <span key={`${condition.field}-${index}`} className="chip">
-                  {chipLabel(condition)}
-                  <button
-                    className="chip-x"
-                    onClick={() => remove(index)}
-                    aria-label={`remove filter ${chipLabel(condition)}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          <section className="quick-presets" aria-labelledby="quick-presets-heading">
-            <div className="quick-presets-head">
-              <strong id="quick-presets-heading">Quick views</strong>
-              <span>Measured characteristics and orientation</span>
-            </div>
-            <div className="quick-presets-list">
-              {QUICK_FILTER_PRESETS.map((preset) => {
-                const active = isQuickFilterPresetActive(draft, preset);
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={active ? "is-active" : ""}
-                    aria-pressed={active}
-                    disabled={disabled}
-                    onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
-                  >
-                    {preset.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="rating-filter" aria-labelledby="rating-filter-heading">
-            <div className="rating-filter-head">
-              <strong id="rating-filter-heading">Rating</strong>
-              <button type="button" className={!rating ? "is-active" : ""} onClick={() => setRatingFilter("any")}>Any</button>
-              <button type="button" className={unratedOnly ? "is-active" : ""} onClick={() => setRatingFilter("unrated")}>Unrated</button>
-            </div>
-            <div className="rating-filter-stars" aria-label="Minimum rating">
-              {[1, 2, 3, 4, 5].map((star) => (
-                <button
-                  key={star}
-                  type="button"
-                  className={`marks-star${ratingThreshold !== null && ratingThreshold >= star ? " is-on" : ""}`}
-                  aria-pressed={ratingThreshold === star}
-                  aria-label={`${star} stars or more`}
-                  onClick={() => setRatingFilter(ratingThreshold === star ? "any" : star)}
-                >★</button>
-              ))}
-              <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
-            </div>
-          </section>
-
-          <QuickFilterControls
-            draft={draft}
-            onChange={onChange}
-            disabled={disabled}
-            sessionId={sessionId}
-          />
-
+          <div className="filter-discovery">
+            <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />
+            <FilterPicker draft={draft} disabled={disabled} onSelect={(choice) => {
+              if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
+              else if (choice.field === "palette_color") {
+                root.current?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
+              } else selectField(choice.field);
+            }} />
+          </div>
           <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
-            <button
-              type="button"
-              className="more-filters-trigger"
-              onClick={() => setAdvancedOpen((current) => !current)}
-              aria-expanded={advancedOpen}
-              aria-controls="advanced-filter-composer"
-            >
-              <span>
-                <strong>More filters</strong>
-                <small>Camera, date, review and other fields</small>
-              </span>
-              <span className="more-filters-meta">
-                <span className={`more-filters-count mono${otherConditions.length > 0 ? " is-active" : ""}`}>
-                  {otherConditions.length > 0 ? `${otherConditions.length} active` : "Optional"}
-                </span>
-                <span className="more-filters-chevron" aria-hidden="true">⌄</span>
-              </span>
-            </button>
-
             {advancedOpen && (
-              <div className="more-filters-panel" id="advanced-filter-composer">
+              <div className="more-filters-panel" ref={composer} onKeyDown={(event) => {
+                if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
+              }}>
                 <div className="filterbar-compose">
-                  <ComposerControl label="Field" select className="filter-compose-control-field">
-                    <select
-                      className="input"
-                      value={field}
-                      onChange={(e) => selectField(e.target.value)}
-                      aria-label="Filter field"
-                    >
-                      {AREA_ORDER.map((area) => (
-                        <optgroup key={area} label={area}>
-                          {ADVANCED_FILTER_FIELDS.filter((f) => f.area === area).map((f) => (
-                            <option key={f.field} value={f.field}>
-                              {f.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </ComposerControl>
+                  <div className="filter-editor-heading">
+                    <strong>{def.label}</strong>
+                    <button type="button" className="btn btn-sm" aria-label="Close filter editor"
+                      onClick={closeEditor}>×</button>
+                  </div>
                   <ComposerControl label="Condition" select>
                     <select
                       className="input"
@@ -527,6 +444,61 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               </div>
             )}
           </div>
+          <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />
+
+          <section className="quick-presets" aria-labelledby="quick-presets-heading">
+            <div className="quick-presets-head">
+              <strong id="quick-presets-heading">Quick filters</strong>
+            </div>
+            <div className="quick-presets-list">
+              {QUICK_FILTER_PRESETS.map((preset) => {
+                const active = isQuickFilterPresetActive(draft, preset);
+                return (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={active ? "is-active" : ""}
+                    aria-pressed={active}
+                    disabled={disabled}
+                    onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
+                  >
+                    {preset.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="rating-filter" aria-labelledby="rating-filter-heading">
+            <div className="rating-filter-head">
+              <strong id="rating-filter-heading">Rating</strong>
+              <button type="button" className={!rating ? "is-active" : ""} disabled={disabled} aria-pressed={!rating} onClick={() => setRatingFilter("any")}>Any</button>
+              <button type="button" className={unratedOnly ? "is-active" : ""} disabled={disabled} aria-pressed={unratedOnly} onClick={() => setRatingFilter("unrated")}>Unrated</button>
+            </div>
+            <div className="rating-filter-stars" aria-label="Minimum rating">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  className={`marks-star${ratingThreshold !== null && ratingThreshold >= star ? " is-on" : ""}`}
+                  disabled={disabled}
+                  aria-pressed={ratingThreshold === star}
+                  aria-label={`${star} stars or more`}
+                  onClick={() => setRatingFilter(ratingThreshold === star ? "any" : star)}
+                >★</button>
+              ))}
+              <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
+            </div>
+          </section>
+
+          <QuickFilterControls
+            draft={draft}
+            onChange={onChange}
+            disabled={disabled}
+            sessionId={sessionId}
+          />
+
+
         </div>
       )}
     </div>

@@ -271,9 +271,9 @@ export function quickRangeCondition(
   return { field, operator: "<=", value: upper };
 }
 
-/** Read both new range filters and legacy strict quick-filter conditions.
- * Strictness is preserved in the condition itself until the photographer
- * moves a handle, at which point the scrubber emits its inclusive model. */
+/** Read inclusive and legacy strict bounds without rewriting conditions.
+ * The presentation layer guards strict/out-of-stop conditions against edits
+ * through the inclusive scrubber; the exact composer supports every operator. */
 export function quickRangeBounds(
   condition: FilterCondition | undefined,
   domainLower: number,
@@ -321,7 +321,7 @@ export function replaceFieldConditions(
 
 const PALETTE_COLOR_IDS = new Set<string>(PALETTE_COLORS.map((color) => color.id));
 
-/** Read a saved palette condition defensively, preserving the wheel's order. */
+/** Read a saved palette condition defensively, preserving hue order. */
 export function selectedPaletteColors(conditions: FilterCondition[]): PaletteColorId[] {
   const condition = conditions.find((item) => item.field === "palette_color");
   if (condition?.operator !== "in" || !Array.isArray(condition.value)) return [];
@@ -570,7 +570,8 @@ export function chipLabel(c: FilterCondition): string {
   }
   if (def?.kind === "bool") {
     const phrase = BOOL_PHRASES[c.field] ?? label.toLowerCase();
-    return c.operator === "!=" ? `not ${phrase}` : phrase;
+    const positive = c.operator === "!=" ? c.value === false : c.value !== false;
+    return positive ? phrase : `not ${phrase}`;
   }
   return `${label.toLowerCase()} ${OP_SYMBOL[c.operator] ?? c.operator} ${String(c.value)}`;
 }

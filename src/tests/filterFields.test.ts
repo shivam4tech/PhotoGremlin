@@ -221,7 +221,8 @@ describe("chipLabel", () => {
     expect(chipLabel({ field: "possible_blink", operator: "=", value: true })).toBe(
       "possible blink",
     );
-    expect(chipLabel({ field: "color", operator: "!=", value: false })).toBe("not in color");
+    expect(chipLabel({ field: "color", operator: "!=", value: false })).toBe("in color");
+    expect(chipLabel({ field: "color", operator: "=", value: false })).toBe("not in color");
   });
 
   it("shows date ranges without the hidden end-of-day", () => {
