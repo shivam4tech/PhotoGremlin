@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
+import { PhotoHistogram, type HistogramMode } from "@/components/PhotoHistogram";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { MARK_COLORS } from "@/features/library/marks";
 import { useAppStore } from "@/stores/appStore";
-import type { PhotoFull, PhotoSummary } from "@/types/api";
+import type { PhotoFull, PhotoHistogram as PhotoHistogramData, PhotoSummary } from "@/types/api";
 
 type ImageState =
   | { kind: "loading" }
-  | { kind: "ok"; url: string }
+  | { kind: "ok"; url: string; histogram: PhotoHistogramData | null }
   | { kind: "placeholder"; msg: string }
   | { kind: "error"; msg: string };
 
@@ -87,6 +88,7 @@ export function Viewer({
 }) {
   const [full, setFull] = useState<PhotoFull | null>(null);
   const [image, setImage] = useState<ImageState>({ kind: "loading" });
+  const [histogramMode, setHistogramMode] = useState<HistogramMode>("luma");
   const [metaError, setMetaError] = useState<string | null>(null);
   const updateMarks = useAppStore((state) => state.updateMarks);
 
@@ -108,8 +110,8 @@ export function Viewer({
     }).catch((e) => {
       if (!cancelled) setMetaError(toErrorMessage(e));
     });
-    api.getThumbnail(photoId, "viewer").then((t) => {
-      if (!cancelled) setImage({ kind: "ok", url: t.data_url });
+    api.getThumbnail(photoId, "viewer", { includeHistogram: true }).then((t) => {
+      if (!cancelled) setImage({ kind: "ok", url: t.data_url, histogram: t.histogram });
     }).catch((e) => {
       if (!cancelled)
         setImage(toErrorMessage(e).toLowerCase().includes("supported")
@@ -174,6 +176,14 @@ export function Viewer({
             <div style={{ margin: "0 0 12px", padding: "8px 10px", borderRadius: 6, background: "var(--danger-soft)", color: "var(--danger)", fontSize: 12 }}>
               {metaError}
             </div>
+          )}
+
+          {image.kind === "ok" && image.histogram && (
+            <PhotoHistogram
+              histogram={image.histogram}
+              mode={histogramMode}
+              onModeChange={setHistogramMode}
+            />
           )}
 
           <Section title="File">

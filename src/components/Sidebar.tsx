@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useAppStore, VIEW_META } from "@/stores/appStore";
 import { toErrorMessage } from "@/lib/ipc";
 import { filterToDraft, toggleExactFieldCondition } from "@/features/library/filterFields";
+import { savedViewMatches } from "@/features/library/filterDiscovery";
 import type { Filter, FilterCondition, SavedView, ViewId } from "@/types/api";
 import {
   CollectionsIcon,
@@ -88,6 +89,10 @@ export function Sidebar() {
       </button>
 
       <div className="sidebar-scroll">
+        <button className={`sidebar-row sidebar-library${view === "library" ? " active" : ""}`}
+          aria-current={view === "library" ? "page" : undefined} onClick={() => setView("library")}>
+          <LibraryIcon size={16} /><span className="sidebar-row-label">Library</span>
+        </button>
         {activeFolder && (
           <section className="sidebar-section sidebar-review" aria-labelledby="sidebar-review-heading">
             <div className="sidebar-heading" id="sidebar-review-heading">Review views</div>
@@ -95,9 +100,9 @@ export function Sidebar() {
               {REVIEW_VIEWS.map(({ label, condition }) => (
                 <button
                   key={label}
-                  className={`sidebar-row${sameCondition(activeReview, condition) ? " active" : ""}`}
+                  className={`sidebar-row${view === "library" && sameCondition(activeReview, condition) ? " active" : ""}`}
                   onClick={() => toggleReview(condition)}
-                  aria-pressed={sameCondition(activeReview, condition)}
+                  aria-pressed={view === "library" && sameCondition(activeReview, condition)}
                 >
                   <span className="sidebar-review-dot" aria-hidden="true" />
                   <span className="sidebar-row-label">{label}</span>
@@ -122,7 +127,7 @@ export function Sidebar() {
           <div className="sidebar-list">
             {activeFolder && (
               <button
-                className={`sidebar-row${view === "library" ? " active" : ""}`}
+                className="sidebar-row current-folder"
                 onClick={() => setView("library")}
                 title={activeFolder}
               >
@@ -161,8 +166,9 @@ export function Sidebar() {
             )}
             {(savedViews ?? []).slice(0, 5).map((savedView) => (
               <button
-                className="sidebar-row"
+                className={`sidebar-row${view === "library" && savedViewMatches(savedView.filter_json, filterConditions) ? " active" : ""}`}
                 key={savedView.id}
+                aria-pressed={view === "library" && savedViewMatches(savedView.filter_json, filterConditions)}
                 onClick={() => openSavedView(savedView)}
                 title={savedView.description ?? savedView.name}
               >

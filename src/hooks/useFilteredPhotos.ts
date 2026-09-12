@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import type { PhotoSummary } from "@/types/api";
 
@@ -34,12 +34,18 @@ export function useFilteredPhotos(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const requestVersion = useRef(0);
+  const pending = useRef(false);
+
   const load = useCallback(
     async (p: number, fj: string, append: boolean) => {
+      const request = ++requestVersion.current;
+      pending.current = true;
       setLoading(true);
       setError(null);
       try {
         const res = await api.listFilteredPhotos(fj, p * PHOTOS_PAGE_SIZE, PHOTOS_PAGE_SIZE);
+        if (request !== requestVersion.current) return;
         if (append && p > 0) {
           setPhotos((prev) => [...prev, ...res.photos]);
         } else {
@@ -48,13 +54,17 @@ export function useFilteredPhotos(
         setTotal(res.total);
         setPage(p);
       } catch (e) {
+        if (request !== requestVersion.current) return;
         if (!append) {
           setPhotos([]);
           setTotal(0);
         }
         setError(toErrorMessage(e));
       } finally {
-        setLoading(false);
+        if (request === requestVersion.current) {
+          pending.current = false;
+          setLoading(false);
+        }
       }
     },
     [],
@@ -63,11 +73,13 @@ export function useFilteredPhotos(
   // (Re)load page 0 when the library changes or the filter changes.
   useEffect(() => {
     if (enabled) void load(0, filterJson, false);
+    return () => { requestVersion.current += 1; pending.current = false; };
   }, [enabled, filterJson, refreshKey, load]);
 
   // Forget contents when the library is cleared.
   useEffect(() => {
     if (!enabled) {
+      setLoading(false);
       setPhotos([]);
       setTotal(0);
       setPage(0);
@@ -84,16 +96,16 @@ export function useFilteredPhotos(
   );
 
   const reload = useCallback(() => {
-    void load(page, filterJson, false);
-  }, [load, page, filterJson]);
+    if (enabled) void load(0, filterJson, false);
+  }, [load, enabled, filterJson]);
 
   const loadMore = useCallback(() => {
     const nextPage = page + 1;
     const maxPage = Math.max(0, Math.ceil(total / PHOTOS_PAGE_SIZE) - 1);
-    if (nextPage <= maxPage && !loading) {
+    if (enabled && nextPage <= maxPage && !loading && !pending.current) {
       void load(nextPage, filterJson, true);
     }
-  }, [load, page, total, filterJson, loading]);
+  }, [load, page, total, filterJson, loading, enabled]);
 
   const hasMore = (page + 1) * PHOTOS_PAGE_SIZE < total;
 

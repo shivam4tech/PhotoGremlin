@@ -106,6 +106,22 @@ Output: `is_monochrome ∈ {0, 1}`.
 boundaries as the categories above). Filters can use flags or the numeric
 score.
 
+## Rendered-preview histograms
+
+The single-photo viewer and Shoot Review can opt into a display histogram on
+their viewer-thumbnail request. Rust computes 256-bin luma, red, green and
+blue counts from the **exact locally rendered JPEG preview bytes returned in
+that response**. Luma uses the same rounded Rec. 709 calculation documented
+for brightness. JPEG decoding and counting run in the thumbnail service's
+bounded `spawn_blocking` capacity; no source pixels enter React.
+
+This is deliberately separate from stored catalog analysis. It is computed
+on demand, is not written to SQLite, does not power filters, and is never
+requested for grid tiles or contact sheets. For RAW photographs it describes
+the displayed embedded/paired/developed preview after local JPEG encoding —
+not sensor RAW values and not a Lightroom-style develop-pipeline histogram.
+The UI therefore labels it “Rendered preview”.
+
 ## Color signature (Sprint 35)
 
 Color exploration uses a deterministic 12-bit HSV hue-presence signature;

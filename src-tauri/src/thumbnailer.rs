@@ -22,6 +22,7 @@ use std::time::SystemTime;
 use image::{ImageReader, RgbImage};
 use rusqlite::{params, OptionalExtension};
 
+use crate::analysis::metrics::luma;
 use crate::database::Db;
 use crate::error::{AppError, AppResult};
 use crate::scanner::{classify_extension, FileClass};
@@ -87,6 +88,21 @@ pub struct ThumbData {
     pub width: u32,
     pub height: u32,
     pub from_cache: bool,
+    /// Present only when explicitly requested for a viewer preview.
+    pub histogram: Option<PhotoHistogram>,
+}
+
+/// Histogram of the exact locally rendered JPEG preview returned to the UI.
+/// It is deliberately preview-scoped: this is not sensor RAW or a develop
+/// pipeline histogram.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PhotoHistogram {
+    pub source: &'static str,
+    pub pixel_count: u64,
+    pub luma: Vec<u32>,
+    pub red: Vec<u32>,
+    pub green: Vec<u32>,
+    pub blue: Vec<u32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -102,16 +118,35 @@ enum Outcome {
     Fail(AppError),
 }
 
-fn outcome_to_data(outcome: Outcome, from_cache: bool) -> AppResult<ThumbData> {
-    match outcome {
-        Outcome::Ready(bytes, w, h) => Ok(ThumbData {
-            data_url: b64_data_url(&bytes),
-            width: w,
-            height: h,
-            from_cache,
-        }),
-        Outcome::Fail(e) => Err(e),
+fn preview_histogram(rgb: &RgbImage) -> PhotoHistogram {
+    let mut histogram = PhotoHistogram {
+        source: "rendered_preview",
+        pixel_count: u64::from(rgb.width()) * u64::from(rgb.height()),
+        luma: vec![0; 256],
+        red: vec![0; 256],
+        green: vec![0; 256],
+        blue: vec![0; 256],
+    };
+    for pixel in rgb.pixels() {
+        let [red, green, blue] = pixel.0;
+        histogram.red[usize::from(red)] += 1;
+        histogram.green[usize::from(green)] += 1;
+        histogram.blue[usize::from(blue)] += 1;
+        histogram.luma[luma(u32::from(red), u32::from(green), u32::from(blue)) as usize] +=
+            1;
     }
+    histogram
+}
+
+fn preview_histogram_from_jpeg(bytes: &[u8]) -> AppResult<PhotoHistogram> {
+    let rgb = image::load_from_memory(bytes)
+        .map_err(|error| {
+            AppError::operation(format!(
+                "Could not read the rendered preview histogram: {error}"
+            ))
+        })?
+        .to_rgb8();
+    Ok(preview_histogram(&rgb))
 }
 
 /// Long-lived thumbnail service: cache dir + generation throttle +
@@ -181,7 +216,16 @@ impl ThumbService {
     }
 
     /// Generate (or read from cache) a thumbnail for a photo row.
-    pub async fn get(&self, db: &Db, photo_id: i64, kind: ThumbKind) -> AppResult<ThumbData> {
+    pub async fn get(
+        &self,
+        db: &Db,
+        photo_id: i64,
+        kind: ThumbKind,
+        include_histogram: bool,
+    ) -> AppResult<ThumbData> {
+        // Histogram work is intentionally unavailable to grid and contact-
+        // sheet callers, even if a caller accidentally opts in.
+        let include_histogram = include_histogram && kind == ThumbKind::Viewer;
         // Photo row: path, extension, size, mtime.
         let (path, extension, size_bytes, mtime) = {
             let conn = db.lock()?;
@@ -234,12 +278,7 @@ impl ThumbService {
                 .ok_or_else(|| AppError::operation("Cached thumbnail is corrupt"))?;
             tracing::debug!(photo_id, %path, "thumbnail cache hit");
             touch_cache_file(&cache_file);
-            return Ok(ThumbData {
-                data_url: b64_data_url(&bytes),
-                width: w,
-                height: h,
-                from_cache: true,
-            });
+            return self.thumbnail_data(bytes, w, h, true, include_histogram).await;
         }
 
         // In-flight dedup: another task may already be generating this key.
@@ -268,12 +307,7 @@ impl ThumbService {
                 .map_err(|e| AppError::io(e, cache_file.display().to_string()))?;
             let (w, h) = image_dimensions_of(&bytes)
                 .ok_or_else(|| AppError::operation("Cached thumbnail is corrupt"))?;
-            return Ok(ThumbData {
-                data_url: b64_data_url(&bytes),
-                width: w,
-                height: h,
-                from_cache: true,
-            });
+            return self.thumbnail_data(bytes, w, h, true, include_histogram).await;
         }
 
         // We are the generator for this key.
@@ -288,7 +322,51 @@ impl ThumbService {
             .lock()
             .expect("in-flight map poisoned")
             .remove(&key);
-        outcome_to_data(outcome, false)
+        match outcome {
+            Outcome::Ready(bytes, width, height) => {
+                self.thumbnail_data(bytes, width, height, false, include_histogram).await
+            }
+            Outcome::Fail(error) => Err(error),
+        }
+    }
+
+    async fn thumbnail_data(
+        &self,
+        bytes: Vec<u8>,
+        width: u32,
+        height: u32,
+        from_cache: bool,
+        include_histogram: bool,
+    ) -> AppResult<ThumbData> {
+        if !include_histogram {
+            return Ok(ThumbData {
+                data_url: b64_data_url(&bytes),
+                width,
+                height,
+                from_cache,
+                histogram: None,
+            });
+        }
+
+        // Decoding the encoded preview is CPU work. Use the same bounded
+        // capacity as thumbnail generation and keep it off the async thread.
+        let _permit = self
+            .sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::operation("Thumbnail generator shut down"))?;
+        tokio::task::spawn_blocking(move || {
+            let histogram = preview_histogram_from_jpeg(&bytes)?;
+            Ok(ThumbData {
+                data_url: b64_data_url(&bytes),
+                width,
+                height,
+                from_cache,
+                histogram: Some(histogram),
+            })
+        })
+        .await
+        .map_err(|error| AppError::operation(format!("Preview histogram task failed: {error}")))?
     }
 
     /// Decode + downscale + encode + write cache. CPU work runs on a
@@ -591,6 +669,42 @@ mod tests {
     }
 
     #[test]
+    fn preview_histogram_counts_luma_and_channels() {
+        let image = ImageBuffer::from_vec(
+            2,
+            2,
+            vec![0, 0, 0, 255, 255, 255, 255, 0, 0, 0, 255, 0],
+        )
+        .unwrap();
+        let histogram = preview_histogram(&image);
+
+        assert_eq!(histogram.source, "rendered_preview");
+        assert_eq!(histogram.pixel_count, 4);
+        assert_eq!(histogram.luma.len(), 256);
+        assert_eq!(histogram.red.len(), 256);
+        assert_eq!(histogram.green.len(), 256);
+        assert_eq!(histogram.blue.len(), 256);
+        for channel in [
+            &histogram.luma,
+            &histogram.red,
+            &histogram.green,
+            &histogram.blue,
+        ] {
+            assert_eq!(
+                channel
+                    .iter()
+                    .map(|count| u64::from(*count))
+                    .sum::<u64>(),
+                4
+            );
+        }
+        assert_eq!(histogram.luma[0], 1);
+        assert_eq!(histogram.luma[54], 1); // Rec.709 rounded red.
+        assert_eq!(histogram.luma[182], 1); // Rec.709 rounded green.
+        assert_eq!(histogram.luma[255], 1);
+    }
+
+    #[test]
     fn cache_name_reacts_to_inputs() {
         let a = thumb_cache_name("/x/a.jpg", 100, Some("2026-01-01T00:00:00Z"), 256);
         let b = thumb_cache_name("/x/a.jpg", 101, Some("2026-01-01T00:00:00Z"), 256);
@@ -694,18 +808,44 @@ mod tests {
         };
 
         let svc = ThumbService::new(dir.join("cache"));
-        let first = svc.get(&db, photo_id, ThumbKind::Grid).await.unwrap();
+        let first = svc.get(&db, photo_id, ThumbKind::Grid, false).await.unwrap();
         assert!(!first.from_cache);
+        assert!(first.histogram.is_none());
         assert!(first.data_url.starts_with("data:image/jpeg;base64,"));
         // 300x200 scaled to max-width 256: 200 * 256/300 = 170.67 -> 170 (truncated)
         assert_eq!((first.width, first.height), (256, 170));
 
-        let second = svc.get(&db, photo_id, ThumbKind::Grid).await.unwrap();
+        let second = svc.get(&db, photo_id, ThumbKind::Grid, false).await.unwrap();
         assert!(second.from_cache);
         assert_eq!(second.data_url, first.data_url); // same bytes from cache
 
+        // Grid callers cannot opt into histogram work.
+        let grid_opt_in = svc.get(&db, photo_id, ThumbKind::Grid, true).await.unwrap();
+        assert!(grid_opt_in.histogram.is_none());
+
+        // Viewer opt-in derives all channels from the exact returned JPEG,
+        // and works identically on generation and cache-hit paths.
+        let viewer = svc.get(&db, photo_id, ThumbKind::Viewer, true).await.unwrap();
+        let histogram = viewer.histogram.as_ref().unwrap();
+        assert_eq!(histogram.source, "rendered_preview");
+        assert_eq!(histogram.pixel_count, u64::from(viewer.width) * u64::from(viewer.height));
+        for channel in [
+            &histogram.luma,
+            &histogram.red,
+            &histogram.green,
+            &histogram.blue,
+        ] {
+            assert_eq!(
+                channel.iter().map(|count| u64::from(*count)).sum::<u64>(),
+                histogram.pixel_count,
+            );
+        }
+        let cached_viewer = svc.get(&db, photo_id, ThumbKind::Viewer, true).await.unwrap();
+        assert!(cached_viewer.from_cache);
+        assert_eq!(cached_viewer.histogram, viewer.histogram);
+
         // Unknown photo id -> friendly error.
-        let err = svc.get(&db, 999_999, ThumbKind::Grid).await.unwrap_err();
+        let err = svc.get(&db, 999_999, ThumbKind::Grid, false).await.unwrap_err();
         assert!(err.to_string().contains("no longer in the library"));
 
         let _ = std::fs::remove_file(&dbp);

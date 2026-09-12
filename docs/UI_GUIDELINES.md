@@ -22,13 +22,13 @@ with a concrete fix, like the skills prescribe.
   light (`data-theme="light"`) contrast.
 - New UI needs new tokens only when existing ones genuinely cannot express
   it — add them to both theme blocks together, or don't add them.
-- Standard controls are 32 px high; compact toolbar, form and segmented
-  controls are 30 px high. Bespoke square icon controls may be smaller only
+- Standard controls are 36 px high; compact toolbar, form and segmented
+  controls are 32 px high. Bespoke square icon controls may be smaller only
   when they are isolated from a standard control row.
 
 ## 2. Layout & hierarchy baseline
 
-- Spacing steps in multiples of 4px (`4/8/12/16/24/32`); no arbitrary gaps.
+- Spacing uses the compact scale `4/6/8/12/16/20/24/32`; no arbitrary gaps.
 - Hierarchy comes from size + weight + `--text/--text-dim/--text-faint`
   dimming — never from new colors.
 - Fixed z-index scale only (check `theme.css`); no ad-hoc `z-index: 999`.
@@ -55,9 +55,11 @@ Lightroom Classic:
 - scan, metadata, analysis, similarity, culling, and review commands remain in
   the horizontal Library action bar so long-running operations stay visible.
 
-At the supported 1024 px minimum window width, the rails remain visible and
-the center grid stays the only photograph scroller. The inspector has its own
-vertical scroll; it must never make the virtual grid measure its contents.
+Desktop rails are 208/320 px, reducing to 190/300 px below 1200 px. Filters can
+be hidden to recover photograph space. Below 1000 px the inspector overlays the
+grid (the native app currently has a 1024 px minimum width). The center grid
+stays the photograph scroller. The inspector has its own vertical scroll and
+sticky discovery controls; it must never make the virtual grid measure its contents.
 This is a structural convention, not an Adobe visual clone: PhotoGremlin keeps
 its own graphite/silver tokens, language, and local-first controls.
 
@@ -74,33 +76,31 @@ its own graphite/silver tokens, language, and local-first controls.
 - Analysis diagnostics such as sharpness and eye-closure confidence never sit
   on normal photo cards. They remain available in the filter inspector and
   detail surfaces, where their meaning and context can be read deliberately.
+- Histograms belong only beside a focused photograph in the single-photo
+  viewer and Shoot Review, where they can inform an immediate exposure/channel
+  inspection. They do not appear in the Library filter rail, grid tiles, bulk
+  culling, or Review Compare: those placements add decode work and visual
+  authority without enough decision context. The histogram defaults to luma,
+  offers an RGB toggle, and says “Rendered preview” because it measures the
+  exact local JPEG shown rather than sensor RAW or developed source values.
 - Rating stars are cumulative: a rating of four illuminates stars one through
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
 - The 12-hue color spectrum is the inspector's primary visual filter. It is
   always visible, supports multi-selection, communicates **match any**, and
-  shows selected hues as removable text-labelled chips. The wheel center
-  reports the current selection count, and Clear appears only while a selection
-  is active. Hue is deterministic image data, not a color label or aesthetic
-  verdict.
+  shows selected hues as removable text-labelled chips. A compact six-by-two
+  swatch grid replaces the wheel; selected swatches have a ring and checkmark.
+  Hue is deterministic image data, not a color label or aesthetic verdict.
 - Brightness, sharpness, contrast, highlight clipping, shadow clipping, eye
-  closure confidence, ISO and focal length are compact nested disclosure rows
-  inside the measured-filters disclosure. Each row keeps its label, current
-  filter state and local-value availability visible; expanding it reveals the
-  dual-range control and missing-value actions. The parent opens automatically
-  whenever a measured range is active, and active rows start open while
-  inactive rows stay collapsed. Their tracks use one restrained low-to-high
-  cool-blue tonal ramp, so measurement controls remain easy to identify without
-  turning the inspector into a multicolor dashboard. This is measurement
-  context, never a red/green quality verdict. Exact values are hidden at rest
-  and appear in the thumb bubble while the control is being adjusted; screen
-  readers receive the same value through the native range input and
-  `aria-valuetext`.
-- Those eight ranges are not offered again by the advanced composer. Legacy
-  saved conditions remain visible and removable without silent rewriting.
-- The advanced composer keeps native select semantics and keyboard behavior,
-  while presenting field, condition and value in labelled compact shells with
-  a consistent chevron and an explicit active-condition count.
+  closure confidence, ISO and focal length are shallow disclosure rows. One
+  opens at a time, showing a dual-range control, labelled numeric endpoints,
+  subordinate measured/missing counts and missing-value actions. Screen readers
+  receive native input values and `aria-valuetext`. Strict or nonrepresentable
+  conditions are never approximated by the slider.
+- Every field, including those eight ranges, is searchable in the custom
+  combobox picker. Arrow keys navigate, Enter selects and Escape closes. The
+  exact composer retains native operator/value selectors. Applied conditions
+  remain in the sticky active list regardless of which row is expanded.
 - Similar, burst and local face-appearance results live in Groups, not above
   the Library grid. Group cards use neutral factual descriptions and open into
   the same virtual photo grid and viewer used by other photo surfaces.
@@ -117,8 +117,9 @@ its own graphite/silver tokens, language, and local-first controls.
 
 ## 4. Motion (the premium feel is restraint)
 
-- Animate ONLY compositor properties: `transform`, `opacity`. Never
-  animate `width/height/top/left/margin/padding` — use FLIP or opacity.
+- Prefer compositor properties: `transform`, `opacity`. Semantic color changes
+  use 140–200 ms transitions. The single expanded filter control may animate
+  grid rows for 200 ms; never animate layout across the virtualized photo grid.
 - Interaction feedback ≤ 200ms, entrances use ease-out. One-shot effects
   only; nothing loops except progress indicators.
 - Respect `prefers-reduced-motion: reduce` — transitions collapse to near-
@@ -126,15 +127,14 @@ its own graphite/silver tokens, language, and local-first controls.
 - Blur/backdrop-filter never animates on large surfaces (photo grid!);
   `will-change` only during an active animation, then removed.
 - No decorative gradients, no glow-as-affordance, no decorative motion. The
-  measured range tracks and the functional hue spectrum are the only
-  data-encoding gradient exceptions.
+  photograph filename legibility overlay is a functional gradient exception.
   Large translucent surfaces must not use backdrop blur; an opaque semantic
   overlay is clearer over photographs and cheaper to render.
 - View changes and disclosure entrances follow the Transitions.dev portable
   CSS pattern: the entering inner surface fades and translates no more than
   8px with an explicit 180ms ease-out transition. Controls may use the same
   timing for a small transform/opacity state change. Never use `transition:
-  all`, and never animate the outer layout container.
+  all`, and never animate the workspace layout container.
 
 ## 5. Accessibility (non-negotiable)
 
@@ -178,7 +178,7 @@ its own graphite/silver tokens, language, and local-first controls.
 [ ] tokens only — no raw colors/radii/shadows
 [ ] both themes verified
 [ ] one accent per view; semantic colors used semantically
-[ ] motion: transform/opacity only, ≤200ms, reduced-motion respected
+[ ] motion: bounded controls only, ≤200ms, reduced-motion respected
 [ ] icon-only controls have aria-labels; focus visible everywhere
 [ ] numbers in mono + tabular-nums
 [ ] loading = skeletons/progress, empty = one clear next action

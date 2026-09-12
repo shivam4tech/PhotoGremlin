@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
 import { useFilteredPhotos } from "@/hooks/useFilteredPhotos";
@@ -8,12 +8,13 @@ import { VirtualGrid } from "@/components/VirtualGrid";
 import { PhotoTile } from "@/components/PhotoTile";
 import { Viewer } from "@/features/viewer/Viewer";
 import { FilterBar } from "@/features/library/FilterBar";
+import { AdvancedFiltersDialog } from "@/features/library/AdvancedFiltersDialog";
 import { CullActionTray } from "@/features/library/CullActionTray";
 import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
 import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { ReviewMode } from "@/features/review/ReviewMode";
 import { cleanName } from "@/features/organize/labels";
-import { draftToFilter } from "@/features/library/filterFields";
+import { serializeLibraryFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
 
 export function LibraryView() {
@@ -41,6 +42,27 @@ export function LibraryView() {
   const [viewerId, setViewerId] = useState<number | null>(null);
   const [photoFileAction, setPhotoFileAction] = useState<{ photoId: number; tab: FileOpsTab } | null>(null);
   const [reviewMode, setReviewMode] = useState(false);
+
+  const [filtersOpen, setFiltersOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 1000);
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [tileSize, setTileSize] = useState(180);
+  const filterToggle = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    function keydown(event: KeyboardEvent) {
+      if (viewerId !== null || reviewMode || photoFileAction || advancedFiltersOpen) return;
+      if (event.key === "Escape" && filtersOpen && window.innerWidth <= 1000) {
+        setFiltersOpen(false); filterToggle.current?.focus(); return;
+      }
+      const target = event.target as HTMLElement;
+      if (target.closest("input, textarea, select, [contenteditable=true]") || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key.toLowerCase() === "f") {
+        event.preventDefault(); setFiltersOpen(true);
+        requestAnimationFrame(() => document.querySelector<HTMLInputElement>(".filter-search")?.focus());
+      }
+    }
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
+  }, [viewerId, reviewMode, photoFileAction, filtersOpen, advancedFiltersOpen]);
 
   // Saving the current filter as a named view.
   const [saveViewOpen, setSaveViewOpen] = useState(false);
@@ -81,21 +103,16 @@ export function LibraryView() {
   }, [selectionMode, refreshKey, sessionId, activeFolder]);
 
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
-  const filterJson = useMemo(() => {
-    const base = draftToFilter(filterConditions);
-    // When the folder has no session yet (before first scan), show nothing
-    // rather than leaking in photos from other projects.
-    if (sessionId === null && activeFolder) {
-      return JSON.stringify({ operator: "AND", conditions: [{ field: "session_id", operator: "=", value: -1 }] });
-    }
-    if (sessionId === null) return JSON.stringify(base);
-    const sessionCond = { field: "session_id", operator: "=", value: sessionId };
-    if (typeof base === "string" && base === "") {
-      return JSON.stringify({ operator: "AND", conditions: [sessionCond] });
-    }
-    const obj = base as { operator: string; conditions: unknown[] };
-    return JSON.stringify({ ...obj, conditions: [...obj.conditions, sessionCond] });
-  }, [filterConditions, sessionId, activeFolder]);
+  const filterJson = useMemo(
+    () => serializeLibraryFilter(filterConditions, sessionId, !!activeFolder),
+    [filterConditions, sessionId, activeFolder],
+  );
+  const previewFilterCount = useCallback(async (conditions: typeof filterConditions) => {
+    const previewJson = serializeLibraryFilter(conditions, sessionId, !!activeFolder);
+    // The same deterministic local query as the grid, limited to one result;
+    // PhotoPage.total remains the exact number of matches.
+    return (await api.listFilteredPhotos(previewJson, 0, 1)).total;
+  }, [sessionId, activeFolder]);
   const photos = useFilteredPhotos(
     libraryHasPhotos,
     filterJson,
@@ -323,19 +340,6 @@ export function LibraryView() {
     setPhotoFileAction({ photoId, tab });
   }
 
-  // Forward wheel events from toolbar/filter areas to the photo grid
-  function forwardWheel(e: React.WheelEvent) {
-    const vg = document.querySelector(".vg") as HTMLDivElement | null;
-    if (vg && e.deltaY !== 0) {
-      const atTop = vg.scrollTop <= 0;
-      const atBottom = vg.scrollTop + vg.clientHeight >= vg.scrollHeight - 1;
-      if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
-        vg.scrollTop += e.deltaY;
-        e.preventDefault();
-      }
-    }
-  }
-
   // Reset scroll when switching projects
   const prevFolderRef = useRef(activeFolder);
   useEffect(() => {
@@ -374,14 +378,21 @@ export function LibraryView() {
   }
 
   return (
-    <div className="library" onWheel={forwardWheel}>
+    <div className={`library${filtersOpen ? " filters-open" : " filters-closed"}`}>
+      <div className="library-breadcrumb" title={activeFolder}>
+        <FolderIcon size={14} /><span>{activeFolder.split(/[\\/]/).filter(Boolean).join(" / ")}</span>
+      </div>
       <div className="library-toolbar">
-        <FolderIcon size={16} />
-        <span className="mono library-toolbar-path" title={activeFolder}>{activeFolder}</span>
+        <span className="library-shoot-name">{sessionName}</span>
         <span className="spacer" />
+        <button ref={filterToggle} className="btn btn-sm library-filter-toggle"
+          aria-expanded={filtersOpen} aria-controls="library-filters" title="Show filters (F)"
+          onClick={() => setFiltersOpen((current) => !current)}>
+          Filters{filterConditions.length > 0 ? ` (${filterConditions.length})` : ""}
+        </button>
         {!scanning ? (
           <button
-            className="btn btn-sm btn-primary"
+            className={`btn btn-sm${libraryHasPhotos ? "" : " btn-primary"}`}
             onClick={startScan}
             disabled={busy || photos.loading || anyPassRunning || findingSimilar}
           >
@@ -573,7 +584,7 @@ export function LibraryView() {
             )}
           </EmptyState>
         </div>
-      ) : !hasPhotos && filterConditions.length > 0 ? (
+      ) : !hasPhotos && !photos.loading && !photos.error && filterConditions.length > 0 ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
           <EmptyState glyph="◫" title="No photographs match these filters">
             <p>
@@ -593,9 +604,12 @@ export function LibraryView() {
             <div className="library-grid-area">
               <VirtualGrid
                 itemCount={pagePhotos.length}
+                minColWidth={tileSize}
+                rowHeight={tileSize + 12}
                 onReachEnd={() => { if (photos.hasMore && !photos.loading) photos.loadMore(); }}
                 render={(i) => (
                   <PhotoTile
+                    key={pagePhotos[i].id}
                     photo={pagePhotos[i]}
                     onOpen={setViewerId}
                     selectionMode={selectionMode}
@@ -613,18 +627,11 @@ export function LibraryView() {
           )}
 
           <div className="library-statusbar">
-            {filterConditions.length > 0 ? (
-              <span>
-                Showing {pagePhotos.length.toLocaleString()} of {photos.total.toLocaleString()} filtered
-                {photos.hasMore ? " — scroll for more" : ""} · {filterConditions.length} filter{filterConditions.length > 1 ? "s" : ""}
-              </span>
-            ) : (
-              <span>
-                {pagePhotos.length.toLocaleString()} of {photos.total.toLocaleString()} photographs
-                {photos.hasMore ? " — scroll for more" : ""}
-              </span>
-            )}
-            <span className="faint">Page {photos.page + 1}</span>
+            <span role="status" aria-live="polite" aria-busy={photos.loading}>
+              {photos.total.toLocaleString()} of {(sessionPhotoCount ?? photos.total).toLocaleString()} photos
+              {filterConditions.length > 0 ? ` · ${filterConditions.length} filters` : ""}
+              {photos.loading ? " · Updating…" : ""}
+            </span>
             {dbStatus && dbStatus.analyzed_count > 0 && (
               <span className="faint">{dbStatus.analyzed_count.toLocaleString()} analyzed</span>
             )}
@@ -632,7 +639,10 @@ export function LibraryView() {
               <span className="faint">{metadataPending.toLocaleString()} awaiting metadata</span>
             )}
             <span className="spacer" />
-            <span className="faint">Local-only index · thumbnails &amp; analysis on this machine</span>
+            <label className="library-density">Size
+              <input type="range" min={140} max={240} step={20} value={tileSize}
+                aria-label="Thumbnail size" onChange={(event) => setTileSize(Number(event.target.value))} />
+            </label>
             <button className="btn btn-ghost btn-sm" onClick={photos.reload} disabled={photos.loading}>Refresh</button>
           </div>
         </>
@@ -640,29 +650,36 @@ export function LibraryView() {
 
         </section>
 
-        <aside className="library-inspector" aria-label="Photo filters">
+        <aside className="library-inspector" id="library-filters" aria-label="Photo filters" hidden={!filtersOpen}>
           <div className="library-inspector-head">
             <div>
               <strong>Filters</strong>
-              <span className="faint">Refine this project</span>
+              <span className="faint" aria-live="polite">{photos.loading ? "Updating results…" : `${photos.total.toLocaleString()} of ${(sessionPhotoCount ?? photos.total).toLocaleString()} photos`}</span>
             </div>
             {filterConditions.length > 0 && (
               <button
                 className="btn btn-ghost btn-sm"
                 onClick={() => store().setFilterConditions([])}
               >
-                Clear {filterConditions.length}
+                Clear all
               </button>
             )}
+            <button className="btn btn-ghost btn-sm inspector-close" aria-label="Close filters"
+              onClick={() => { setFiltersOpen(false); filterToggle.current?.focus(); }}>×</button>
           </div>
 
           <>
+              <div className="filter-mode-switch" aria-label="Filter workspace">
+                <button type="button" aria-pressed="true" onClick={() => document.querySelector<HTMLInputElement>(".library-inspector .filter-search")?.focus()}>Simple</button>
+                <button type="button" aria-haspopup="dialog" onClick={() => setAdvancedFiltersOpen(true)}>Advanced</button>
+              </div>
               <FilterBar
                 mode="inspector"
                 draft={filterConditions}
                 onChange={(conditions) => store().setFilterConditions(conditions)}
                 disabled={anyPassRunning}
                 sessionId={sessionId}
+                onAdvanced={() => setAdvancedFiltersOpen(true)}
               />
 
               {filterConditions.length > 0 && (
@@ -707,6 +724,10 @@ export function LibraryView() {
         </aside>
       </div>
 
+      {advancedFiltersOpen && <AdvancedFiltersDialog initialConditions={filterConditions} sessionId={sessionId}
+        loadPreviewCount={previewFilterCount}
+        disabled={anyPassRunning} onApply={(conditions) => store().setFilterConditions(conditions)}
+        onClose={() => setAdvancedFiltersOpen(false)} />}
       {viewerId !== null && (
         <Viewer
           photoId={viewerId}
