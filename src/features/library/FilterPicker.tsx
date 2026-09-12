@@ -2,22 +2,31 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { FilterCondition } from "@/types/api";
 import { choiceIsActive, searchFilterChoices, type FilterChoice } from "./filterDiscovery";
 
-export function FilterPicker({ draft, disabled, onSelect }: {
+export function FilterPicker({ draft, disabled, autoFocus, onSelect, onOpenChange }: {
   draft: FilterCondition[];
   disabled?: boolean;
+  autoFocus?: boolean;
   onSelect: (choice: FilterChoice) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
+  const openRef = useRef(false);
   const listId = useId();
   const choices = searchFilterChoices(query);
+  function updateOpen(next: boolean) {
+    if (openRef.current === next) return;
+    openRef.current = next;
+    setOpen(next);
+    onOpenChange?.(next);
+  }
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      if (!root.current?.contains(event.target as Node)) updateOpen(false);
     };
     window.addEventListener("pointerdown", outside);
     return () => window.removeEventListener("pointerdown", outside);
@@ -26,28 +35,28 @@ export function FilterPicker({ draft, disabled, onSelect }: {
     if (open) document.getElementById(`${listId}-${index}`)?.scrollIntoView({ block: "nearest" });
   }, [index, open, listId]);
   function choose(choice: FilterChoice) {
-    input.current?.focus(); setQuery(""); setIndex(0); setOpen(false); onSelect(choice);
+    input.current?.focus(); setQuery(""); setIndex(0); updateOpen(false); onSelect(choice);
   }
   return <div className="filter-picker" ref={root} onBlur={(event) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    if (!event.currentTarget.contains(event.relatedTarget)) updateOpen(false);
   }}>
     <div className="filter-search-row">
-      <input ref={input} className="input filter-search" type="search"
+      <input ref={input} className="input filter-search" type="search" autoFocus={autoFocus}
         placeholder="Search filters…" aria-label="Search filters" role="combobox"
         aria-expanded={open} aria-controls={listId} aria-autocomplete="list"
         aria-activedescendant={open && choices.length ? `${listId}-${index}` : undefined}
-        value={query} disabled={disabled} onFocus={() => setOpen(true)}
-        onChange={(event) => { setQuery(event.target.value); setIndex(0); setOpen(true); }}
+        value={query} disabled={disabled} onFocus={() => updateOpen(true)}
+        onChange={(event) => { setQuery(event.target.value); setIndex(0); updateOpen(true); }}
         onKeyDown={(event) => {
-          if (event.key === "Escape") { event.stopPropagation(); setOpen(false); }
+          if (event.key === "Escape") { event.stopPropagation(); updateOpen(false); }
           if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-            event.preventDefault(); setOpen(true);
+            event.preventDefault(); updateOpen(true);
             setIndex((current) => open ? Math.max(0, Math.min(choices.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))) : 0);
           }
           if (event.key === "Enter" && open && choices[index]) { event.preventDefault(); choose(choices[index]); }
         }} />
       <button className="btn btn-sm" type="button" disabled={disabled} aria-label="Add filter" aria-expanded={open}
-        onClick={() => { input.current?.focus(); setOpen(true); }}>+</button>
+        onClick={() => { input.current?.focus(); updateOpen(true); }}>+</button>
     </div>
     {open && <div className="filter-picker-popover">
       <div className="filter-picker-results" id={listId} role="listbox" aria-label="Available filters">

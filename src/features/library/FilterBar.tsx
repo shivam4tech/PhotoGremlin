@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
 import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
@@ -17,6 +17,7 @@ import { FilterPicker } from "./FilterPicker";
 import { ActiveFilterList } from "./ActiveFilterList";
 import { FILTER_CHOICES } from "./filterDiscovery";
 import { QuickFilterIcon } from "./QuickFilterIcon";
+import type { AdvancedFilterEditorState, AdvancedFilterWorkspaceAction } from "./advancedFilterState";
 
 interface FilterBarProps {
   draft: FilterCondition[];
@@ -29,6 +30,9 @@ interface FilterBarProps {
   /** A category limits presentation only; the complete draft is preserved. */
   category?: string;
   onAdvanced?: () => void;
+  /** Advanced mode may own editor transitions alongside its private draft. */
+  editorState?: AdvancedFilterEditorState;
+  editorDispatch?: Dispatch<AdvancedFilterWorkspaceAction>;
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
@@ -45,6 +49,16 @@ function monthFromDate(value: string): Date {
 
 function isoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function conditionInputs(condition: FilterCondition | null): [string, string] {
+  if (!condition || condition.value === null || condition.value === undefined) return ["", ""];
+  if (condition.operator === "between" && Array.isArray(condition.value)) {
+    const upper = String(condition.value[1] ?? "");
+    return [String(condition.value[0] ?? ""), upper.endsWith("T23:59:59Z") ? upper.slice(0, 10) : upper];
+  }
+  if (Array.isArray(condition.value)) return [condition.value.join(", "), ""];
+  return [String(condition.value), ""];
 }
 
 /** Click-only date calendar. Native WebKit date popovers lose selections on
@@ -158,14 +172,24 @@ function ComposerControl({
  * engine and (later) stored in saved views. Neutral technical language
  * throughout (FILTER_ENGINE.md).
  */
-export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = "bar", category, onAdvanced }: FilterBarProps) {
+export function FilterBar({
+  draft,
+  onChange,
+  disabled,
+  sessionId = null,
+  mode = "bar",
+  category,
+  onAdvanced,
+  editorState,
+  editorDispatch,
+}: FilterBarProps) {
   const headingId = useId();
   const root = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(draft.length > 0);
   // Disclosure controls only editor visibility. Candidate configuration is
   // derived below, while `draft` remains the sole active-filter state.
-  const [editorDisclosed, setEditorDisclosed] = useState(false);
+  const [localEditorDisclosed, setLocalEditorDisclosed] = useState(false);
   const [field, setField] = useState(ADVANCED_FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
   const presentation = getFilterPresentation(field)!;
@@ -176,13 +200,39 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const [metadataOptions, setMetadataOptions] = useState<FilterValueOptions | null>(null);
   const [metadataOptionsLoading, setMetadataOptionsLoading] = useState(false);
   const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
+  const controlledEditor = editorState?.kind === "editing" ? editorState : null;
+  const editorDisclosed = editorState ? controlledEditor !== null : localEditorDisclosed;
+
+  const editorIdentity = controlledEditor
+    ? `${controlledEditor.intent}:${controlledEditor.field}:${controlledEditor.intent === "edit" ? controlledEditor.index : "new"}`
+    : "";
+
+  useEffect(() => {
+    if (!controlledEditor) return;
+    const seed = controlledEditor.candidate;
+    const nextField = controlledEditor.field;
+    let nextOperator = seed?.operator ?? getFilterPresentation(nextField)!.operatorOptions[0].op;
+    let [nextRaw, nextRaw2] = conditionInputs(seed);
+    // The engine supports `!=`, but the binary editor can express the same
+    // condition more plainly by selecting the opposite named state.
+    if (FIELD_BY_NAME[nextField]?.kind === "bool" && nextOperator === "!="
+      && (nextRaw === "true" || nextRaw === "false")) {
+      nextOperator = "=";
+      nextRaw = nextRaw === "true" ? "false" : "true";
+    }
+    setField(nextField);
+    setOp(nextOperator);
+    setRaw(nextRaw);
+    setRaw2(nextRaw2);
+  }, [editorIdentity]);
 
   useEffect(() => {
     if (editorDisclosed) composer.current?.querySelector<HTMLSelectElement>("select")?.focus();
   }, [editorDisclosed, field]);
 
   function closeEditor() {
-    setEditorDisclosed(false);
+    if (editorState) editorDispatch?.({ type: "cancel-editor" });
+    else setLocalEditorDisclosed(false);
     root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
   }
 
@@ -210,14 +260,16 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const needsTwoValues = op === "between" && def.kind !== "datetime";
   const needsValue = !["is-null", "not-null"].includes(op);
   const valueUsesSelect = needsValue && (presentation.controlType === "boolean"
+    || presentation.controlType === "rating"
     || presentation.controlType === "enum" || hasMetadataOptions);
   const valueUsesPair = needsValue && op === "between";
-  const configuredRaw = presentation.controlType === "boolean" && raw === ""
+  const configuredRaw = raw === "" && !Array.isArray(presentation.defaultValue)
+    && presentation.defaultValue !== undefined
     ? String(presentation.defaultValue)
     : raw;
-  const candidate = configuredRaw === UNIDENTIFIED
+  const candidate = useMemo(() => configuredRaw === UNIDENTIFIED
     ? { field, operator: "is-null" as const, value: null }
-    : buildCondition(field, op, configuredRaw, raw2);
+    : buildCondition(field, op, configuredRaw, raw2), [configuredRaw, field, op, raw2]);
   const editorConfigured = candidate !== null;
   const expanded = mode === "inspector" || open;
   const categoryFields = FILTER_CHOICES.filter((choice) => !choice.preset && choice.category === category && choice.field !== "palette_color");
@@ -225,6 +277,11 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const rating = draft.find((condition) => condition.field === "rating");
   const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
   const unratedOnly = rating?.operator === "=" && rating.value === 0;
+
+  useEffect(() => {
+    if (!controlledEditor || field !== controlledEditor.field) return;
+    editorDispatch?.({ type: "update-candidate", candidate });
+  }, [candidate, controlledEditor?.field, editorDispatch, field]);
 
   function setRatingFilter(value: "any" | "unrated" | number) {
     const withoutRating = draft.filter((condition) => condition.field !== "rating");
@@ -234,7 +291,14 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   }
 
   function selectField(f: string) {
-    setEditorDisclosed(true);
+    if (editorState) {
+      const existingIndex = draft.findIndex((condition) => condition.field === f);
+      editorDispatch?.(existingIndex >= 0
+        ? { type: "begin-edit", index: existingIndex }
+        : { type: "begin-add", field: f });
+      return;
+    }
+    setLocalEditorDisclosed(true);
     setField(f);
     const first = getFilterPresentation(f)!.operatorOptions[0].op;
     setOp(first);
@@ -244,6 +308,14 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
   function add() {
     if (!candidate) return;
+    if (editorState) {
+      editorDispatch?.({ type: "update-candidate", candidate });
+      editorDispatch?.({ type: "commit-editor" });
+      setRaw("");
+      setRaw2("");
+      root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
+      return;
+    }
     onChange([...draft, candidate]);
     closeEditor();
     setRaw("");
@@ -252,6 +324,20 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
   function valueInput() {
     if (!needsValue) return null;
+    if (presentation.controlType === "rating") {
+      return (
+        <select
+          className="input"
+          value={configuredRaw}
+          onChange={(event) => setRaw(event.target.value)}
+          aria-label="Rating value"
+        >
+          {presentation.valueOptions?.map((option) => (
+            <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
+          ))}
+        </select>
+      );
+    }
     switch (def.kind) {
       case "palette":
         return null;
@@ -402,7 +488,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
       {expanded && (
         <div className="filterbar-panel">
           <div className="filter-discovery">
-            <FilterPicker draft={draft} disabled={disabled} onSelect={(choice) => {
+            <FilterPicker draft={draft} disabled={disabled} autoFocus={editorState?.kind === "idle"} onOpenChange={editorState ? (isOpen) => {
+              if (isOpen) editorDispatch?.({ type: "open-picker" });
+            } : undefined} onSelect={(choice) => {
               if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
               else if (choice.field === "palette_color") {
                 (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
@@ -476,7 +564,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
           </div>}
           <div className={`more-filters${editorDisclosed ? " is-open" : ""}`}>
             {editorDisclosed && (
-              <div className="more-filters-panel" ref={composer} onKeyDown={(event) => {
+              <div key={editorIdentity || field} className="more-filters-panel" ref={composer} onKeyDown={(event) => {
                 if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
               }}>
                 <div className="filterbar-compose">
@@ -485,23 +573,25 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                     <button type="button" className="btn btn-ghost btn-sm" aria-label="Close filter editor"
                       onClick={closeEditor}>×</button>
                   </div>
-                  <ComposerControl label="Condition" select>
-                    <select
-                      className="input"
-                      value={op}
-                      onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
-                      aria-label="Filter condition"
-                    >
-                      {ops.map((o) => (
-                        <option key={o.op} value={o.op}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </ComposerControl>
+                  {presentation.controlType !== "boolean" && (
+                    <ComposerControl label="Condition" select>
+                      <select
+                        className="input"
+                        value={op}
+                        onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+                        aria-label="Filter condition"
+                      >
+                        {ops.map((o) => (
+                          <option key={o.op} value={o.op}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                    </ComposerControl>
+                  )}
                   {needsValue && (
                     <ComposerControl
-                      label="Value"
+                      label={presentation.controlType === "boolean" ? "Show" : presentation.controlType === "rating" ? "Rating" : "Value"}
                       select={valueUsesSelect}
                       wide={valueUsesPair}
                       className="filter-compose-control-value"
@@ -510,7 +600,7 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
                     </ComposerControl>
                   )}
                   <button type="button" className="btn btn-primary btn-sm filterbar-compose-add" onClick={add} disabled={!editorConfigured || disabled}>
-                    Add filter
+                    {controlledEditor?.intent === "edit" ? "Save change" : editorState ? "Add to filters" : "Add filter"}
                   </button>
                 </div>
                 {needsTwoValues && (

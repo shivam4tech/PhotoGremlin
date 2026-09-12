@@ -106,7 +106,12 @@ export function advancedFilterWorkspaceReducer(
         currentEditor: { kind: "idle" },
       };
     case "open-picker":
-      return { ...state, currentEditor: { kind: "picker" } };
+      // Search is a temporary layer. Opening it while a typed editor is
+      // visible must not discard that editor's candidate; Escape can then
+      // close Search first and the editor second.
+      return state.currentEditor.kind === "editing"
+        ? state
+        : { ...state, currentEditor: { kind: "picker" } };
     case "begin-add":
       return {
         ...state,

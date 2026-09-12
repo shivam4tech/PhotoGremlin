@@ -36,8 +36,14 @@ async function type(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
 }
-async function key(input: HTMLElement, value: string) {
-  await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })));
+async function key(input: HTMLElement, value: string, init: KeyboardEventInit = {}) {
+  await act(async () => input.dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true, ...init })));
+}
+async function selectValue(select: HTMLSelectElement, value: string) {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
 }
 function button(label: string) {
   return container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
@@ -57,6 +63,23 @@ describe("advanced filter workspace", () => {
     expect(dialog.querySelector(".advanced-filters-summary")).toBeNull();
     expect(dialog.querySelector(".advanced-filters-main .advanced-filters-selection")).not.toBeNull();
     expect(dialog.querySelectorAll(".advanced-filters-categories button")).toHaveLength(6);
+  });
+  it("previews the exact draft match count after a short debounce", async () => {
+    const loadPreviewCount = vi.fn(async (conditions: FilterCondition[]) => conditions.length ? 12 : 277);
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1}
+      loadPreviewCount={loadPreviewCount} onApply={vi.fn()} onClose={vi.fn()} />);
+    expect(container.querySelector(".advanced-filter-preview")?.textContent).toBe("Checking matches…");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    expect(loadPreviewCount).toHaveBeenLastCalledWith([]);
+    expect(container.querySelector(".advanced-filter-preview")?.textContent).toBe("277 matching photos");
+
+    await click(button("Blue"));
+    expect(container.querySelector(".advanced-filter-preview")?.textContent).toBe("Checking matches…");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 200)); });
+    expect(loadPreviewCount).toHaveBeenLastCalledWith([
+      { field: "palette_color", operator: "in", value: ["blue"] },
+    ]);
+    expect(container.querySelector(".advanced-filter-preview")?.textContent).toBe("12 matching photos");
   });
   it("stages colors and only publishes the combined conditions on Apply", async () => {
     const initial: FilterCondition[] = [{ field: "rating", operator: ">=", value: 4 }];
@@ -93,6 +116,179 @@ describe("advanced filter workspace", () => {
     expect(container.querySelector('[aria-label="Selected filters"]')).toBeNull();
     await click(textButton("Apply filters"));
     expect(apply).toHaveBeenCalledWith([]);
+  });
+  it("adds a searched condition, resets the editor, and edits it without creating a duplicate", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search filters"]')!;
+
+    await type(search, "iso");
+    await click(container.querySelector<HTMLElement>('[role="option"]')!);
+    expect(textButton("Add to filters").disabled).toBe(true);
+    await type(container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!, "400");
+    await click(textButton("Add to filters"));
+
+    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso = 400");
+    expect(container.querySelector(".more-filters")?.classList.contains("is-open")).toBe(false);
+
+    await type(search, "iso");
+    expect(container.querySelector('[role="option"]')?.textContent).toContain("Added");
+    await click(container.querySelector<HTMLElement>('[role="option"]')!);
+    expect(textButton("Save change")).toBeTruthy();
+    const isoValue = container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!;
+    expect(isoValue.value).toBe("400");
+    await type(isoValue, "800");
+    await click(textButton("Save change"));
+    await click(textButton("Apply filters (1)"));
+
+    expect(apply).toHaveBeenCalledWith([{ field: "iso", operator: "=", value: 800 }]);
+  });
+  it("adds and applies Monochrome from Search with a natural label", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search filters"]')!;
+
+    await type(search, "mono");
+    await click(container.querySelector<HTMLElement>('[role="option"]')!);
+    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("Black & white");
+    await click(textButton("Apply filters (1)"));
+
+    expect(apply).toHaveBeenCalledWith([{ field: "monochrome", operator: "=", value: true }]);
+  });
+  it("keeps the applied condition unchanged when an edited draft is cancelled", async () => {
+    const initial: FilterCondition[] = [{ field: "iso", operator: ">=", value: 100 }];
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={initial} sessionId={1} onApply={apply} onClose={vi.fn()} />);
+
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Edit iso"]')!);
+    const isoValue = container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!;
+    await type(isoValue, "200");
+    await click(textButton("Save change"));
+    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso ≥ 200");
+    await click(textButton("Cancel"));
+
+    expect(initial).toEqual([{ field: "iso", operator: ">=", value: 100 }]);
+    expect(apply).not.toHaveBeenCalled();
+  });
+  it("opens a staged chip for in-place editing and removes it with its separate action", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[{ field: "iso", operator: ">=", value: 100 }]}
+      sessionId={1} onApply={apply} onClose={vi.fn()} />);
+
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Edit iso"]')!);
+    expect(textButton("Save change")).toBeTruthy();
+    const isoValue = container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!;
+    expect(isoValue.value).toBe("100");
+    await type(isoValue, "200");
+    await click(textButton("Save change"));
+    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso ≥ 200");
+
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Remove iso"]')!);
+    expect(container.querySelector('[aria-label="Selected filters"]')).toBeNull();
+    await click(textButton("Apply filters"));
+    expect(apply).toHaveBeenCalledWith([]);
+  });
+  it("focuses discovery first and applies the complete draft with Ctrl+Enter", async () => {
+    const apply = vi.fn(); const close = vi.fn();
+    const initial: FilterCondition[] = [{ field: "rating", operator: ">=", value: 4 }];
+    await render(<AdvancedFiltersDialog initialConditions={initial} sessionId={1} onApply={apply} onClose={close} />);
+    expect(document.activeElement).toBe(container.querySelector('[aria-label="Search filters"]'));
+    await key(container.querySelector("dialog")!, "Enter", { ctrlKey: true });
+    expect(apply).toHaveBeenCalledWith(initial);
+    expect(close).toHaveBeenCalledOnce();
+  });
+  it("does not reopen Search or steal focus when the category changes", async () => {
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
+    const cameraCategory = textButton("Camera & date");
+    await act(async () => cameraCategory.focus());
+    await click(cameraCategory);
+    expect(document.activeElement).toBe(cameraCategory);
+    expect(container.querySelector('[aria-label="Search filters"]')?.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+  });
+  it("stages two measured ranges, removes one, and applies the remaining draft", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    await click(textButton("Image properties"));
+
+    const rangeHeading = (label: string) => Array.from(
+      container.querySelectorAll<HTMLButtonElement>(".range-filter-heading"),
+    ).find((item) => item.textContent?.includes(label))!;
+
+    await click(rangeHeading("Sharpness"));
+    expect(container.querySelector('[aria-label="Sharpness range"]')?.textContent)
+      .toContain("120 measured · 2 unmeasured");
+    const sharpness = container.querySelector<HTMLInputElement>('[aria-label="Sharpness minimum value"]')!;
+    await type(sharpness, "70");
+    await key(sharpness, "Enter");
+
+    await click(rangeHeading("Brightness"));
+    const brightness = container.querySelector<HTMLInputElement>('[aria-label="Brightness minimum value"]')!;
+    await type(brightness, "20");
+    await key(brightness, "Enter");
+
+    const selected = container.querySelector('[aria-label="Selected filters"]')!;
+    expect(selected.textContent).toContain("sharpness ≥ 70");
+    expect(selected.textContent).toContain("brightness ≥ 20");
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Remove sharpness"]')!);
+    expect(selected.textContent).not.toContain("sharpness");
+    expect(selected.textContent).toContain("brightness ≥ 20");
+
+    await click(textButton("Apply filters (1)"));
+    expect(apply).toHaveBeenCalledWith([{ field: "brightness", operator: ">=", value: 20 }]);
+  });
+  it("closes Search before cancelling the typed editor with Escape", async () => {
+    const close = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[{ field: "iso", operator: ">=", value: 100 }]}
+      sessionId={1} onApply={vi.fn()} onClose={close} />);
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Edit iso"]')!);
+    expect(textButton("Save change")).toBeTruthy();
+
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search filters"]')!;
+    await type(search, "iso");
+    expect(container.querySelector('[role="listbox"]')).not.toBeNull();
+    expect(textButton("Save change")).toBeTruthy();
+    await key(search, "Escape");
+    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(textButton("Save change")).toBeTruthy();
+
+    await key(container.querySelector<HTMLElement>(".more-filters-panel")!, "Escape");
+    expect(Array.from(container.querySelectorAll("button")).some((item) => item.textContent === "Save change")).toBe(false);
+    expect(container.querySelector("dialog")?.open).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+  });
+  it("edits legacy negative booleans as an equivalent named state", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog
+      initialConditions={[{ field: "monochrome", operator: "!=", value: false }]}
+      sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Edit "]')!);
+    expect(container.querySelector('[aria-label="Filter condition"]')).toBeNull();
+    const value = container.querySelector<HTMLSelectElement>('[aria-label="Monochrome value"]')!;
+    expect(Array.from(value.options).map((option) => option.text)).toEqual(["Black & white", "Color"]);
+    expect(value.value).toBe("true");
+    await click(textButton("Save change"));
+    await click(textButton("Apply filters (1)"));
+    expect(apply).toHaveBeenCalledWith([{ field: "monochrome", operator: "=", value: true }]);
+  });
+  it("offers only supported natural rating comparisons and named star values", async () => {
+    const apply = vi.fn();
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={apply} onClose={vi.fn()} />);
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search filters"]')!;
+    await type(search, "rating");
+    await click(container.querySelector<HTMLElement>('[role="option"]')!);
+    const condition = container.querySelector<HTMLSelectElement>('[aria-label="Filter condition"]')!;
+    const value = container.querySelector<HTMLSelectElement>('[aria-label="Rating value"]')!;
+    expect(Array.from(condition.options).map((option) => option.text)).toEqual(["At least", "Exactly", "At most"]);
+    expect(Array.from(value.options).map((option) => option.text)).toEqual([
+      "Unrated", "1 star", "2 stars", "3 stars", "4 stars", "5 stars",
+    ]);
+    expect(value.value).toBe("1");
+    await selectValue(condition, "<=");
+    await selectValue(value, "3");
+    await click(textButton("Add to filters"));
+    await click(textButton("Apply filters (1)"));
+    expect(apply).toHaveBeenCalledWith([{ field: "rating", operator: "<=", value: 3 }]);
   });
 });
 
@@ -147,7 +343,8 @@ describe("filter control interactions", () => {
     await click(Array.from(container.querySelectorAll<HTMLElement>("[role=option]"))
       .find((item) => item.textContent?.trim() === "Monochrome")!);
     const value = container.querySelector<HTMLSelectElement>('[aria-label="Monochrome value"]')!;
-    expect(Array.from(value.options).map((option) => option.text)).toEqual(["Yes", "No"]);
+    expect(container.querySelector('[aria-label="Filter condition"]')).toBeNull();
+    expect(Array.from(value.options).map((option) => option.text)).toEqual(["Black & white", "Color"]);
     expect(value.value).toBe("true");
     await click(Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((item) => item.textContent?.trim() === "Add filter")!);

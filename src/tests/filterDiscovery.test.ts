@@ -32,7 +32,11 @@ describe("filter discovery", () => {
     expect(savedViewMatches("invalid", draft)).toBe(false);
   });
   it("labels negative boolean filters honestly", () => {
-    expect(chipLabel({ field: "faces_present", operator: "=", value: false })).toMatch(/^Not /i);
-    expect(chipLabel({ field: "faces_present", operator: "!=", value: false })).not.toMatch(/^Not /i);
+    expect(chipLabel({ field: "faces_present", operator: "=", value: false })).toBe(
+      "No faces detected",
+    );
+    expect(chipLabel({ field: "faces_present", operator: "!=", value: false })).toBe(
+      "Contains faces",
+    );
   });
 });

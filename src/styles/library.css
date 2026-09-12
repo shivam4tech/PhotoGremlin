@@ -54,6 +54,10 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .filter-chip:hover:not(:disabled) { background: var(--bg-selected); border-color: var(--accent); }
 .filter-chip > span { margin-left: auto; font-size: 16px; line-height: 1; }
 .filter-chip > i { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--spectrum-color); }
+.filter-chip-group { display: inline-flex; min-width: 0; animation: filter-chip-in 160ms var(--ease-out); }
+.filter-chip-group .filter-chip { border-radius: var(--radius-sm) 0 0 var(--radius-sm); animation: none; }
+.filter-chip-remove { display: grid; place-items: center; width: 28px; padding: 0; border: 1px solid var(--accent-border-strong); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--accent-muted); color: var(--text); font-size: 16px; }
+.filter-chip-remove:hover:not(:disabled) { background: var(--bg-selected); border-color: var(--accent); }
 .filter-picker { position: relative; min-width: 0; }
 .filter-search-row { display: flex; gap: 6px; }
 .filter-search-row .input { width: 100%; min-width: 0; font-size: 12px; height: 36px; }

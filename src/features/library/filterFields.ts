@@ -453,6 +453,60 @@ const NATURAL_OPERATOR_LABELS: Partial<Record<FilterCondition["operator"], strin
   "not-null": "recorded",
 };
 
+const BOOLEAN_VALUE_OPTIONS: Record<string, readonly FilterValueOption[]> = {
+  monochrome: [
+    { value: true, label: "Black & white" },
+    { value: false, label: "Color" },
+  ],
+  color: [
+    { value: true, label: "Color detected" },
+    { value: false, label: "No color detected" },
+  ],
+  closed_eye_candidate: [
+    { value: true, label: "Closed-eye candidate" },
+    { value: false, label: "Not a closed-eye candidate" },
+  ],
+  possible_blink: [
+    { value: true, label: "Possible blink" },
+    { value: false, label: "No blink signal" },
+  ],
+  faces_present: [
+    { value: true, label: "Contains faces" },
+    { value: false, label: "No faces detected" },
+  ],
+  smiling: [
+    { value: true, label: "Smiling" },
+    { value: false, label: "Not smiling" },
+  ],
+  dark: [
+    { value: true, label: "Dark" },
+    { value: false, label: "Not dark" },
+  ],
+  bright: [
+    { value: true, label: "Bright" },
+    { value: false, label: "Not bright" },
+  ],
+  flagged: [
+    { value: true, label: "Flagged" },
+    { value: false, label: "Not flagged" },
+  ],
+};
+
+const RATING_OPERATOR_OPTIONS: readonly OpDef[] = [
+  { op: ">=", label: "At least" },
+  { op: "=", label: "Exactly" },
+  { op: "<=", label: "At most" },
+];
+
+const RATING_VALUE_OPTIONS: readonly FilterValueOption[] = [
+  { value: 0, label: "Unrated" },
+  { value: 1, label: "1 star" },
+  { value: 2, label: "2 stars" },
+  { value: 3, label: "3 stars" },
+  { value: 4, label: "4 stars" },
+  { value: 5, label: "5 stars" },
+];
+
 const QUICK_PRESENTATION: Partial<Record<QuickRangeField, Pick<FilterPresentation,
   "description" | "values" | "min" | "max" | "step" | "unit" | "defaultValue" | "icon"
 >>> = {
@@ -492,14 +546,17 @@ export function getFilterPresentation(field: string): FilterPresentation | null 
     : definition.kind === "real" || definition.kind === "int" ? "number"
     : "text";
   const engineOperators = OPS_BY_KIND[definition.kind];
-  const operatorOptions = engineOperators.map((operator) => ({
-    ...operator,
-    label: definition.kind === "bool" ? operator.label
-      : definition.kind === "datetime" || definition.kind === "palette" ? operator.label
-      : NATURAL_OPERATOR_LABELS[operator.op] ?? operator.label,
-  }));
+  const operatorOptions = field === "rating" ? RATING_OPERATOR_OPTIONS
+    : definition.kind === "bool" ? [{ op: "=" as const, label: "is" }]
+    : engineOperators.map((operator) => ({
+      ...operator,
+      label: definition.kind === "datetime" || definition.kind === "palette" ? operator.label
+        : NATURAL_OPERATOR_LABELS[operator.op] ?? operator.label,
+    }));
   const valueOptions = definition.kind === "bool"
-    ? [{ value: true, label: "Yes" }, { value: false, label: "No" }]
+    ? BOOLEAN_VALUE_OPTIONS[field] ?? [{ value: true, label: "Yes" }, { value: false, label: "No" }]
+    : field === "rating"
+      ? RATING_VALUE_OPTIONS
     : definition.kind === "palette"
       ? PALETTE_COLORS.map(({ id, label }) => ({ value: id, label }))
       : definition.values?.map((value) => ({ value, label: labelValue(value) }));
@@ -514,20 +571,10 @@ export function getFilterPresentation(field: string): FilterPresentation | null 
     valueOptions,
     supportsUnmeasured: engineOperators.some(({ op }) => op === "is-null"),
     ...(definition.kind === "bool" ? { defaultValue: true } : {}),
-    ...(field === "rating" ? { min: 0, max: 5, step: 1, defaultValue: 0 } : {}),
+    ...(field === "rating" ? { min: 0, max: 5, step: 1, defaultValue: 1 } : {}),
     ...quick,
   };
 }
-
-const BOOL_PHRASES: Record<string, string> = {
-  monochrome: "monochrome",
-  color: "in color",
-  dark: "dark",
-  bright: "bright",
-  faces_present: "contains faces",
-  smiling: "smiling",
-  flagged: "flagged",
-};
 
 const OP_SYMBOL: Record<string, string> = {
   "=": "=",
@@ -684,15 +731,47 @@ export function chipLabel(c: FilterCondition): string {
     return `${label.toLowerCase()} ${lo} → ${hiTxt}`;
   }
   if (def?.kind === "bool") {
-    const phrase = BOOL_PHRASES[c.field] ?? label.toLowerCase();
-    const positive = c.operator === "!=" ? c.value === false : c.value !== false;
-    return positive ? phrase : `not ${phrase}`;
+    const effectiveValue = c.operator === "!=" ? c.value === false : c.value !== false;
+    const valueLabel = (BOOLEAN_VALUE_OPTIONS[c.field]
+      ?? [{ value: true, label: "Yes" }, { value: false, label: "No" }])
+      .find((option) => option.value === effectiveValue)?.label;
+    return valueLabel ?? `${label}: ${effectiveValue ? "Yes" : "No"}`;
   }
   return `${label.toLowerCase()} ${OP_SYMBOL[c.operator] ?? c.operator} ${String(c.value)}`;
 }
 
 export function draftToFilter(conditions: FilterCondition[]): Filter {
   return { operator: "AND", conditions };
+}
+
+/**
+ * Serializes the visible Library filter with its project-session boundary.
+ * Keeping this in one pure helper ensures the applied grid and Advanced
+ * draft preview can never disagree about which project is in scope.
+ */
+export function serializeLibraryFilter(
+  conditions: FilterCondition[],
+  sessionId: number | null,
+  hasActiveFolder: boolean,
+): string {
+  const base = draftToFilter(conditions);
+  // A newly opened folder has no session until its first scan completes.
+  // Match nothing during that interval instead of showing another project's
+  // photos from the shared local catalog.
+  if (sessionId === null && hasActiveFolder) {
+    return JSON.stringify({
+      operator: "AND",
+      conditions: [{ field: "session_id", operator: "=", value: -1 }],
+    });
+  }
+  if (sessionId === null) return JSON.stringify(base);
+  return JSON.stringify({
+    ...base,
+    conditions: [
+      ...base.conditions,
+      { field: "session_id", operator: "=", value: sessionId },
+    ],
+  });
 }
 
 export function filterToDraft(filter: Filter): FilterCondition[] {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore } from "@/stores/appStore";
 import { useFilteredPhotos } from "@/hooks/useFilteredPhotos";
@@ -14,7 +14,7 @@ import { FileOpsDialog } from "@/features/fileops/FileOpsDialog";
 import type { FileOpsTab } from "@/features/fileops/FileOpsPanel";
 import { ReviewMode } from "@/features/review/ReviewMode";
 import { cleanName } from "@/features/organize/labels";
-import { draftToFilter } from "@/features/library/filterFields";
+import { serializeLibraryFilter } from "@/features/library/filterFields";
 import { FolderIcon } from "@/components/Icons";
 
 export function LibraryView() {
@@ -103,21 +103,16 @@ export function LibraryView() {
   }, [selectionMode, refreshKey, sessionId, activeFolder]);
 
   const libraryHasPhotos = !!activeFolder && (dbStatus?.photo_count ?? 0) > 0;
-  const filterJson = useMemo(() => {
-    const base = draftToFilter(filterConditions);
-    // When the folder has no session yet (before first scan), show nothing
-    // rather than leaking in photos from other projects.
-    if (sessionId === null && activeFolder) {
-      return JSON.stringify({ operator: "AND", conditions: [{ field: "session_id", operator: "=", value: -1 }] });
-    }
-    if (sessionId === null) return JSON.stringify(base);
-    const sessionCond = { field: "session_id", operator: "=", value: sessionId };
-    if (typeof base === "string" && base === "") {
-      return JSON.stringify({ operator: "AND", conditions: [sessionCond] });
-    }
-    const obj = base as { operator: string; conditions: unknown[] };
-    return JSON.stringify({ ...obj, conditions: [...obj.conditions, sessionCond] });
-  }, [filterConditions, sessionId, activeFolder]);
+  const filterJson = useMemo(
+    () => serializeLibraryFilter(filterConditions, sessionId, !!activeFolder),
+    [filterConditions, sessionId, activeFolder],
+  );
+  const previewFilterCount = useCallback(async (conditions: typeof filterConditions) => {
+    const previewJson = serializeLibraryFilter(conditions, sessionId, !!activeFolder);
+    // The same deterministic local query as the grid, limited to one result;
+    // PhotoPage.total remains the exact number of matches.
+    return (await api.listFilteredPhotos(previewJson, 0, 1)).total;
+  }, [sessionId, activeFolder]);
   const photos = useFilteredPhotos(
     libraryHasPhotos,
     filterJson,
@@ -730,6 +725,7 @@ export function LibraryView() {
       </div>
 
       {advancedFiltersOpen && <AdvancedFiltersDialog initialConditions={filterConditions} sessionId={sessionId}
+        loadPreviewCount={previewFilterCount}
         disabled={anyPassRunning} onApply={(conditions) => store().setFilterConditions(conditions)}
         onClose={() => setAdvancedFiltersOpen(false)} />}
       {viewerId !== null && (

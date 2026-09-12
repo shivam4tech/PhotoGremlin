@@ -63,28 +63,30 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 ## Current implementation map
 
 - `src/features/library/FilterBar.tsx`
-  - Simple inspector composition, rating/color/quick filters, measured rows, and generic condition composer.
+  - Simple inspector composition, rating/color/quick filters, measured rows, and the registry-derived typed condition composer.
   - Uses presentation labels and values while preserving the canonical filter-engine condition shape.
-  - Known issue: candidate insertion still needs duplicate prevention for the Phase 2 repeated-add workflow.
+  - Advanced candidate insertion is routed through duplicate-safe draft upserts; the simple inspector retains its live append behavior.
 - `src/features/library/QuickFilterControls.tsx`
   - Quick-filter controls and `RangeFilterRow`.
   - Measured rows open and close independently while the controls remain mounted.
 - `src/features/library/AdvancedFiltersDialog.tsx`
   - Responsive right-side drawer with staged Apply/Cancel behavior.
   - The draft summary and color controls are inline with the editor instead of occupying a persistent third column.
-  - Known issue: no live preview count, and the complete drawer workflow still needs visual acceptance.
+  - The footer reports an exact, debounced draft match count without publishing the draft to the Library grid.
+  - The complete drawer workflow still needs whole-application visual acceptance.
 - `src/features/library/advancedFilterState.ts`
   - Explicit applied/draft/current-editor workspace state and duplicate-safe draft updates.
-  - The UI still needs to route the complete picker/editor flow through this state model.
+  - The Advanced picker, add editor, staged edits, removals, and commit/reset transitions are routed through this model.
 - `src/features/library/ActiveFilterList.tsx`
-  - Removable applied/draft filter chips, including per-color chips.
+  - Removable applied chips in Simple and separate edit/remove actions for staged Advanced chips, including per-color chips.
 - `src/features/library/FilterPicker.tsx`
   - Searchable keyboard-accessible filter picker.
-  - Known issue: active entries are labelled Added, but duplicate prevention must be enforced by the state layer.
+  - Active entries are labelled Added; choosing one in Advanced opens its existing staged condition for editing.
 - `src/features/library/filterDiscovery.ts`
   - Substring/alias discovery (for example sharp, mono, ISO, face), categorized through the presentation adapter.
 - `src/features/library/filterFields.ts`
   - Canonical filter registry plus the derived UI presentation adapter for control types, natural operator labels, values, bounds, units, defaults, unmeasured support, and icons.
+  - Applied and preview queries share one session-aware filter serializer, including the empty active-folder sentinel behavior.
 - `src/stores/filterStore.ts`
   - Applied Library filter state. Keep it as the source of truth outside Advanced.
 - `src/features/filters/filterEngine.ts` and existing Rust/IPC code
@@ -109,16 +111,16 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 ### Known gaps that must not be mistaken for completion
 
 - [x] Simple numeric rows use a compact collapsed rhythm and disclose exact controls only on demand.
-- [~] Quick filters are lightweight in Simple; Advanced retains its temporary card layout until Phase 2.
-- [~] Search discovers filters but the add/configure flow remains fragmented.
-- [~] The Advanced `Add filter` state model is explicit and duplicate-safe, but the UI is not yet routed through it end to end.
-- [~] Shared presentation labels now replace raw boolean/operator values, but Advanced still uses a generic composer rather than the Phase 2 typed flow.
+- [x] Quick filters are lightweight in Simple and use a compact two-column layout in Advanced where space permits.
+- [x] Search discovers filters and routes selections into the Advanced add/edit composer.
+- [x] The Advanced `Add filter` state model is explicit, duplicate-safe, and wired through the picker/editor workflow.
+- [x] Shared presentation labels and registry-derived typed editors replace raw boolean/operator values in Advanced.
 - [~] Advanced is now a right-side drawer; whole-Library visual acceptance is still pending.
 - [x] The persistent third Advanced column has been removed.
-- [ ] Draft preview/matching count is not implemented.
-- [ ] Editing an already-staged filter is not a clear first-class flow.
-- [ ] Duplicate filter conditions are not safely prevented.
-- [~] Focus management exists in parts but needs a complete drawer/picker/editor/apply return path.
+- [x] Draft preview uses the existing deterministic local filter query, debounced by 180ms and limited to one returned row while reading its exact total.
+- [x] Clicking a staged non-color filter opens it for first-class in-place editing; color chips return focus to the palette control.
+- [x] Advanced prevents unsupported duplicate field conditions by editing/upserting the existing staged field.
+- [x] Automated coverage verifies initial picker focus, layered Escape handling, keyboard Apply, and restoration to the opening trigger.
 - [~] The Phase 1 inspector is approved in dark/light isolated renders; the Advanced drawer and whole-workflow Phase 2 matrix remain open.
 
 ## Completed Phase 1: ordinary filtering
@@ -189,7 +191,7 @@ Goal: Advanced becomes a context-preserving deeper inspector.
 - [~] Keep the photo grid visibly recognizable; the drawer geometry preserves it, but visual acceptance is pending.
 - [x] Remove the persistent third summary/color column.
 - [x] Use no backdrop or a very subtle backdrop; never near-black.
-- [x] Use a short 200–240ms translate/fade transition.
+- [x] Use a short 200ms translate/fade transition.
 - [~] Adapt to medium and narrow windows without forcing the desktop layout; responsive rules exist, but visual acceptance is pending.
 - [x] Consolidate categories into at most six prominent destinations.
 
@@ -199,44 +201,44 @@ Goal: Advanced becomes a context-preserving deeper inspector.
 - [x] Opening Advanced clones applied state.
 - [x] Cancel discards draft state.
 - [x] X closes directly and consistently discards the private draft like Cancel.
-- [ ] Apply validates, commits the entire draft, closes the drawer, preserves gallery context, and returns focus to the trigger.
-- [ ] Add a debounced draft preview count if calculation cost requires it.
+- [x] Apply commits the entire valid draft, closes the drawer, preserves gallery context, and returns focus to the prior trigger.
+- [x] Add a debounced draft preview count using the existing project-scoped filter query and exact result total.
 
 ### Fix Add Filter end to end
 
-- [ ] No editor → Add Filter → searchable picker.
-- [ ] Selecting a filter opens the correct typed editor.
-- [ ] Valid configuration enables a local `Add to filters` action.
-- [ ] Add inserts/updates `draftFilters`, updates ACTIVE, resets the editor, and supports adding another filter immediately.
-- [ ] Apply promotes the complete draft to applied filters and closes.
-- [ ] Prevent unsupported duplicate filters.
-- [ ] Clicking a staged filter reopens it for editing; do not require remove/re-add.
-- [ ] Provide clear `Save change` versus `Add filter` behavior.
+- [x] No editor → Add Filter → searchable picker.
+- [x] Selecting a filter opens the registry-derived control for its data type.
+- [x] Valid configuration enables a local `Add to filters` action.
+- [x] Add inserts/updates `draftFilters`, updates ACTIVE, resets the editor, and supports adding another filter immediately.
+- [x] Apply promotes the complete draft to applied filters and closes.
+- [x] Prevent unsupported duplicate filters.
+- [x] Clicking a staged filter reopens it for editing; do not require remove/re-add.
+- [x] Provide clear `Save change` versus `Add to filters` behavior.
 
 ### Typed editors
 
-- [ ] Boolean: natural choices such as Any / Monochrome / Color; never `true`/`false`.
-- [ ] Binary analysis: natural terms for Contains faces, Closed-eye candidate, and Possible blink.
-- [ ] Enum: compact choices for orientation and other available values.
-- [ ] Range/number: compact dual-thumb range plus exact From/To and coverage.
-- [ ] Rating: natural At least / Exactly / At most only if supported by current semantics.
-- [ ] Text/metadata: searchable available values where the backend already supplies them.
-- [ ] Date: From/To only if date filtering actually exists.
-- [ ] Expose operators only where meaningful and describe them in natural language.
-- [ ] Do not merge Color and Monochrome semantics without verifying backend equivalence.
+- [x] Boolean: natural named states such as Black & white / Color; never `true`/`false`.
+- [x] Binary analysis: natural terms for Contains faces, Closed-eye candidate, and Possible blink.
+- [x] Enum: compact choices for orientation and other available values.
+- [x] Range/number: compact dual-thumb range plus exact From/To and coverage.
+- [x] Rating: natural At least / Exactly / At most choices backed by current comparison semantics.
+- [x] Text/metadata: use available project-scoped values where the backend supplies them.
+- [x] Date: calendar-backed single date or From/To controls use the existing date operators.
+- [x] Expose operators only where meaningful and describe them in natural language; binary state editors omit the redundant operator.
+- [x] Keep the separate Color and Monochrome engine fields distinct; the presentation adapter does not merge them.
 
 ### Advanced presentation, accessibility, and performance
 
-- [ ] Compact staged Active Filter stack with edit/remove.
-- [ ] Lighter two-column quick controls where space permits; no large checkbox cards.
-- [ ] Filter picker groups recent/category entries and shows Added states.
-- [ ] Popovers remain small and temporary; no nested editor popovers.
-- [ ] Remove redundant instructional copy and dead space.
-- [ ] Complete keyboard flow: initial search focus, arrow/Enter picker navigation, Escape layering, Cmd/Ctrl+Enter Apply, logical Tab order.
-- [ ] Complete ARIA labels/states, focus trapping/restoration, slider semantics, and non-color-only selection.
-- [ ] Preserve the drawer shell while swapping editor content with a subtle 120–160ms fade.
-- [ ] Avoid drawer keystrokes triggering unnecessary grid rerenders.
-- [ ] Avoid per-card layout animation; preserve virtualization and scroll context.
+- [x] Compact staged Active Filter stack with separate edit/remove actions.
+- [x] Lighter two-column quick controls where space permits; no large checkbox cards.
+- [~] Filter picker groups category entries and shows Added states; a recent-items group is still deferred.
+- [x] Popovers remain small and temporary; the typed editor stays inline rather than nesting another popover.
+- [x] Remove redundant instructional copy and dead space.
+- [x] Complete keyboard flow: initial search focus, arrow/Enter picker navigation, Escape layering, Cmd/Ctrl+Enter Apply, logical Tab order.
+- [x] Complete ARIA labels/states, native modal focus trapping/restoration, slider semantics, and non-color-only selection.
+- [x] Preserve the drawer shell while swapping editor content with a subtle 140ms opacity fade.
+- [x] Keep draft/editor keystrokes local to the drawer; the grid receives state only when Apply publishes the draft.
+- [x] Avoid per-card layout animation; draft staging leaves the virtualized grid and its scroll context untouched.
 - [ ] Audit contrast and surface depth independently in dark and light themes.
 
 ### Phase 2 validation and commit
@@ -288,6 +290,23 @@ This checkpoint covers independent measured-filter expansion, exact empty-data
 states, tighter numeric controls, the shared presentation adapter, search-first
 ordering, and complete simple-inspector interaction states. Whole-Library and
 Advanced-workflow visual acceptance remains part of Phase 2.
+
+The Phase 2 implementation checkpoint passed on September 12, 2026:
+
+- `npm test`: 165 tests across 20 files.
+- `npm run test:rust` after sourcing `/home/shivam/pg-env.sh`.
+- `npm run typecheck`.
+- `npm run build`.
+- `npm run build:app`: debug executable and Debian bundle produced.
+- `git diff --check`.
+- The Debian bundle was extracted into the local PhotoGremlin installation so
+  the desktop launcher uses this checkpoint.
+
+This checkpoint covers the context-preserving drawer, explicit private draft
+state, searchable duplicate-safe Add Filter workflow, registry-derived typed
+editors, staged edits/removals, keyboard Apply and focus restoration, and an
+exact debounced draft match count. The whole-application visual acceptance
+matrix below remains open.
 
 ### Validation commands for every remaining phase
 
