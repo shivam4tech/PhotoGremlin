@@ -1,5 +1,5 @@
 import type { Filter, FilterCondition } from "@/types/api";
-import { FILTER_FIELDS, QUICK_FILTER_PRESETS, isQuickFilterPresetActive } from "./filterFields";
+import { FILTER_FIELDS, QUICK_FILTER_PRESETS, getFilterPresentation, isQuickFilterPresetActive } from "./filterFields";
 
 /** Presentation only: conditions always use the existing field registry. */
 export const FILTER_CHOICES = [
@@ -9,10 +9,7 @@ export const FILTER_CHOICES = [
   })),
   ...FILTER_FIELDS.map((field) => ({
     id: field.field, label: field.label,
-    category: field.area.includes("local") || field.area === "Burst context" ? "People & content"
-      : ["Camera & lens", "Exposure", "Time"].includes(field.area) ? "Camera & date"
-      : ["Marking", "Review"].includes(field.area) ? "Rating & review"
-      : field.area === "Technical" ? "Image properties" : "Appearance",
+    category: getFilterPresentation(field.field)!.category,
     field: field.field, preset: undefined,
   })),
 ];

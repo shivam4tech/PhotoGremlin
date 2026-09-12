@@ -4,10 +4,10 @@ import type { FilterCondition, FilterValueOptions } from "@/types/api";
 import {
   FILTER_FIELDS,
   FIELD_BY_NAME,
-  OPS_BY_KIND,
   QUICK_FILTER_PRESETS,
   QUICK_RANGE_FIELDS,
   buildCondition,
+  getFilterPresentation,
   isQuickFilterPresetActive,
   toggleQuickFilterPreset,
 } from "./filterFields";
@@ -163,10 +163,13 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const root = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(draft.length > 0);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  // Disclosure controls only editor visibility. Candidate configuration is
+  // derived below, while `draft` remains the sole active-filter state.
+  const [editorDisclosed, setEditorDisclosed] = useState(false);
   const [field, setField] = useState(ADVANCED_FILTER_FIELDS[0].field);
   const def = FIELD_BY_NAME[field];
-  const ops = OPS_BY_KIND[def.kind];
+  const presentation = getFilterPresentation(field)!;
+  const ops = presentation.operatorOptions;
   const [op, setOp] = useState<FilterCondition["operator"]>(ops[0].op);
   const [raw, setRaw] = useState("");
   const [raw2, setRaw2] = useState("");
@@ -175,17 +178,17 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
 
   useEffect(() => {
-    if (advancedOpen) composer.current?.querySelector<HTMLSelectElement>("select")?.focus();
-  }, [advancedOpen, field]);
+    if (editorDisclosed) composer.current?.querySelector<HTMLSelectElement>("select")?.focus();
+  }, [editorDisclosed, field]);
 
   function closeEditor() {
-    setAdvancedOpen(false);
+    setEditorDisclosed(false);
     root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
   }
 
   // Keep the operator valid when the field's kind changes.
   useEffect(() => {
-    const allowed = OPS_BY_KIND[FIELD_BY_NAME[field].kind];
+    const allowed = getFilterPresentation(field)!.operatorOptions;
     if (!allowed.some((o) => o.op === op)) setOp(allowed[0].op);
   }, [field, op]);
 
@@ -206,15 +209,16 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
 
   const needsTwoValues = op === "between" && def.kind !== "datetime";
   const needsValue = !["is-null", "not-null"].includes(op);
-  const valueUsesSelect = needsValue && (
-    def.kind === "bool"
-    || (def.kind === "text" && (hasMetadataOptions || Boolean(def.values)))
-  );
+  const valueUsesSelect = needsValue && (presentation.controlType === "boolean"
+    || presentation.controlType === "enum" || hasMetadataOptions);
   const valueUsesPair = needsValue && op === "between";
-  const candidate = raw === UNIDENTIFIED
+  const configuredRaw = presentation.controlType === "boolean" && raw === ""
+    ? String(presentation.defaultValue)
+    : raw;
+  const candidate = configuredRaw === UNIDENTIFIED
     ? { field, operator: "is-null" as const, value: null }
-    : buildCondition(field, op, raw, raw2);
-  const canAdd = candidate !== null;
+    : buildCondition(field, op, configuredRaw, raw2);
+  const editorConfigured = candidate !== null;
   const expanded = mode === "inspector" || open;
   const categoryFields = FILTER_CHOICES.filter((choice) => !choice.preset && choice.category === category && choice.field !== "palette_color");
   const rangeFields = categoryFields.map((choice) => choice.field).filter((name) => QUICK_RANGE_FIELDS.some((field) => field === name));
@@ -230,9 +234,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
   }
 
   function selectField(f: string) {
-    setAdvancedOpen(true);
+    setEditorDisclosed(true);
     setField(f);
-    const first = OPS_BY_KIND[FIELD_BY_NAME[f].kind][0].op;
+    const first = getFilterPresentation(f)!.operatorOptions[0].op;
     setOp(first);
     setRaw("");
     setRaw2("");
@@ -259,8 +263,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             onChange={(e) => setRaw(e.target.value)}
             aria-label={`${def.label} value`}
           >
-            <option value="true">true</option>
-            <option value="false">false</option>
+            {presentation.valueOptions?.map((option) => (
+              <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
+            ))}
           </select>
         );
       case "text":
@@ -297,9 +302,9 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               aria-label={`${def.label} value`}
             >
               <option value="">—</option>
-              {def.values.map((v) => (
-                <option key={v} value={v}>
-                  {v}
+              {presentation.valueOptions?.map((option) => (
+                <option key={String(option.value)} value={String(option.value)}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -405,53 +410,6 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             }} />
             {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
           </div>
-          <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
-            {advancedOpen && (
-              <div className="more-filters-panel" ref={composer} onKeyDown={(event) => {
-                if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
-              }}>
-                <div className="filterbar-compose">
-                  <div className="filter-editor-heading">
-                    <strong>{def.label}</strong>
-                    <button type="button" className="btn btn-sm" aria-label="Close filter editor"
-                      onClick={closeEditor}>×</button>
-                  </div>
-                  <ComposerControl label="Condition" select>
-                    <select
-                      className="input"
-                      value={op}
-                      onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
-                      aria-label="Filter condition"
-                    >
-                      {ops.map((o) => (
-                        <option key={o.op} value={o.op}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                  </ComposerControl>
-                  {needsValue && (
-                    <ComposerControl
-                      label="Value"
-                      select={valueUsesSelect}
-                      wide={valueUsesPair}
-                      className="filter-compose-control-value"
-                    >
-                      {valueInput()}
-                    </ComposerControl>
-                  )}
-                  <button type="button" className="btn btn-sm filterbar-compose-add" onClick={add} disabled={!canAdd || disabled}>
-                    Add filter
-                  </button>
-                </div>
-                {needsTwoValues && (
-                  <div className="faint mono more-filters-hint">
-                    between: two values, min → max
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
           {!category && <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />}
 
           {(!category || category === "Quick filters") && <section className="quick-presets" aria-labelledby={`${headingId}-quick`}>
@@ -461,17 +419,18 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
             </div>
             <div className="quick-presets-list">
               {QUICK_FILTER_PRESETS.map((preset) => {
-                const active = isQuickFilterPresetActive(draft, preset);
+                const isActive = isQuickFilterPresetActive(draft, preset);
                 return (
                   <button
                     key={preset.id}
                     type="button"
-                    className={active ? "is-active" : ""}
-                    aria-pressed={active}
+                    className={isActive ? "is-active" : ""}
+                    aria-pressed={isActive}
                     disabled={disabled}
                     onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
                   >
                     {category && <QuickFilterIcon id={preset.id} />}
+                    <span className="quick-preset-check" aria-hidden="true">{isActive ? "✓" : ""}</span>
                     <span>{preset.label}</span>
                   </button>
                 );
@@ -515,8 +474,53 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
               <span>{choice.label}</span><span>{draft.some((condition) => condition.field === choice.field) ? "Added" : "Any"} <span aria-hidden="true">›</span></span>
             </button>)}
           </div>}
-
-
+          <div className={`more-filters${editorDisclosed ? " is-open" : ""}`}>
+            {editorDisclosed && (
+              <div className="more-filters-panel" ref={composer} onKeyDown={(event) => {
+                if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
+              }}>
+                <div className="filterbar-compose">
+                  <div className="filter-editor-heading">
+                    <strong>{def.label}</strong>
+                    <button type="button" className="btn btn-ghost btn-sm" aria-label="Close filter editor"
+                      onClick={closeEditor}>×</button>
+                  </div>
+                  <ComposerControl label="Condition" select>
+                    <select
+                      className="input"
+                      value={op}
+                      onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
+                      aria-label="Filter condition"
+                    >
+                      {ops.map((o) => (
+                        <option key={o.op} value={o.op}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </ComposerControl>
+                  {needsValue && (
+                    <ComposerControl
+                      label="Value"
+                      select={valueUsesSelect}
+                      wide={valueUsesPair}
+                      className="filter-compose-control-value"
+                    >
+                      {valueInput()}
+                    </ComposerControl>
+                  )}
+                  <button type="button" className="btn btn-primary btn-sm filterbar-compose-add" onClick={add} disabled={!editorConfigured || disabled}>
+                    Add filter
+                  </button>
+                </div>
+                {needsTwoValues && (
+                  <div className="faint mono more-filters-hint">
+                    between: two values, min → max
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

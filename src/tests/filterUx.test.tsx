@@ -94,6 +94,55 @@ describe("filter control interactions", () => {
     expect(discovery.children[0].classList.contains("filter-picker")).toBe(true);
     expect(discovery.children[1].classList.contains("active-filter-list")).toBe(true);
   });
+  it("keeps the generic editor after the ordinary inspector controls", async () => {
+    await render(<FilterBar mode="inspector" draft={[{ field: "rating", operator: ">=", value: 4 }]}
+      onChange={vi.fn()} sessionId={1} />);
+    const input = container.querySelector<HTMLInputElement>("[role=combobox]")!;
+    await type(input, "aperture");
+    await click(container.querySelector<HTMLElement>("[role=option]")!);
+    const panel = container.querySelector(".filterbar-panel")!;
+    const classes = Array.from(panel.children).map((child) => child.className);
+    expect(classes).toEqual([
+      "filter-discovery",
+      "color-filter",
+      "quick-presets",
+      "rating-filter",
+      "quick-filters",
+      "more-filters is-open",
+    ]);
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Filter condition"]')?.options[3].text)
+      .toBe("at least");
+    expect(container.querySelector(".filterbar-compose-add")?.classList.contains("btn-primary")).toBe(true);
+  });
+  it("shows persistent non-color state when a quick filter is toggled", async () => {
+    function Harness() {
+      const [draft, setDraft] = useState<FilterCondition[]>([]);
+      return <FilterBar mode="inspector" draft={draft} onChange={setDraft} sessionId={1} />;
+    }
+    await render(<Harness />);
+    const quick = Array.from(container.querySelectorAll<HTMLButtonElement>(".quick-presets-list button"))
+      .find((item) => item.textContent?.includes("Black & white"))!;
+    await click(quick);
+    expect(quick.getAttribute("aria-pressed")).toBe("true");
+    expect(quick.querySelector(".quick-preset-check")?.textContent).toBe("✓");
+    await click(quick);
+    expect(quick.getAttribute("aria-pressed")).toBe("false");
+    expect(quick.querySelector(".quick-preset-check")?.textContent).toBe("");
+  });
+  it("adds the visible default value for a boolean filter", async () => {
+    const changed = vi.fn();
+    await render(<FilterBar mode="inspector" draft={[]} onChange={changed} sessionId={1} />);
+    const input = container.querySelector<HTMLInputElement>("[role=combobox]")!;
+    await type(input, "monochrome");
+    await click(Array.from(container.querySelectorAll<HTMLElement>("[role=option]"))
+      .find((item) => item.textContent?.trim() === "Monochrome")!);
+    const value = container.querySelector<HTMLSelectElement>('[aria-label="Monochrome value"]')!;
+    expect(Array.from(value.options).map((option) => option.text)).toEqual(["Yes", "No"]);
+    expect(value.value).toBe("true");
+    await click(Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((item) => item.textContent?.trim() === "Add filter")!);
+    expect(changed).toHaveBeenCalledWith([{ field: "monochrome", operator: "=", value: true }]);
+  });
   it("searches, selects with the keyboard and closes with Escape", async () => {
     const select = vi.fn();
     await render(<FilterPicker draft={[{ field: "iso", operator: ">=", value: 100 }]} onSelect={select} />);

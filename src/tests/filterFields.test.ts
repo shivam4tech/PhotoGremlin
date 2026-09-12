@@ -8,6 +8,7 @@ import {
   chipLabel,
   draftToFilter,
   endOfDay,
+  getFilterPresentation,
   quickRangeBounds,
   quickRangeCondition,
   QUICK_FILTER_PRESETS,
@@ -78,6 +79,36 @@ describe("filter registry", () => {
     for (const f of FILTER_FIELDS) {
       expect(OPS_BY_KIND[f.kind].length).toBeGreaterThan(0);
     }
+  });
+
+  it("derives human-facing controls without changing the engine registry", () => {
+    const sharpness = getFilterPresentation("sharpness")!;
+    expect(sharpness).toMatchObject({
+      label: FIELD_BY_NAME.sharpness.label,
+      category: "Image properties",
+      controlType: "range",
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: [0, 100],
+      supportsUnmeasured: true,
+      icon: "sharpness",
+    });
+    expect(sharpness.operatorOptions.find(({ op }) => op === ">=")?.label).toBe("at least");
+    expect(getFilterPresentation("monochrome")).toMatchObject({
+      controlType: "boolean",
+      defaultValue: true,
+      valueOptions: [{ value: true, label: "Yes" }, { value: false, label: "No" }],
+    });
+    expect(getFilterPresentation("orientation")).toMatchObject({
+      controlType: "enum",
+      valueOptions: [
+        { value: "landscape", label: "Landscape" },
+        { value: "portrait", label: "Portrait" },
+        { value: "square", label: "Square" },
+      ],
+    });
+    expect(getFilterPresentation("missing-field")).toBeNull();
   });
 
   it("orientation is a fixed value set", () => {

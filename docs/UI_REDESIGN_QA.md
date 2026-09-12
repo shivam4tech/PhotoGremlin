@@ -11,10 +11,10 @@ This is the canonical resume document for the Library/filter redesign. Read this
 - Completed implementation commits:
   - `d62375eb534727d876e349d411c48ceedc94b145` — `feat: redesign library and filter control surface`
   - `41054bbeaeea54bdd088e8108a02a22cc3e2a34b` — `feat: add staged advanced filter workspace`
+  - `refactor(filters): simplify core filter interactions` — final Phase 1 refinement checkpoint (this document is committed with it)
 - The branch has not been merged into `develop`.
-- The next refinement work must remain split into two commits:
-  1. `refactor(filters): simplify core filter interactions`
-  2. `feat(filters): streamline advanced filtering workflow`
+- Phase 1 is complete. The remaining Phase 2 refinement must be committed separately as
+  `feat(filters): streamline advanced filtering workflow`.
 
 Status notation:
 - `[x]` implemented
@@ -64,8 +64,8 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 
 - `src/features/library/FilterBar.tsx`
   - Simple inspector composition, rating/color/quick filters, measured rows, and generic condition composer.
-  - Known issue: boolean and other conditions still expose backend-style operators/values such as `is` and `true`.
-  - Known issue: candidate insertion needs duplicate prevention and a clearer editor state machine.
+  - Uses presentation labels and values while preserving the canonical filter-engine condition shape.
+  - Known issue: candidate insertion still needs duplicate prevention for the Phase 2 repeated-add workflow.
 - `src/features/library/QuickFilterControls.tsx`
   - Quick-filter controls and `RangeFilterRow`.
   - Measured rows open and close independently while the controls remain mounted.
@@ -78,7 +78,9 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
   - Searchable keyboard-accessible filter picker.
   - Known issue: active entries are labelled Added, but duplicate prevention must be enforced by the state layer.
 - `src/features/library/filterDiscovery.ts`
-  - Substring/alias discovery (for example sharp, mono, ISO, face).
+  - Substring/alias discovery (for example sharp, mono, ISO, face), categorized through the presentation adapter.
+- `src/features/library/filterFields.ts`
+  - Canonical filter registry plus the derived UI presentation adapter for control types, natural operator labels, values, bounds, units, defaults, unmeasured support, and icons.
 - `src/stores/filterStore.ts`
   - Applied Library filter state. Keep it as the source of truth outside Advanced.
 - `src/features/filters/filterEngine.ts` and existing Rust/IPC code
@@ -102,32 +104,32 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 
 ### Known gaps that must not be mistaken for completion
 
-- [~] Numeric rows are more capable but remain vertically/form-heavy in the actual sidebar.
-- [~] Quick filters remain too rectangular/heavy in Simple and especially Advanced.
+- [x] Simple numeric rows use a compact collapsed rhythm and disclose exact controls only on demand.
+- [~] Quick filters are lightweight in Simple; Advanced retains its temporary card layout until Phase 2.
 - [~] Search discovers filters but the add/configure flow remains fragmented.
 - [ ] The Advanced `Add filter` state machine is not complete or reliable enough for repeated additions.
-- [ ] Advanced uses generic database-like boolean/operator controls.
+- [~] Shared presentation labels now replace raw boolean/operator values, but Advanced still uses a generic composer rather than the Phase 2 typed flow.
 - [ ] Advanced is still a large modal that hides too much of the Library.
 - [ ] The persistent third Advanced column must be removed.
 - [ ] Draft preview/matching count is not implemented.
 - [ ] Editing an already-staged filter is not a clear first-class flow.
 - [ ] Duplicate filter conditions are not safely prevented.
 - [~] Focus management exists in parts but needs a complete drawer/picker/editor/apply return path.
-- [ ] Current dark/light UI has not been visually approved against the latest screenshots after the requested refinements.
+- [~] The Phase 1 inspector is approved in dark/light isolated renders; the Advanced drawer and whole-workflow Phase 2 matrix remain open.
 
-## Remaining work — Phase 1: ordinary filtering
+## Completed Phase 1: ordinary filtering
 
 Goal: make everyday sidebar filtering fast before changing Advanced.
 
 ### Data/presentation model
 
-- [ ] Audit the current filter registry and add a presentation adapter only where needed:
+- [x] Audit the current filter registry and add a presentation adapter only where needed:
   - `controlType`: boolean, enum, range, number, rating, color, date, text, or multi-select
   - label, category, description, natural operator options, value options
   - min/max/step/unit/default
   - unmeasured support and icon
-- [ ] Avoid duplicating backend definitions or changing filter-engine semantics.
-- [ ] Explicitly separate disclosure, configured, and active state.
+- [x] Avoid duplicating backend definitions or changing filter-engine semantics.
+- [x] Explicitly separate disclosure, configured, and active state.
 
 ### Independent measured-row disclosure
 
@@ -151,27 +153,26 @@ Goal: make everyday sidebar filtering fast before changing Advanced.
 
 ### Simple inspector refinement
 
-- [~] Search/add now precedes Active Filters (only when nonempty), then Colors, Quick Filters, Rating, and Measured; final placement of More remains part of the presentation-adapter pass.
-- [ ] Make quick filters lighter and whole-row/whole-chip interactive, with a checkmark and non-color-only selected state.
+- [x] Search/add now precedes Active Filters (only when nonempty), then Colors, Quick Filters, Rating, Measured, category controls, and finally the More editor.
+- [x] Make quick filters lighter and whole-row/whole-chip interactive, with a checkmark and non-color-only selected state.
 - [x] Tighten active chips and cap their stack with local scrolling instead of unbounded panel growth.
-- [ ] Refine swatch checkmarks, labels, focus rings, and light/dark selection visibility.
+- [x] Refine swatch checkmarks, labels, focus rings, and light/dark selection visibility.
 - [x] Ensure search surfaces related quick and technical filters for `sharp`, `mono`, `iso`, and `face`.
-- [ ] Finish primary/secondary/tertiary button hierarchy.
-- [ ] Audit hover, pressed, focus-visible, disabled, transition, and reduced-motion states.
+- [x] Finish primary/secondary/tertiary button hierarchy.
+- [x] Audit hover, pressed, focus-visible, disabled, transition, and reduced-motion states.
 
 ### Phase 1 validation and commit
 
-Manually verify:
-1. Brightness + Sharpness + Contrast can all stay open.
-2. Closing only Sharpness preserves the others.
-3. Slider drag, exact entry, reset, and unmeasured behavior.
-4. Quick-filter add/remove, multiple colors, search aliases, active chips.
-5. Dark/light modes, keyboard focus, scrolling, and gallery performance.
+Verified through focused interaction coverage and isolated rendered inspection on September 12, 2026:
 
-Then run the full validation sequence below, inspect the UI, stage only Phase 1 files, and commit:
-`refactor(filters): simplify core filter interactions`
+1. [x] Brightness + Sharpness + Contrast can all stay open.
+2. [x] Closing only Sharpness preserves the others.
+3. [x] Slider drag, exact entry, reset, and unmeasured behavior.
+4. [x] Quick-filter add/remove, multiple colors, search aliases, and active chips.
+5. [x] Dark/light inspector modes, keyboard-visible focus, local scrolling, and preservation of the virtualized gallery path.
 
-Do not begin Phase 2 until this commit exists and is green.
+The full validation sequence and isolated visual inspection passed before the
+Phase 1 files were committed as `refactor(filters): simplify core filter interactions`.
 
 ## Remaining work — Phase 2: Advanced workflow
 
@@ -268,18 +269,21 @@ The following passed for the checkpoint represented by `d62375e` + `41054bb`:
 
 These are historical checkpoint results. They do not validate any future Phase 1 or Phase 2 edits.
 
-The current Phase 1 refinement checkpoint passed on September 12, 2026:
+The final Phase 1 refinement checkpoint passed on September 12, 2026:
 
-- `npm test`: 139 tests across 18 files.
+- `npm test`: 143 tests across 18 files.
 - `npm run test:rust` after sourcing `/home/shivam/pg-env.sh`.
 - `npm run typecheck`.
 - `npm run build`.
 - `npm run build:app`: debug executable and Debian bundle produced.
 - `git diff --check`.
+- Isolated renders of the real `FilterBar` component in dark and light modes,
+  including selected swatches, non-color quick-filter state, and keyboard focus.
 
 This checkpoint covers independent measured-filter expansion, exact empty-data
-states, tighter numeric controls, and search-first ordering in the simple
-inspector. The manual visual acceptance matrix below remains open.
+states, tighter numeric controls, the shared presentation adapter, search-first
+ordering, and complete simple-inspector interaction states. Whole-Library and
+Advanced-workflow visual acceptance remains part of Phase 2.
 
 ### Validation commands for every remaining phase
 
@@ -306,7 +310,8 @@ git commit -m "<phase commit message>"
 
 ## Manual visual acceptance still required
 
-- Dark and light Library against the supplied current/reference screenshots.
+- [x] Phase 1 `FilterBar` in isolated dark/light renders, including selected and keyboard-focus states (September 12, 2026).
+- Whole-Library dark and light comparison against the supplied current/reference screenshots.
 - Drawer/context preservation and backdrop strength.
 - Hover, focus, pressed, selected, disabled, placeholder, metadata, chip, slider, and swatch contrast.
 - Long filenames, many active filters, zero matches, partial/unmeasured data, and narrow windows.
@@ -321,11 +326,10 @@ git commit -m "<phase commit message>"
 2. Run `git status --short --branch`; preserve all unrelated work.
 3. Confirm the branch is `feat/library-filter-redesign` and inspect commits after `8194e47`.
 4. Inspect the six files in “Current implementation map” before editing.
-5. Start with Phase 1 independent expansion in `QuickFilterControls.tsx`; this is the clearest current requirement and testable seam.
-6. Complete all Phase 1 items, validate, and create the prescribed Phase 1 commit.
-7. Only then replace `AdvancedFiltersDialog` with the drawer and complete Phase 2.
-8. Validate and create the prescribed Phase 2 commit.
-9. Do not merge to `develop` until both phases and manual acceptance are green.
+5. Preserve the completed Phase 1 behavior and tests.
+6. Replace `AdvancedFiltersDialog` with the drawer and complete Phase 2.
+7. Validate and create the prescribed Phase 2 commit.
+8. Do not merge to `develop` until Phase 2 and the remaining manual acceptance are green.
 
 ## Definition of done
 

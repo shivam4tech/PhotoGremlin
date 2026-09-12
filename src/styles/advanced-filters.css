@@ -29,10 +29,8 @@
 .advanced-filters-main .quick-presets-head { display: none; }
 .advanced-filters-main .quick-presets-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .advanced-filters-main .quick-presets-list button { position: relative; display: flex; align-items: flex-start; flex-direction: column; justify-content: center; gap: 12px; min-height: 100px; padding: 14px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-surface-elevated); color: var(--text-primary); text-align: left; white-space: normal; }
-.advanced-filters-main .quick-presets-list button::after { content: ""; position: absolute; top: 9px; right: 9px; width: 12px; height: 12px; border: 1px solid var(--text-tertiary); border-radius: 3px; }
 .advanced-filters-main .quick-presets-list button.is-active { border-color: var(--accent); background: var(--bg-selected); }
-.advanced-filters-main .quick-presets-list button.is-active::before { content: none; }
-.advanced-filters-main .quick-presets-list button.is-active::after { content: "✓"; display: grid; place-items: center; border-color: var(--accent); background: var(--accent-strong); color: var(--accent-on-strong); font-size: 11px; }
+.advanced-filters-main .quick-preset-check { position: absolute; top: 9px; right: 9px; border-radius: 3px; }
 .advanced-filters-summary { display: flex; flex-direction: column; gap: 20px; padding: 16px; border-left: 1px solid var(--border-subtle); background: var(--bg-surface-elevated); overflow-y: auto; }
 .advanced-filters-summary > p { font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
 .advanced-filters-summary .active-filter-chips { max-height: none; }

@@ -45,7 +45,7 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .inspector-close { width: 32px; font-size: 20px; }
 .filterbar-inspector { border-bottom: 0; }
 .filterbar-inspector .filterbar-panel { padding: 0 12px 12px; gap: 16px; }
-.filter-discovery { position: sticky; top: 64px; z-index: 20; display: grid; gap: 12px; padding: 12px 0; margin-bottom: -8px; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
+.filter-discovery { position: sticky; top: 64px; z-index: 20; display: grid; gap: 12px; padding: 12px 0; background: var(--bg-panel); border-bottom: 1px solid var(--border-subtle); }
 .filter-section-title, .filter-section-heading { font-size: 12px; font-weight: 600; color: var(--text); }
 .filter-section-heading { display: flex; justify-content: space-between; margin-bottom: 8px; }
 .filter-section-heading > span { color: var(--text-tertiary); font-variant-numeric: tabular-nums; }
@@ -71,17 +71,22 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .color-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 2px; }
 .color-swatch { display: grid; place-items: center; position: relative; width: 100%; height: 36px; padding: 0; border: 0; background: transparent; border-radius: var(--radius-sm); }
 .color-swatch:disabled { cursor: not-allowed; opacity: .65; }
-.color-swatch::before { content: ""; width: 23px; height: 23px; background: var(--spectrum-color); border-radius: 50%; transition: outline-color var(--motion-fast) var(--ease-out); }
+.color-swatch::before { content: ""; width: 23px; height: 23px; background: var(--spectrum-color); border-radius: 50%; transition: box-shadow var(--motion-fast) var(--ease-out); }
 .color-swatch:hover:not(:disabled) { background: var(--bg-hover); }
-.color-swatch[aria-pressed="true"]::before { outline: 2px solid var(--text); outline-offset: 3px; }
+.color-swatch:active:not(:disabled) { background: var(--bg-selected); }
+.color-swatch:focus-visible { outline-offset: -2px; }
+.color-swatch[aria-pressed="true"]::before { box-shadow: 0 0 0 2px var(--bg-panel), 0 0 0 4px var(--accent); }
 .color-swatch > span { position: absolute; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--photo-control); color: var(--on-photo-control); font-size: 12px; }
 .quick-presets, .rating-filter, .quick-filters { border: 0; border-top: 1px solid var(--border-subtle); border-radius: 0; padding: 12px 0 0; background: transparent; overflow: visible; }
 .quick-presets-head strong, .rating-filter-head strong { font-size: 12px; }
 .quick-presets-list { gap: 6px; }
-.quick-presets-list button { font-size: 12px; min-height: 32px; padding: 5px 9px; border-color: var(--border); border-radius: var(--radius-sm); transition: background-color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out); }
+.quick-presets-list button { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; min-height: 30px; padding: 4px 9px; border-color: var(--border); border-radius: 999px; background: transparent; text-align: left; transition: background-color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out); }
 .quick-presets-list button:hover:not(:disabled) { background: var(--bg-hover); }
+.quick-presets-list button:active:not(:disabled) { background: var(--bg-selected); }
+.quick-presets-list button:disabled { cursor: not-allowed; opacity: .65; }
 .quick-presets-list button.is-active { color: var(--text); background: var(--bg-selected); border-color: var(--accent); }
-.quick-presets-list button.is-active::before { content: "✓ "; }
+.quick-preset-check { display: grid; place-items: center; flex: 0 0 14px; width: 14px; height: 14px; border: 1px solid var(--text-tertiary); border-radius: 50%; color: transparent; font-size: 10px; line-height: 1; }
+.quick-presets-list button.is-active .quick-preset-check { border-color: var(--accent); background: var(--accent-strong); color: var(--accent-on-strong); }
 .rating-filter-head button { min-height: 32px; padding: 4px 8px; font-size: 12px; }
 .rating-filter-stars .faint { font-size: 12px; }
 .rating-filter-stars .mark-star { width: 32px; height: 32px; font-size: 20px; }

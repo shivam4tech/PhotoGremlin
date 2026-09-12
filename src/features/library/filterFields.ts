@@ -118,6 +118,42 @@ export interface OpDef {
   label: string;
 }
 
+export type FilterControlType =
+  | "boolean"
+  | "enum"
+  | "range"
+  | "number"
+  | "rating"
+  | "color"
+  | "date"
+  | "text"
+  | "multi-select";
+
+export interface FilterValueOption {
+  value: string | number | boolean;
+  label: string;
+}
+
+/** UI-only metadata derived from the canonical field registry. It never
+ * changes or duplicates the filter engine's field/operator semantics. */
+export interface FilterPresentation {
+  field: string;
+  label: string;
+  category: string;
+  description: string;
+  controlType: FilterControlType;
+  operatorOptions: readonly OpDef[];
+  valueOptions?: readonly FilterValueOption[];
+  values?: readonly number[];
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  defaultValue?: FilterCondition["value"];
+  supportsUnmeasured: boolean;
+  icon?: string;
+}
+
 export type QuickRangeField =
   | "brightness"
   | "sharpness"
@@ -403,6 +439,85 @@ export const OPS_BY_KIND: Record<FieldKind, OpDef[]> = {
   ],
   palette: [{ op: "in", label: "includes any" }],
 };
+
+const NATURAL_OPERATOR_LABELS: Partial<Record<FilterCondition["operator"], string>> = {
+  "=": "equal to",
+  "!=": "not equal to",
+  ">": "greater than",
+  ">=": "at least",
+  "<": "less than",
+  "<=": "at most",
+  between: "between",
+  in: "one of",
+  "is-null": "not recorded",
+  "not-null": "recorded",
+};
+
+const QUICK_PRESENTATION: Partial<Record<QuickRangeField, Pick<FilterPresentation,
+  "description" | "values" | "min" | "max" | "step" | "unit" | "defaultValue" | "icon"
+>>> = {
+  brightness: { description: "Limit photos by measured brightness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "brightness" },
+  sharpness: { description: "Limit photos by measured edge sharpness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "sharpness" },
+  contrast: { description: "Limit photos by measured contrast.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "contrast" },
+  highlight_clipping: { description: "Limit photos by clipped highlight coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "highlight-clipping" },
+  shadow_clipping: { description: "Limit photos by clipped shadow coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "shadow-clipping" },
+  eye_closure_confidence: { description: "Limit photos by locally measured eye-closure confidence.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "closed-eye-candidate" },
+  iso: { description: "Limit photos by recorded ISO sensitivity.", values: STANDARD_FILTER_STOPS.iso, min: 25, max: 102400, defaultValue: [25, 102400], icon: "iso" },
+  focal_length: { description: "Limit photos by recorded focal length.", values: STANDARD_FILTER_STOPS.focal_length, min: 8, max: 1200, unit: " mm", defaultValue: [8, 1200], icon: "focal-length" },
+};
+
+export function filterPresentationCategory(area: string): string {
+  if (area.includes("local") || area === "Burst context") return "People & content";
+  if (["Camera & lens", "Exposure", "Time"].includes(area)) return "Camera & date";
+  if (["Marking", "Review"].includes(area)) return "Rating & review";
+  if (area === "Technical") return "Image properties";
+  return "Appearance";
+}
+
+function labelValue(value: string): string {
+  return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+/** Adapt one engine-backed field for human-facing controls. */
+export function getFilterPresentation(field: string): FilterPresentation | null {
+  const definition = FIELD_BY_NAME[field];
+  if (!definition) return null;
+  const quick = QUICK_PRESENTATION[field as QuickRangeField];
+  const controlType: FilterControlType = field === "rating" ? "rating"
+    : definition.kind === "palette" ? "color"
+    : quick ? "range"
+    : definition.kind === "bool" ? "boolean"
+    : definition.values ? "enum"
+    : definition.kind === "datetime" ? "date"
+    : definition.kind === "real" || definition.kind === "int" ? "number"
+    : "text";
+  const engineOperators = OPS_BY_KIND[definition.kind];
+  const operatorOptions = engineOperators.map((operator) => ({
+    ...operator,
+    label: definition.kind === "bool" ? operator.label
+      : definition.kind === "datetime" || definition.kind === "palette" ? operator.label
+      : NATURAL_OPERATOR_LABELS[operator.op] ?? operator.label,
+  }));
+  const valueOptions = definition.kind === "bool"
+    ? [{ value: true, label: "Yes" }, { value: false, label: "No" }]
+    : definition.kind === "palette"
+      ? PALETTE_COLORS.map(({ id, label }) => ({ value: id, label }))
+      : definition.values?.map((value) => ({ value, label: labelValue(value) }));
+
+  return {
+    field,
+    label: definition.label,
+    category: filterPresentationCategory(definition.area),
+    description: quick?.description ?? `Filter photos by ${definition.label.toLowerCase()}.`,
+    controlType,
+    operatorOptions,
+    valueOptions,
+    supportsUnmeasured: engineOperators.some(({ op }) => op === "is-null"),
+    ...(definition.kind === "bool" ? { defaultValue: true } : {}),
+    ...(field === "rating" ? { min: 0, max: 5, step: 1, defaultValue: 0 } : {}),
+    ...quick,
+  };
+}
 
 const BOOL_PHRASES: Record<string, string> = {
   monochrome: "monochrome",

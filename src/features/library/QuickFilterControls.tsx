@@ -7,7 +7,7 @@ import type {
 } from "@/types/api";
 import {
   QUICK_RANGE_FIELDS,
-  STANDARD_FILTER_STOPS,
+  getFilterPresentation,
   quickRangeBounds,
   quickRangeCondition,
   replaceFieldConditions,
@@ -31,7 +31,6 @@ interface RangeSpec {
   missingNoun: string;
 }
 
-const MEASURED_VALUES = Array.from({ length: 101 }, (_, index) => index);
 const RANGE_INTERACTION_KEYS = new Set([
   "ArrowLeft",
   "ArrowRight",
@@ -43,16 +42,27 @@ const RANGE_INTERACTION_KEYS = new Set([
   "PageDown",
 ]);
 
-const RANGE_SPECS: readonly RangeSpec[] = [
-  { field: "brightness", label: "Brightness", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
-  { field: "sharpness", label: "Sharpness", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
-  { field: "contrast", label: "Contrast", values: MEASURED_VALUES, recordedNoun: "measured", missingNoun: "unmeasured" },
-  { field: "highlight_clipping", label: "Highlight clipping", values: MEASURED_VALUES, unit: "%", recordedNoun: "measured", missingNoun: "unmeasured" },
-  { field: "shadow_clipping", label: "Shadow clipping", values: MEASURED_VALUES, unit: "%", recordedNoun: "measured", missingNoun: "unmeasured" },
-  { field: "eye_closure_confidence", label: "Eye closure confidence", values: MEASURED_VALUES, unit: "%", recordedNoun: "evaluated", missingNoun: "not evaluated" },
-  { field: "iso", label: "ISO", values: STANDARD_FILTER_STOPS.iso, recordedNoun: "recorded", missingNoun: "not recorded" },
-  { field: "focal_length", label: "Focal length", values: STANDARD_FILTER_STOPS.focal_length, unit: " mm", recordedNoun: "recorded", missingNoun: "not recorded" },
-];
+const RANGE_NOUNS: Record<QuickRangeField, Pick<RangeSpec, "recordedNoun" | "missingNoun">> = {
+  brightness: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  sharpness: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  contrast: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  highlight_clipping: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  shadow_clipping: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  eye_closure_confidence: { recordedNoun: "evaluated", missingNoun: "not evaluated" },
+  iso: { recordedNoun: "recorded", missingNoun: "not recorded" },
+  focal_length: { recordedNoun: "recorded", missingNoun: "not recorded" },
+};
+
+const RANGE_SPECS: readonly RangeSpec[] = QUICK_RANGE_FIELDS.map((field) => {
+  const presentation = getFilterPresentation(field)!;
+  return {
+    field,
+    label: presentation.label.replace(" (mm)", ""),
+    values: presentation.values!,
+    unit: presentation.unit,
+    ...RANGE_NOUNS[field],
+  };
+});
 
 function nearestValueIndex(values: readonly number[], value: number): number {
   return values.reduce(
