@@ -149,7 +149,10 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
   .library-shoot-name { max-width: 140px; }
   .library-statusbar > .faint { display: none; }
 }
-@media (max-width: 1000px) {
+/* Tauri's minimum window width is 1024px, so this breakpoint must remain
+   reachable above that floor. At minimum width the inspector becomes an
+   overlay instead of compressing the gallery to roughly 530px. */
+@media (max-width: 1100px) {
   .library-workspace { grid-template-columns: minmax(0, 1fr); }
   .library-inspector { position: absolute; z-index: 40; inset: 0 0 0 auto; width: min(340px, 100%); box-shadow: var(--shadow-pop); animation: filter-popover-in 200ms var(--ease-out); }
 }

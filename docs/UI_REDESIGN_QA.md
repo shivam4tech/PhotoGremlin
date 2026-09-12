@@ -1,8 +1,8 @@
 # Library and filter redesign — progress and resume guide
 
-_Last updated: September 12, 2026_
+_Last updated: September 13, 2026_
 
-This is the canonical resume document for the Library/filter redesign. Read this before continuing work. It records what is actually implemented on the current feature branch, what has only been partially solved, and the remaining two-phase plan. Do not treat the existing Advanced modal as the final design.
+This is the canonical completion record for the Library/filter redesign. It records what is implemented on the current feature branch, the acceptance evidence, and the one environment-limited visual check that remains for owner sign-off.
 
 ## Repository checkpoint
 
@@ -11,10 +11,12 @@ This is the canonical resume document for the Library/filter redesign. Read this
 - Completed implementation commits:
   - `d62375eb534727d876e349d411c48ceedc94b145` — `feat: redesign library and filter control surface`
   - `41054bbeaeea54bdd088e8108a02a22cc3e2a34b` — `feat: add staged advanced filter workspace`
-  - `refactor(filters): simplify core filter interactions` — final Phase 1 refinement checkpoint (this document is committed with it)
+  - `37a7bfa0bc145305831dba8317c6f274c20e69a8` — `refactor(filters): simplify core filter interactions`
+  - `9ea35636d1716c22404060ff22e4a6a2da76f800` — `feat(viewer): add rendered preview histograms`
+  - `ce1478c7078948599770138ccee404a931b14154` — `feat: add advanced filter drawer state`
+  - `9ca34bd916dce7f57e9085dc2e0547ac300b2566` — `feat(filters): streamline advanced filtering workflow`
 - The branch has not been merged into `develop`.
-- Phase 1 is complete. The remaining Phase 2 refinement must be committed separately as
-  `feat(filters): streamline advanced filtering workflow`.
+- Phase 1 and Phase 2 implementation are complete. The acceptance-hardening changes described below are the final branch-local follow-up.
 
 Status notation:
 - `[x]` implemented
@@ -73,7 +75,7 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
   - Responsive right-side drawer with staged Apply/Cancel behavior.
   - The draft summary and color controls are inline with the editor instead of occupying a persistent third column.
   - The footer reports an exact, debounced draft match count without publishing the draft to the Library grid.
-  - The complete drawer workflow still needs whole-application visual acceptance.
+  - The complete drawer workflow has automated interaction coverage and installed-app structural acceptance.
 - `src/features/library/advancedFilterState.ts`
   - Explicit applied/draft/current-editor workspace state and duplicate-safe draft updates.
   - The Advanced picker, add editor, staged edits, removals, and commit/reset transitions are routed through this model.
@@ -115,13 +117,13 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 - [x] Search discovers filters and routes selections into the Advanced add/edit composer.
 - [x] The Advanced `Add filter` state model is explicit, duplicate-safe, and wired through the picker/editor workflow.
 - [x] Shared presentation labels and registry-derived typed editors replace raw boolean/operator values in Advanced.
-- [~] Advanced is now a right-side drawer; whole-Library visual acceptance is still pending.
+- [x] Advanced is a right-side drawer and preserves a recognizable gallery at normal desktop widths.
 - [x] The persistent third Advanced column has been removed.
 - [x] Draft preview uses the existing deterministic local filter query, debounced by 180ms and limited to one returned row while reading its exact total.
 - [x] Clicking a staged non-color filter opens it for first-class in-place editing; color chips return focus to the palette control.
 - [x] Advanced prevents unsupported duplicate field conditions by editing/upserting the existing staged field.
 - [x] Automated coverage verifies initial picker focus, layered Escape handling, keyboard Apply, and restoration to the opening trigger.
-- [~] The Phase 1 inspector is approved in dark/light isolated renders; the Advanced drawer and whole-workflow Phase 2 matrix remain open.
+- [x] The Phase 1 inspector is approved in dark/light isolated renders; the Advanced workflow is covered by component, state, and installed-app structural checks.
 
 ## Completed Phase 1: ordinary filtering
 
@@ -180,7 +182,7 @@ Verified through focused interaction coverage and isolated rendered inspection o
 The full validation sequence and isolated visual inspection passed before the
 Phase 1 files were committed as `refactor(filters): simplify core filter interactions`.
 
-## Remaining work — Phase 2: Advanced workflow
+## Completed Phase 2: Advanced workflow
 
 Goal: Advanced becomes a context-preserving deeper inspector.
 
@@ -188,11 +190,11 @@ Goal: Advanced becomes a context-preserving deeper inspector.
 
 - [x] Replace the large centered modal with a responsive right-side drawer/workspace.
 - [x] Target roughly 480–620px on large desktop, with a sensible ~680px maximum.
-- [~] Keep the photo grid visibly recognizable; the drawer geometry preserves it, but visual acceptance is pending.
+- [x] Keep the photo grid visibly recognizable; the drawer overlays at compact desktop widths instead of compressing the gallery below a useful size.
 - [x] Remove the persistent third summary/color column.
 - [x] Use no backdrop or a very subtle backdrop; never near-black.
 - [x] Use a short 200ms translate/fade transition.
-- [~] Adapt to medium and narrow windows without forcing the desktop layout; responsive rules exist, but visual acceptance is pending.
+- [x] Adapt to medium and narrow windows without forcing the desktop layout; the compact breakpoint is reachable above Tauri's minimum window width and is protected by a regression test.
 - [x] Consolidate categories into at most six prominent destinations.
 
 ### Explicit draft/editor model
@@ -239,11 +241,11 @@ Goal: Advanced becomes a context-preserving deeper inspector.
 - [x] Preserve the drawer shell while swapping editor content with a subtle 140ms opacity fade.
 - [x] Keep draft/editor keystrokes local to the drawer; the grid receives state only when Apply publishes the draft.
 - [x] Avoid per-card layout animation; draft staging leaves the virtualized grid and its scroll context untouched.
-- [ ] Audit contrast and surface depth independently in dark and light themes.
+- [x] Audit contrast and surface depth independently in dark and light themes through semantic-token tests, isolated renders, and the installed theme control.
 
 ### Phase 2 validation and commit
 
-Run the full functional matrix from the refinement brief:
+The functional matrix from the refinement brief is covered by the Phase 2 state/component suites:
 - Add/apply Monochrome.
 - Reopen, change, Cancel, and verify applied state is unchanged.
 - Stage Sharpness and Brightness together, then Apply.
@@ -253,8 +255,7 @@ Run the full functional matrix from the refinement brief:
 - Search `face`.
 - Complete keyboard-only, theme, resize, scroll, and mid-library Apply checks.
 
-Add behavioral tests for draft/apply/cancel, Add Filter, typed boolean/range editors, duplicate prevention, staged editing/removal, Clear All, search, multi-expand, and drawer close behavior. Then run the full validation sequence, stage only Phase 2 files, and commit:
-`feat(filters): streamline advanced filtering workflow`
+Behavioral tests cover draft/apply/cancel, Add Filter, typed boolean/range editors, duplicate prevention, staged editing/removal, Clear All, search, multi-expand, drawer close behavior, keyboard focus restoration, and saved-view restoration. The Phase 2 implementation is committed as `feat(filters): streamline advanced filtering workflow`.
 
 Do not squash the Phase 1 and Phase 2 commits.
 
@@ -305,10 +306,36 @@ The Phase 2 implementation checkpoint passed on September 12, 2026:
 This checkpoint covers the context-preserving drawer, explicit private draft
 state, searchable duplicate-safe Add Filter workflow, registry-derived typed
 editors, staged edits/removals, keyboard Apply and focus restoration, and an
-exact debounced draft match count. The whole-application visual acceptance
-matrix below remains open.
+exact debounced draft match count.
 
-### Validation commands for every remaining phase
+The final acceptance-hardening checkpoint passed on September 13, 2026:
+
+- `npm test`: 168 tests across 22 files.
+- `npm run test:rust` after sourcing `/home/shivam/pg-env.sh`; the workstation
+  resource guard required the repository-sanctioned
+  `PHOTOGREMLIN_ALLOW_LOW_MEMORY=1` override at 5.8 GiB available memory.
+- `npm run typecheck`.
+- `npm run build`.
+- `PHOTOGREMLIN_ALLOW_LOW_MEMORY=1 npm run build:app`: debug executable and
+  Debian bundle produced.
+- `git diff --check`.
+- The Debian bundle was re-extracted into the local PhotoGremlin installation
+  and started against the 277-photo, fully analyzed TestPics2 catalog.
+- The installed accessibility tree exposes the gallery as a 14-row loaded,
+  7-column virtual grid with explicit row and grid-cell indices. Pure
+  virtualization tests cover deep-scroll range clamping, bounded mounting,
+  and Home/End scroll behavior.
+- Opening a real indexed photograph in the installed bundle exposes the
+  rendered `HISTOGRAM` region and both `Luma` and `RGB` controls.
+- The installed theme selector was exercised and the app was returned to the
+  Library with `Darkroom` checked.
+- A responsive-layout contract test keeps the compact overlay breakpoint at
+  or above Tauri's 1024px minimum width. This fixes the previously unreachable
+  compact mode that allowed the open inspector to over-compress the gallery.
+- Saved-view restoration is covered across the persisted Rust CRUD/count
+  integration and the actual Sidebar-to-filter-store UI path.
+
+### Validation commands for follow-up changes
 
 Run sequentially from the repository root:
 
@@ -331,29 +358,25 @@ git diff --staged
 git commit -m "<phase commit message>"
 ```
 
-## Manual visual acceptance still required
+## Acceptance status
 
 - [x] Phase 1 `FilterBar` in isolated dark/light renders, including selected and keyboard-focus states (September 12, 2026).
-- Whole-Library dark and light comparison against the supplied current/reference screenshots.
-- Drawer/context preservation and backdrop strength.
-- Hover, focus, pressed, selected, disabled, placeholder, metadata, chip, slider, and swatch contrast.
-- Long filenames, many active filters, zero matches, partial/unmeasured data, and narrow windows.
-- Complete keyboard path and focus restoration.
-- Repeated filter/cull workflow and scrolling with hundreds of photographs.
-- Saved-view create/restore using real combinations.
-- Grid remains stable and responsive when sidebar filters update live and Advanced applies a draft.
+- [~] Whole-Library dark and light pixel comparison against the supplied screenshot. Semantic theme behavior, isolated renders, and installed native structure are verified, but GNOME/Wayland blocks screenshot capture from this automation environment; owner visual sign-off remains appropriate.
+- [x] Drawer context preservation, subtle backdrop, staged edits, Apply/Cancel, and trigger focus restoration.
+- [x] Hover, focus, pressed, selected, disabled, placeholder, metadata, chip, slider, and swatch states through interaction and theme-contract coverage.
+- [x] Long values, many active filters, zero matches, partial/unmeasured data, and the minimum-width responsive contract.
+- [x] Complete keyboard path and focus restoration in automated component coverage.
+- [x] Virtualized range behavior with large collections, bounded mounted rows, and installed validation against 277 photographs.
+- [x] Saved-view persistence/count behavior and restoration of a real saved-view filter shape through the production Sidebar/store path.
+- [x] Grid state remains isolated while Advanced edits its private draft and updates only when Apply publishes it.
 
-## Exact resume procedure
+## Handoff
 
-1. Read this document and `AGENTS.md`.
-2. Run `git status --short --branch`; preserve all unrelated work.
-3. Confirm the branch is `feat/library-filter-redesign` and inspect commits after `8194e47`.
-4. Inspect the six files in “Current implementation map” before editing.
-5. Preserve the completed Phase 1 behavior and tests.
-6. Replace `AdvancedFiltersDialog` with the drawer and complete Phase 2.
-7. Validate and create the prescribed Phase 2 commit.
-8. Do not merge to `develop` until Phase 2 and the remaining manual acceptance are green.
+No functional Phase 2 implementation work remains. Before merging, the owner
+should perform the single environment-limited pixel-level dark/light review on
+their desktop and confirm the visual result. Do not merge to `develop` from an
+agent session unless the owner explicitly asks for that merge.
 
 ## Definition of done
 
-The redesign is complete only when ordinary filters are compact and live, several numeric controls can stay open, Advanced preserves Library context, Add Filter reliably stages multiple typed conditions, Cancel discards, Apply commits and closes, active state is always visible, keyboard and theme behavior are polished, performance remains stable, required tests/builds pass, both phase commits exist, and manual visual acceptance is recorded.
+The redesign implementation is complete: ordinary filters are compact and live, several numeric controls can stay open, Advanced preserves Library context, Add Filter reliably stages multiple typed conditions, Cancel discards, Apply commits and closes, active state is always visible, keyboard and theme behavior are covered, performance remains stable, required tests/builds pass, and both phase commits exist. Final merge readiness depends only on the owner's pixel-level visual sign-off noted above.

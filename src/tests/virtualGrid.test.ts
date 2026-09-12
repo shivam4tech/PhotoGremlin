@@ -1,5 +1,9 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
 import { describe, it, expect } from "vitest";
 import { computeVisibleRange, computeColumns } from "@/components/VirtualGrid";
+import { VirtualGrid } from "@/components/VirtualGrid";
 
 const ROW_H = 180;
 
@@ -66,5 +70,46 @@ describe("computeVisibleRange", () => {
     const mounted = layout.endIndex - layout.startIndex;
     // visible rows = ceil(4000/180)=23 + 4 overshoot = 27 rows * 6 cols
     expect(mounted).toBeLessThanOrEqual(27 * 6);
+  });
+});
+
+describe("VirtualGrid accessibility", () => {
+  it("exposes virtualized rows and cells with the full grid dimensions", async () => {
+    class ResizeObserverStub {
+      observe() {}
+      disconnect() {}
+    }
+    Object.assign(globalThis, {
+      IS_REACT_ACT_ENVIRONMENT: true,
+      ResizeObserver: ResizeObserverStub,
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(createElement(VirtualGrid, {
+      itemCount: 3,
+      render: (index: number) => createElement("button", null, `Photo ${index + 1}`),
+    })));
+
+    const grid = container.querySelector('[role="grid"]')!;
+    expect(grid.getAttribute("aria-rowcount")).toBe("3");
+    expect(grid.getAttribute("aria-colcount")).toBe("1");
+    expect(container.querySelectorAll('[role="row"]')).toHaveLength(3);
+    expect(container.querySelectorAll('[role="gridcell"]')).toHaveLength(3);
+    expect(container.querySelector('[role="row"]')?.getAttribute("aria-rowindex")).toBe("1");
+    expect(container.querySelector('[role="gridcell"]')?.getAttribute("aria-colindex")).toBe("1");
+
+    Object.defineProperties(grid, {
+      scrollHeight: { configurable: true, value: 1_200 },
+      scrollTop: { configurable: true, value: 0, writable: true },
+    });
+    grid.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "End" }));
+    expect((grid as HTMLDivElement).scrollTop).toBe(1_200);
+    grid.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Home" }));
+    expect((grid as HTMLDivElement).scrollTop).toBe(0);
+
+    await act(async () => root.unmount());
+    container.remove();
   });
 });

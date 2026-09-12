@@ -122,6 +122,8 @@ export function VirtualGrid({
       <div
         key={row}
         className="vg-row"
+        role="row"
+        aria-rowindex={row + 1}
         style={{
           position: "absolute",
           top: row * rowHeight,
@@ -136,7 +138,11 @@ export function VirtualGrid({
       >
         {Array.from({ length: Math.min(layout.cols, itemCount - rowStart) }, (_, c) => {
           const i = rowStart + c;
-          return <div key={i} className="vg-cell">{render(i)}</div>;
+          return (
+            <div key={i} className="vg-cell" role="gridcell" aria-colindex={c + 1}>
+              {render(i)}
+            </div>
+          );
         })}
       </div>,
     );
@@ -149,6 +155,8 @@ export function VirtualGrid({
       tabIndex={0}
       role="grid"
       aria-label="Photo grid"
+      aria-rowcount={layout.rows}
+      aria-colcount={layout.cols}
       onScroll={onScroll}
       onKeyDown={(e) => {
         const el = ref.current;
