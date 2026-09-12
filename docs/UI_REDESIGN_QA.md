@@ -70,8 +70,12 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
   - Quick-filter controls and `RangeFilterRow`.
   - Measured rows open and close independently while the controls remain mounted.
 - `src/features/library/AdvancedFiltersDialog.tsx`
-  - Current draft-state modal and Apply/Cancel behavior.
-  - Known issue: oversized modal, category rail + editor + persistent summary column, strong backdrop, no live preview count.
+  - Responsive right-side drawer with staged Apply/Cancel behavior.
+  - The draft summary and color controls are inline with the editor instead of occupying a persistent third column.
+  - Known issue: no live preview count, and the complete drawer workflow still needs visual acceptance.
+- `src/features/library/advancedFilterState.ts`
+  - Explicit applied/draft/current-editor workspace state and duplicate-safe draft updates.
+  - The UI still needs to route the complete picker/editor flow through this state model.
 - `src/features/library/ActiveFilterList.tsx`
   - Removable applied/draft filter chips, including per-color chips.
 - `src/features/library/FilterPicker.tsx`
@@ -107,10 +111,10 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 - [x] Simple numeric rows use a compact collapsed rhythm and disclose exact controls only on demand.
 - [~] Quick filters are lightweight in Simple; Advanced retains its temporary card layout until Phase 2.
 - [~] Search discovers filters but the add/configure flow remains fragmented.
-- [ ] The Advanced `Add filter` state machine is not complete or reliable enough for repeated additions.
+- [~] The Advanced `Add filter` state model is explicit and duplicate-safe, but the UI is not yet routed through it end to end.
 - [~] Shared presentation labels now replace raw boolean/operator values, but Advanced still uses a generic composer rather than the Phase 2 typed flow.
-- [ ] Advanced is still a large modal that hides too much of the Library.
-- [ ] The persistent third Advanced column must be removed.
+- [~] Advanced is now a right-side drawer; whole-Library visual acceptance is still pending.
+- [x] The persistent third Advanced column has been removed.
 - [ ] Draft preview/matching count is not implemented.
 - [ ] Editing an already-staged filter is not a clear first-class flow.
 - [ ] Duplicate filter conditions are not safely prevented.
@@ -180,21 +184,21 @@ Goal: Advanced becomes a context-preserving deeper inspector.
 
 ### Replace the modal shell
 
-- [ ] Replace the large centered modal with a responsive right-side drawer/workspace.
-- [ ] Target roughly 480–620px on large desktop, with a sensible ~680px maximum.
-- [ ] Keep the photo grid visibly recognizable.
-- [ ] Remove the persistent third summary/color column.
-- [ ] Use no backdrop or a very subtle backdrop; never near-black.
-- [ ] Use a short 200–240ms translate/fade transition.
-- [ ] Adapt to medium and narrow windows without forcing the desktop layout.
-- [ ] Consolidate categories into at most six prominent destinations.
+- [x] Replace the large centered modal with a responsive right-side drawer/workspace.
+- [x] Target roughly 480–620px on large desktop, with a sensible ~680px maximum.
+- [~] Keep the photo grid visibly recognizable; the drawer geometry preserves it, but visual acceptance is pending.
+- [x] Remove the persistent third summary/color column.
+- [x] Use no backdrop or a very subtle backdrop; never near-black.
+- [x] Use a short 200–240ms translate/fade transition.
+- [~] Adapt to medium and narrow windows without forcing the desktop layout; responsive rules exist, but visual acceptance is pending.
+- [x] Consolidate categories into at most six prominent destinations.
 
 ### Explicit draft/editor model
 
-- [ ] Keep `appliedFilters`, cloned `draftFilters`, and `currentEditor` conceptually distinct.
-- [ ] Opening Advanced clones applied state.
-- [ ] Cancel discards draft state.
-- [ ] X closes directly when clean; when dirty, consistently discard like Cancel or show one lightweight confirmation.
+- [x] Keep `appliedFilters`, cloned `draftFilters`, and `currentEditor` conceptually distinct.
+- [x] Opening Advanced clones applied state.
+- [x] Cancel discards draft state.
+- [x] X closes directly and consistently discards the private draft like Cancel.
 - [ ] Apply validates, commits the entire draft, closes the drawer, preserves gallery context, and returns focus to the trigger.
 - [ ] Add a debounced draft preview count if calculation cost requires it.
 

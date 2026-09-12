@@ -48,6 +48,16 @@ describe("advanced filter workspace", () => {
     return Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((item) => item.textContent?.trim() === label)!;
   }
+  it("uses a two-column drawer and keeps the draft selection inside its main workspace", async () => {
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
+    const dialog = container.querySelector("dialog")!;
+    const body = dialog.querySelector(".advanced-filters-body")!;
+    expect(dialog.classList.contains("advanced-filters-drawer")).toBe(true);
+    expect(body.children).toHaveLength(2);
+    expect(dialog.querySelector(".advanced-filters-summary")).toBeNull();
+    expect(dialog.querySelector(".advanced-filters-main .advanced-filters-selection")).not.toBeNull();
+    expect(dialog.querySelectorAll(".advanced-filters-categories button")).toHaveLength(6);
+  });
   it("stages colors and only publishes the combined conditions on Apply", async () => {
     const initial: FilterCondition[] = [{ field: "rating", operator: ">=", value: 4 }];
     const apply = vi.fn(); const close = vi.fn();

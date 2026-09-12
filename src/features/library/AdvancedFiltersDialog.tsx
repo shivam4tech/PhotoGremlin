@@ -1,7 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { FilterCondition } from "@/types/api";
 import { DashboardIcon, EyeIcon, LibraryIcon, SavedViewsIcon, SettingsIcon, SunIcon } from "@/components/Icons";
 import { ActiveFilterList } from "./ActiveFilterList";
+import {
+  advancedFilterWorkspaceReducer,
+  createAdvancedFilterWorkspaceState,
+} from "./advancedFilterState";
 import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
 import { FilterBar } from "./FilterBar";
 
@@ -23,7 +27,14 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const [draft, setDraft] = useState<FilterCondition[]>(() => structuredClone(initialConditions));
+  const [workspace, dispatch] = useReducer(
+    advancedFilterWorkspaceReducer,
+    initialConditions,
+    createAdvancedFilterWorkspaceState,
+  );
+  const draft = workspace.draftFilters;
+  const setDraft = (filters: FilterCondition[]) =>
+    dispatch({ type: "replace-draft", filters });
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>(CATEGORIES[0]);
 
   useEffect(() => {
@@ -33,13 +44,13 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
     return () => { if (dialog?.open) dialog.close(); previousFocus?.focus(); };
   }, []);
 
-  return <dialog ref={dialogRef} className="advanced-filters-dialog" aria-labelledby="advanced-filters-title"
+  return <dialog ref={dialogRef} className="advanced-filters-dialog advanced-filters-drawer" aria-labelledby="advanced-filters-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }}>
     <header className="advanced-filters-header">
       <SettingsIcon size={22} />
       <h2 id="advanced-filters-title">Filters</h2>
       <span>Fine-tune your selection</span>
-      <button className="btn btn-ghost btn-sm" disabled={disabled || !draft.length} onClick={() => setDraft([])}>Clear all</button>
+      <button className="btn btn-ghost btn-sm" disabled={disabled || !draft.length} onClick={() => dispatch({ type: "clear-draft" })}>Clear all</button>
       <button className="btn btn-ghost" aria-label="Close advanced filters" onClick={onClose}>×</button>
     </header>
     <div className="advanced-filters-body">
@@ -50,15 +61,15 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
       </nav>
       <main className="advanced-filters-main" aria-label={category.label}>
         <div className="advanced-category-heading"><h3>{category.label}</h3><p>{category.description}</p></div>
+        <section className="advanced-filters-selection" aria-label="Draft filter selection">
+          <ColorSpectrumFilter draft={draft} onChange={setDraft} disabled={disabled} />
+          <ActiveFilterList draft={draft} onChange={setDraft} disabled={disabled} label="Selected filters" />
+          {!draft.length && <p>No filters selected. Choose a shortcut or search for a specific property.</p>}
+          <p className="advanced-draft-note">Changes take effect when you apply filters.</p>
+        </section>
         <FilterBar key={category.label} mode="inspector" category={category.label} draft={draft}
           onChange={setDraft} sessionId={sessionId} disabled={disabled} />
       </main>
-      <aside className="advanced-filters-summary" aria-label="Filter selection">
-        <ColorSpectrumFilter draft={draft} onChange={setDraft} disabled={disabled} />
-        <ActiveFilterList draft={draft} onChange={setDraft} disabled={disabled} label="Selected filters" />
-        {!draft.length && <p>No filters selected. Choose a shortcut or search for a specific property.</p>}
-        <p className="advanced-draft-note">Changes take effect when you apply filters.</p>
-      </aside>
     </div>
     <footer className="advanced-filters-footer">
       <span aria-live="polite">{draft.length ? `${draft.length} filter${draft.length === 1 ? "" : "s"} selected` : "All photos"}</span>
