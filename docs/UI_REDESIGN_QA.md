@@ -1,6 +1,6 @@
 # Library and filter redesign — progress and resume guide
 
-_Last updated: September 11, 2026_
+_Last updated: September 12, 2026_
 
 This is the canonical resume document for the Library/filter redesign. Read this before continuing work. It records what is actually implemented on the current feature branch, what has only been partially solved, and the remaining two-phase plan. Do not treat the existing Advanced modal as the final design.
 
@@ -58,26 +58,26 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 - [x] Dragging can show transient value feedback.
 - [x] Reset and unmeasured/coverage states are represented.
 - [x] Zero-recorded fields can suppress or disable meaningless slider interaction.
-- [~] Only one measured row can currently remain expanded because `QuickFilterControls` stores `expandedField: string | null`. This directly conflicts with the latest requirement.
+- [x] Measured rows use independent disclosure state, so several editors can remain expanded together.
 
 ## Current implementation map
 
-- `src/components/filters/FilterBar.tsx`
+- `src/features/library/FilterBar.tsx`
   - Simple inspector composition, rating/color/quick filters, measured rows, and generic condition composer.
   - Known issue: boolean and other conditions still expose backend-style operators/values such as `is` and `true`.
   - Known issue: candidate insertion needs duplicate prevention and a clearer editor state machine.
-- `src/components/filters/QuickFilterControls.tsx`
+- `src/features/library/QuickFilterControls.tsx`
   - Quick-filter controls and `RangeFilterRow`.
-  - Known issue: single-open disclosure state.
-- `src/components/filters/AdvancedFiltersDialog.tsx`
+  - Measured rows open and close independently while the controls remain mounted.
+- `src/features/library/AdvancedFiltersDialog.tsx`
   - Current draft-state modal and Apply/Cancel behavior.
   - Known issue: oversized modal, category rail + editor + persistent summary column, strong backdrop, no live preview count.
-- `src/components/filters/ActiveFilterList.tsx`
+- `src/features/library/ActiveFilterList.tsx`
   - Removable applied/draft filter chips, including per-color chips.
-- `src/components/filters/FilterPicker.tsx`
+- `src/features/library/FilterPicker.tsx`
   - Searchable keyboard-accessible filter picker.
   - Known issue: active entries are labelled Added, but duplicate prevention must be enforced by the state layer.
-- `src/components/filters/filterDiscovery.ts`
+- `src/features/library/filterDiscovery.ts`
   - Substring/alias discovery (for example sharp, mono, ISO, face).
 - `src/stores/filterStore.ts`
   - Applied Library filter state. Keep it as the source of truth outside Advanced.
@@ -97,11 +97,11 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 - [x] Apply, Cancel, Escape, and staged Clear All have automated coverage.
 - [x] Existing virtualized gallery and filter engine remain in place.
 - [x] Dark and light semantic tokens and reduced-motion rules exist.
+- [x] Multiple measured rows can stay expanded and can be closed independently.
 - [x] No runtime dependency, network capability, cloud behavior, or external AI was added.
 
 ### Known gaps that must not be mistaken for completion
 
-- [ ] Multiple measured rows cannot stay expanded together.
 - [~] Numeric rows are more capable but remain vertically/form-heavy in the actual sidebar.
 - [~] Quick filters remain too rectangular/heavy in Simple and especially Advanced.
 - [~] Search discovers filters but the add/configure flow remains fragmented.
@@ -131,31 +131,31 @@ Goal: make everyday sidebar filtering fast before changing Advanced.
 
 ### Independent measured-row disclosure
 
-- [ ] Replace `expandedField: string | null` with a `Set<FilterId>` (or equivalent).
-- [ ] Opening Brightness, Sharpness, and Contrast must leave all three open.
-- [ ] Closing one must not affect the others.
-- [ ] Keep expansion state stable while the sidebar remains mounted.
-- [ ] Add an automated multi-expand test.
+- [x] Replace `expandedField: string | null` with a `Set<FilterId>` (or equivalent).
+- [x] Opening Brightness, Sharpness, and Contrast leaves all three open.
+- [x] Closing one does not affect the others.
+- [x] Expansion state stays stable while the sidebar remains mounted.
+- [x] Automated coverage verifies multi-expand, independent closing, and numeric commits.
 
 ### Numeric-row refinement
 
-- [ ] Reduce collapsed rows to a compact 40–48px inspector rhythm.
-- [ ] Keep value summary, coverage, and chevron legible without large empty tracks.
-- [ ] Show slider and exact inputs only when expanded.
-- [ ] Keep only the selected range accented.
-- [ ] Ensure crisp 14–16px visual thumbs with larger hit regions and keyboard support.
-- [ ] Refine exact input stepping and remove conflicting browser spinner styling.
-- [ ] Make Reset tertiary and unmeasured choices explicit.
-- [ ] For zero recorded values, show “Not recorded in this shoot” and omit/disable the meaningless range.
-- [ ] Confirm live updates remain performant; debounce only if needed.
+- [x] Reduce collapsed rows to a compact 42px inspector rhythm.
+- [x] Keep value summary, coverage, and chevron legible without large empty tracks.
+- [x] Show slider and exact inputs only when expanded.
+- [x] Keep only the selected range accented.
+- [x] Ensure crisp 14px visual thumbs with 20px hit regions and keyboard support.
+- [x] Refine exact input stepping and remove conflicting browser spinner styling.
+- [x] Make Reset tertiary and unmeasured choices explicit.
+- [x] For zero recorded values, show “Not recorded in this shoot” and omit the meaningless range.
+- [x] Numeric changes publish only at pointer/keyboard interaction completion or exact-input commit; no debounce is needed.
 
 ### Simple inspector refinement
 
-- [ ] Final order: header/count, search/add, Active Filters (only when nonempty), Colors, Quick Filters, Rating, Measured, More.
+- [~] Search/add now precedes Active Filters (only when nonempty), then Colors, Quick Filters, Rating, and Measured; final placement of More remains part of the presentation-adapter pass.
 - [ ] Make quick filters lighter and whole-row/whole-chip interactive, with a checkmark and non-color-only selected state.
-- [ ] Tighten active chips and handle overflow without unbounded panel growth.
+- [x] Tighten active chips and cap their stack with local scrolling instead of unbounded panel growth.
 - [ ] Refine swatch checkmarks, labels, focus rings, and light/dark selection visibility.
-- [ ] Ensure search surfaces related quick and technical filters for `sharp`, `mono`, `iso`, and `face`.
+- [x] Ensure search surfaces related quick and technical filters for `sharp`, `mono`, `iso`, and `face`.
 - [ ] Finish primary/secondary/tertiary button hierarchy.
 - [ ] Audit hover, pressed, focus-visible, disabled, transition, and reduced-motion states.
 
@@ -267,6 +267,19 @@ The following passed for the checkpoint represented by `d62375e` + `41054bb`:
 - Isolated headless component renders of Advanced at 1440×900 in both themes.
 
 These are historical checkpoint results. They do not validate any future Phase 1 or Phase 2 edits.
+
+The current Phase 1 refinement checkpoint passed on September 12, 2026:
+
+- `npm test`: 139 tests across 18 files.
+- `npm run test:rust` after sourcing `/home/shivam/pg-env.sh`.
+- `npm run typecheck`.
+- `npm run build`.
+- `npm run build:app`: debug executable and Debian bundle produced.
+- `git diff --check`.
+
+This checkpoint covers independent measured-filter expansion, exact empty-data
+states, tighter numeric controls, and search-first ordering in the simple
+inspector. The manual visual acceptance matrix below remains open.
 
 ### Validation commands for every remaining phase
 

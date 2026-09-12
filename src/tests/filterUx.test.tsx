@@ -7,15 +7,22 @@ import { ActiveFilterList } from "@/features/library/ActiveFilterList";
 import { QuickFilterControls } from "@/features/library/QuickFilterControls";
 import { ColorSpectrumFilter } from "@/features/library/ColorSpectrumFilter";
 import { AdvancedFiltersDialog } from "@/features/library/AdvancedFiltersDialog";
+import { FilterBar } from "@/features/library/FilterBar";
+import { api } from "@/lib/ipc";
 import type { FilterCondition } from "@/types/api";
 
 vi.mock("@/lib/ipc", () => ({ api: {
-  numericFilterStats: vi.fn(async () => ({ recorded_count: 120, missing_count: 2 })),
+  numericFilterStats: vi.fn(async () => ({
+    recorded_count: 120, missing_count: 2, minimum: 0, maximum: 100,
+  })),
 } }));
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
+  vi.mocked(api.numericFilterStats).mockResolvedValue({
+    recorded_count: 120, missing_count: 2, minimum: 0, maximum: 100,
+  });
   container = document.createElement("div"); document.body.append(container);
   root = createRoot(container);
 });
@@ -80,6 +87,13 @@ describe("advanced filter workspace", () => {
 });
 
 describe("filter control interactions", () => {
+  it("places filter search before the active-filter summary in the simple inspector", async () => {
+    await render(<FilterBar mode="inspector" draft={[{ field: "rating", operator: ">=", value: 4 }]}
+      onChange={vi.fn()} sessionId={1} />);
+    const discovery = container.querySelector(".filter-discovery")!;
+    expect(discovery.children[0].classList.contains("filter-picker")).toBe(true);
+    expect(discovery.children[1].classList.contains("active-filter-list")).toBe(true);
+  });
   it("searches, selects with the keyboard and closes with Escape", async () => {
     const select = vi.fn();
     await render(<FilterPicker draft={[{ field: "iso", operator: ">=", value: 100 }]} onSelect={select} />);
@@ -128,7 +142,7 @@ describe("filter control interactions", () => {
     expect(button("Yellow").getAttribute("aria-pressed")).toBe("false");
     expect(button("Blue").getAttribute("aria-pressed")).toBe("true");
   });
-  it("expands one range, commits a numeric value and preserves the open editor", async () => {
+  it("expands measured ranges independently and preserves them across a numeric commit", async () => {
     function Harness() {
       const [draft, setDraft] = useState<FilterCondition[]>([{ field: "rating", operator: ">=", value: 4 }]);
       return <><QuickFilterControls draft={draft} onChange={setDraft} sessionId={1} />
@@ -137,14 +151,42 @@ describe("filter control interactions", () => {
     await render(<Harness />);
     const headings = container.querySelectorAll<HTMLButtonElement>(".range-filter-heading");
     expect(Array.from(headings).every((heading) => heading.getAttribute("aria-expanded") === "false")).toBe(true);
-    await click(headings[0]); await click(headings[1]);
-    expect(headings[0].getAttribute("aria-expanded")).toBe("false");
+    await click(headings[0]); await click(headings[1]); await click(headings[2]);
+    expect(headings[0].getAttribute("aria-expanded")).toBe("true");
+    expect(headings[1].getAttribute("aria-expanded")).toBe("true");
+    expect(headings[2].getAttribute("aria-expanded")).toBe("true");
     const input = container.querySelector<HTMLInputElement>('[aria-label="Sharpness minimum value"]')!;
+    expect(input.step).toBe("1");
     await type(input, "70"); await key(input, "Enter");
     expect(container.querySelector("output")?.textContent).toContain('"field":"sharpness","operator":">=","value":70');
     expect(container.querySelector("output")?.textContent).toContain('"field":"rating"');
+    expect(headings[0].getAttribute("aria-expanded")).toBe("true");
     expect(headings[1].getAttribute("aria-expanded")).toBe("true");
-    expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Brightness range"]')?.disabled).toBe(true);
+    expect(headings[2].getAttribute("aria-expanded")).toBe("true");
+    await click(headings[1]);
+    expect(headings[0].getAttribute("aria-expanded")).toBe("true");
+    expect(headings[1].getAttribute("aria-expanded")).toBe("false");
+    expect(headings[2].getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Brightness range"]')?.disabled).toBe(false);
+    expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Sharpness range"]')?.disabled).toBe(true);
+    expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Contrast range"]')?.disabled).toBe(false);
+  });
+  it("omits meaningless numeric controls when a field has no recorded values", async () => {
+    vi.mocked(api.numericFilterStats).mockImplementation(async (field) => field === "brightness"
+      ? { recorded_count: 0, missing_count: 120, minimum: null, maximum: null }
+      : { recorded_count: 120, missing_count: 0, minimum: 0, maximum: 100 });
+    const changed = vi.fn();
+    await render(<QuickFilterControls draft={[]} onChange={changed} sessionId={1} />);
+    await click(container.querySelectorAll<HTMLButtonElement>(".range-filter-heading")[0]);
+    const section = container.querySelector('[aria-label="Brightness range"]')!;
+    expect(section.textContent).toContain("Not recorded in this shoot");
+    expect(section.querySelector('[aria-label="Brightness minimum"]')).toBeNull();
+    expect(section.querySelector('[aria-label="Brightness minimum value"]')).toBeNull();
+    const missingOnly = Array.from(section.querySelectorAll<HTMLButtonElement>("button"))
+      .find((item) => item.textContent?.includes("Unmeasured only"))!;
+    expect(missingOnly.disabled).toBe(false);
+    await click(missingOnly);
+    expect(changed).toHaveBeenCalledWith([{ field: "brightness", operator: "is-null", value: null }]);
   });
   it("preserves strict custom conditions and exposes unmeasured-only semantics", async () => {
     const changed = vi.fn();

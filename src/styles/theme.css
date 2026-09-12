@@ -1234,31 +1234,31 @@ select:focus {
 }
 .range-input::-webkit-slider-thumb {
   appearance: none;
-  width: 22px;
-  height: 22px;
-  margin-top: -8px;
-  border: 2px solid var(--text-dim);
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+  border: 3px solid var(--bg-panel);
   border-radius: 50%;
-  background: var(--bg-panel);
-  box-shadow: var(--shadow-card);
+  background: var(--text-dim);
+  box-shadow: 0 0 0 1px var(--text-dim);
   cursor: grab;
   pointer-events: auto;
 }
 .range-input::-moz-range-track { height: 6px; background: transparent; }
 .range-input::-moz-range-thumb {
-  width: 22px;
-  height: 22px;
-  border: 2px solid var(--text-dim);
+  width: 14px;
+  height: 14px;
+  border: 3px solid var(--bg-panel);
   border-radius: 50%;
-  background: var(--bg-panel);
-  box-shadow: var(--shadow-card);
+  background: var(--text-dim);
+  box-shadow: 0 0 0 1px var(--text-dim);
   cursor: grab;
   pointer-events: auto;
 }
-.range-scrubber.is-filtered .range-input::-webkit-slider-thumb { border-color: var(--accent); }
-.range-scrubber.is-filtered .range-input::-moz-range-thumb { border-color: var(--accent); }
-.range-input.is-active::-webkit-slider-thumb { border-color: var(--accent); background: var(--accent-soft); cursor: grabbing; }
-.range-input.is-active::-moz-range-thumb { border-color: var(--accent); background: var(--accent-soft); cursor: grabbing; }
+.range-scrubber.is-filtered .range-input::-webkit-slider-thumb { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.range-scrubber.is-filtered .range-input::-moz-range-thumb { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.range-input.is-active::-webkit-slider-thumb { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); cursor: grabbing; }
+.range-input.is-active::-moz-range-thumb { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); cursor: grabbing; }
 .range-scrubber.is-collapsed .range-input-lower::-webkit-slider-thumb { transform: translateX(-5px); }
 .range-scrubber.is-collapsed .range-input-upper::-webkit-slider-thumb { transform: translateX(5px); }
 .range-scrubber.is-collapsed .range-input-lower::-moz-range-thumb { transform: translateX(-5px); }

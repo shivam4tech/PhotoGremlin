@@ -99,8 +99,8 @@ interface RangeFilterRowProps {
   onToggle: () => void;
 }
 
-function RangeNumberInput({ label, value, min, max, disabled, onCommit }: {
-  label: string; value: number; min: number; max: number; disabled?: boolean;
+function RangeNumberInput({ label, value, min, max, step, disabled, onCommit }: {
+  label: string; value: number; min: number; max: number; step: number | "any"; disabled?: boolean;
   onCommit: (value: number) => void;
 }) {
   const [raw, setRaw] = useState(String(value));
@@ -112,7 +112,7 @@ function RangeNumberInput({ label, value, min, max, disabled, onCommit }: {
     onCommit(bounded);
     setRaw(String(value));
   }
-  return <input className="input" type="number" aria-label={label} min={min} max={max} value={raw}
+  return <input className="input" type="number" aria-label={label} min={min} max={max} step={step} value={raw}
     disabled={disabled} onChange={(event) => setRaw(event.target.value)} onBlur={commit}
     onKeyDown={(event) => {
       if (event.key === "Enter") event.currentTarget.blur();
@@ -155,8 +155,8 @@ function RangeFilterRow({
     lastCommitRef.current = JSON.stringify(condition ?? null);
   }, [initialLower, initialUpper, condition]);
 
-  const noRecordedValues = !stats || stats.recorded_count === 0;
-  const sliderDisabled = disabled || noRecordedValues || parsed.missingOnly || !parsed.editable;
+  const noRecordedValues = stats?.recorded_count === 0;
+  const sliderDisabled = disabled || !stats || noRecordedValues || parsed.missingOnly || !parsed.editable;
   const lowerPercent = lowerIndex / (spec.values.length - 1) * 100;
   const upperPercent = upperIndex / (spec.values.length - 1) * 100;
   const isFilteredRange = Boolean(condition && !parsed.missingOnly && parsed.editable);
@@ -212,8 +212,13 @@ function RangeFilterRow({
   }
 
   const availability = stats
-    ? `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
+    ? noRecordedValues
+      ? "Not recorded in this shoot"
+      : `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
     : statsReady ? "Values unavailable" : "Checking local values…";
+  const exactInputStep = spec.values.every((value, index) => index === 0 || value - spec.values[index - 1] === 1)
+    ? 1
+    : "any";
   const detailId = useId();
   return (
     <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
@@ -238,70 +243,74 @@ function RangeFilterRow({
       <div className={`range-filter-reveal${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
         <fieldset className="range-filter-detail" id={detailId} aria-label={`${spec.label} range`} disabled={!expanded || disabled}>
           <p className="range-filter-note">{availability}</p>
-          <div
-            className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}
-            data-field={spec.field}
-          >
-            <div className="range-track" aria-hidden="true">
-              <span className="range-track-base" />
-              <span className="range-track-selected" style={{ left: `${lowerPercent}%`, right: `${100 - upperPercent}%` }} />
-            </div>
-            {activeHandle && (
-              <output
-                className="range-value-bubble mono"
-                style={{ left: `clamp(24px, ${activeHandle === "lower" ? lowerPercent : upperPercent}%, calc(100% - 24px))` }}
+          {!noRecordedValues && (
+            <>
+              <div
+                className={`range-scrubber${isFilteredRange ? " is-filtered" : ""}${sliderDisabled ? " is-disabled" : ""}${lowerIndex === upperIndex ? " is-collapsed" : ""}`}
+                data-field={spec.field}
               >
-                {formatValue(spec.values[activeHandle === "lower" ? lowerIndex : upperIndex], spec.unit)}
-              </output>
-            )}
-            <input
-              className={`range-input range-input-lower${activeHandle === "lower" ? " is-active" : ""}`}
-              type="range"
-              min={0}
-              max={spec.values.length - 1}
-              value={lowerIndex}
-              disabled={sliderDisabled}
-              aria-label={`${spec.label} minimum`}
-              aria-valuetext={`Minimum ${formatValue(spec.values[lowerIndex], spec.unit)}`}
-              onChange={(event) => updateLower(Number(event.target.value))}
-              onPointerDown={() => setActiveHandle("lower")}
-              onPointerUp={finishInteraction}
-              onPointerCancel={finishInteraction}
-              onBlur={finishInteraction}
-              onKeyDown={(event) => beginKeyboardInteraction(event, "lower")}
-              onKeyUp={finishKeyboardInteraction}
-            />
-            <input
-              className={`range-input range-input-upper${activeHandle === "upper" ? " is-active" : ""}`}
-              type="range"
-              min={0}
-              max={spec.values.length - 1}
-              value={upperIndex}
-              disabled={sliderDisabled}
-              aria-label={`${spec.label} maximum`}
-              aria-valuetext={`Maximum ${formatValue(spec.values[upperIndex], spec.unit)}`}
-              onChange={(event) => updateUpper(Number(event.target.value))}
-              onPointerDown={() => setActiveHandle("upper")}
-              onPointerUp={finishInteraction}
-              onPointerCancel={finishInteraction}
-              onBlur={finishInteraction}
-              onKeyDown={(event) => beginKeyboardInteraction(event, "upper")}
-              onKeyUp={finishKeyboardInteraction}
-            />
-          </div>
+                <div className="range-track" aria-hidden="true">
+                  <span className="range-track-base" />
+                  <span className="range-track-selected" style={{ left: `${lowerPercent}%`, right: `${100 - upperPercent}%` }} />
+                </div>
+                {activeHandle && (
+                  <output
+                    className="range-value-bubble mono"
+                    style={{ left: `clamp(24px, ${activeHandle === "lower" ? lowerPercent : upperPercent}%, calc(100% - 24px))` }}
+                  >
+                    {formatValue(spec.values[activeHandle === "lower" ? lowerIndex : upperIndex], spec.unit)}
+                  </output>
+                )}
+                <input
+                  className={`range-input range-input-lower${activeHandle === "lower" ? " is-active" : ""}`}
+                  type="range"
+                  min={0}
+                  max={spec.values.length - 1}
+                  value={lowerIndex}
+                  disabled={sliderDisabled}
+                  aria-label={`${spec.label} minimum`}
+                  aria-valuetext={`Minimum ${formatValue(spec.values[lowerIndex], spec.unit)}`}
+                  onChange={(event) => updateLower(Number(event.target.value))}
+                  onPointerDown={() => setActiveHandle("lower")}
+                  onPointerUp={finishInteraction}
+                  onPointerCancel={finishInteraction}
+                  onBlur={finishInteraction}
+                  onKeyDown={(event) => beginKeyboardInteraction(event, "lower")}
+                  onKeyUp={finishKeyboardInteraction}
+                />
+                <input
+                  className={`range-input range-input-upper${activeHandle === "upper" ? " is-active" : ""}`}
+                  type="range"
+                  min={0}
+                  max={spec.values.length - 1}
+                  value={upperIndex}
+                  disabled={sliderDisabled}
+                  aria-label={`${spec.label} maximum`}
+                  aria-valuetext={`Maximum ${formatValue(spec.values[upperIndex], spec.unit)}`}
+                  onChange={(event) => updateUpper(Number(event.target.value))}
+                  onPointerDown={() => setActiveHandle("upper")}
+                  onPointerUp={finishInteraction}
+                  onPointerCancel={finishInteraction}
+                  onBlur={finishInteraction}
+                  onKeyDown={(event) => beginKeyboardInteraction(event, "upper")}
+                  onKeyUp={finishKeyboardInteraction}
+                />
+              </div>
 
-          <div className="range-numeric-values">
-            <label>Min <RangeNumberInput label={`${spec.label} minimum value`}
-              min={domainLower} max={spec.values[upperIndex]} value={spec.values[lowerIndex]}
-              disabled={sliderDisabled} onCommit={(value) => {
-                updateLower(nearestValueIndex(spec.values, value)); commitRange();
-              }} /></label>
-            <label>Max <RangeNumberInput label={`${spec.label} maximum value`}
-              min={spec.values[lowerIndex]} max={domainUpper} value={spec.values[upperIndex]}
-              disabled={sliderDisabled} onCommit={(value) => {
-                updateUpper(nearestValueIndex(spec.values, value)); commitRange();
-              }} /></label>
-          </div>
+              <div className="range-numeric-values">
+                <label>Min <RangeNumberInput label={`${spec.label} minimum value`}
+                  min={domainLower} max={spec.values[upperIndex]} step={exactInputStep} value={spec.values[lowerIndex]}
+                  disabled={sliderDisabled} onCommit={(value) => {
+                    updateLower(nearestValueIndex(spec.values, value)); commitRange();
+                  }} /></label>
+                <label>Max <RangeNumberInput label={`${spec.label} maximum value`}
+                  min={spec.values[lowerIndex]} max={domainUpper} step={exactInputStep} value={spec.values[upperIndex]}
+                  disabled={sliderDisabled} onCommit={(value) => {
+                    updateUpper(nearestValueIndex(spec.values, value)); commitRange();
+                  }} /></label>
+              </div>
+            </>
+          )}
 
           {!parsed.editable && !parsed.missingOnly && (
             <p className="range-filter-note">This custom condition remains unchanged. Use Search filters to add an exact condition.</p>
@@ -309,7 +318,7 @@ function RangeFilterRow({
           <div className="range-filter-actions">
             <button
               type="button"
-              className={parsed.missingOnly ? "is-active" : ""}
+              className={`range-filter-missing${parsed.missingOnly ? " is-active" : ""}`}
               disabled={disabled || !stats || stats.missing_count === 0}
               onClick={() => onChange(replaceFieldConditions(draft, spec.field, {
                 field: spec.field,
@@ -321,6 +330,7 @@ function RangeFilterRow({
             </button>
             <button
               type="button"
+              className="range-filter-reset"
               disabled={disabled || !condition}
               onClick={() => onChange(replaceFieldConditions(draft, spec.field, null))}
             >
@@ -337,7 +347,16 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId, fiel
   const headingId = useId();
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
-  const [expandedField, setExpandedField] = useState<string | null>(null);
+  const [expandedFields, setExpandedFields] = useState<Set<QuickRangeField>>(() => new Set());
+
+  function toggleExpandedField(field: QuickRangeField) {
+    setExpandedFields((current) => {
+      const next = new Set(current);
+      if (next.has(field)) next.delete(field);
+      else next.add(field);
+      return next;
+    });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -373,8 +392,8 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId, fiel
               return (
                 <RangeFilterRow
                   key={spec.field}
-                  expanded={expandedField === spec.field}
-                  onToggle={() => setExpandedField((current) => current === spec.field ? null : spec.field)}
+                  expanded={expandedFields.has(spec.field)}
+                  onToggle={() => toggleExpandedField(spec.field)}
                   spec={spec}
                   condition={condition}
                   stats={stats[spec.field]}

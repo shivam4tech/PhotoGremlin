@@ -397,13 +397,13 @@ export function FilterBar({ draft, onChange, disabled, sessionId = null, mode = 
       {expanded && (
         <div className="filterbar-panel">
           <div className="filter-discovery">
-            {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
             <FilterPicker draft={draft} disabled={disabled} onSelect={(choice) => {
               if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
               else if (choice.field === "palette_color") {
                 (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
               } else selectField(choice.field);
             }} />
+            {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
           </div>
           <div className={`more-filters${advancedOpen ? " is-open" : ""}`}>
             {advancedOpen && (

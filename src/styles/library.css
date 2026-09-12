@@ -89,20 +89,25 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .quick-filter-content { animation: none; }
 .quick-filter-note { padding: 8px 0; border: 0; background: transparent; font-size: 12px; }
 .range-filter-row:first-child { border-top: 0; }
-.range-filter-heading { min-height: 38px; padding: 8px 0; border-radius: var(--radius-sm); }
+.range-filter-heading { min-height: 42px; padding: 6px 0; border-radius: var(--radius-sm); }
 .range-filter-copy strong { font-size: 12px; font-weight: 500; }
 .range-filter-summary { font: 12px var(--font-ui); font-variant-numeric: tabular-nums; }
-.range-filter-reveal { display: grid; grid-template-rows: 0fr; visibility: hidden; opacity: 0; transition: grid-template-rows var(--motion-standard) var(--ease-out), opacity 160ms var(--ease-out), visibility 0s var(--motion-standard); }
-.range-filter-reveal.is-open { grid-template-rows: 1fr; visibility: visible; opacity: 1; transition-delay: 0s; }
+.range-filter-reveal { display: none; }
+.range-filter-reveal.is-open { display: block; }
 .range-filter-detail { min-height: 0; min-width: 0; overflow: hidden; margin: 0; padding: 0; border: 0; background: transparent; animation: none; }
 .range-filter-note { font-size: 12px; }
 .range-filter-actions { padding-bottom: 12px; }
 .range-filter-actions button { min-height: 32px; font-size: 12px; }
+.range-filter-actions .range-filter-reset { color: var(--text-tertiary); }
 .range-track-base { background: var(--border); }
-.range-track-selected { background: var(--accent); }
+.range-track-selected { background: transparent; }
+.range-scrubber.is-filtered .range-track-selected { background: var(--accent); }
 .range-numeric-values { display: flex; gap: 12px; }
 .range-numeric-values label { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; color: var(--text-tertiary); font-size: 12px; }
 .range-numeric-values input { width: 100%; min-width: 0; height: 32px; padding: 4px 6px; font-variant-numeric: tabular-nums; }
+.range-numeric-values input::-webkit-inner-spin-button,
+.range-numeric-values input::-webkit-outer-spin-button { margin: 0; appearance: none; }
+.range-numeric-values input[type="number"] { appearance: textfield; }
 .more-filters:not(.is-open) { display: none; }
 .filterbar-inspector .more-filters { border: 0; border-radius: 0; }
 .filterbar-inspector .more-filters-panel { padding: 0 0 12px; border: 0; border-bottom: 1px solid var(--border-subtle); animation: filter-popover-in 180ms var(--ease-out); }
