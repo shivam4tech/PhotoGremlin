@@ -118,6 +118,42 @@ export interface OpDef {
   label: string;
 }
 
+export type FilterControlType =
+  | "boolean"
+  | "enum"
+  | "range"
+  | "number"
+  | "rating"
+  | "color"
+  | "date"
+  | "text"
+  | "multi-select";
+
+export interface FilterValueOption {
+  value: string | number | boolean;
+  label: string;
+}
+
+/** UI-only metadata derived from the canonical field registry. It never
+ * changes or duplicates the filter engine's field/operator semantics. */
+export interface FilterPresentation {
+  field: string;
+  label: string;
+  category: string;
+  description: string;
+  controlType: FilterControlType;
+  operatorOptions: readonly OpDef[];
+  valueOptions?: readonly FilterValueOption[];
+  values?: readonly number[];
+  min?: number;
+  max?: number;
+  step?: number;
+  unit?: string;
+  defaultValue?: FilterCondition["value"];
+  supportsUnmeasured: boolean;
+  icon?: string;
+}
+
 export type QuickRangeField =
   | "brightness"
   | "sharpness"
@@ -271,9 +307,9 @@ export function quickRangeCondition(
   return { field, operator: "<=", value: upper };
 }
 
-/** Read both new range filters and legacy strict quick-filter conditions.
- * Strictness is preserved in the condition itself until the photographer
- * moves a handle, at which point the scrubber emits its inclusive model. */
+/** Read inclusive and legacy strict bounds without rewriting conditions.
+ * The presentation layer guards strict/out-of-stop conditions against edits
+ * through the inclusive scrubber; the exact composer supports every operator. */
 export function quickRangeBounds(
   condition: FilterCondition | undefined,
   domainLower: number,
@@ -321,7 +357,7 @@ export function replaceFieldConditions(
 
 const PALETTE_COLOR_IDS = new Set<string>(PALETTE_COLORS.map((color) => color.id));
 
-/** Read a saved palette condition defensively, preserving the wheel's order. */
+/** Read a saved palette condition defensively, preserving hue order. */
 export function selectedPaletteColors(conditions: FilterCondition[]): PaletteColorId[] {
   const condition = conditions.find((item) => item.field === "palette_color");
   if (condition?.operator !== "in" || !Array.isArray(condition.value)) return [];
@@ -404,15 +440,141 @@ export const OPS_BY_KIND: Record<FieldKind, OpDef[]> = {
   palette: [{ op: "in", label: "includes any" }],
 };
 
-const BOOL_PHRASES: Record<string, string> = {
-  monochrome: "monochrome",
-  color: "in color",
-  dark: "dark",
-  bright: "bright",
-  faces_present: "contains faces",
-  smiling: "smiling",
-  flagged: "flagged",
+const NATURAL_OPERATOR_LABELS: Partial<Record<FilterCondition["operator"], string>> = {
+  "=": "equal to",
+  "!=": "not equal to",
+  ">": "greater than",
+  ">=": "at least",
+  "<": "less than",
+  "<=": "at most",
+  between: "between",
+  in: "one of",
+  "is-null": "not recorded",
+  "not-null": "recorded",
 };
+
+const BOOLEAN_VALUE_OPTIONS: Record<string, readonly FilterValueOption[]> = {
+  monochrome: [
+    { value: true, label: "Black & white" },
+    { value: false, label: "Color" },
+  ],
+  color: [
+    { value: true, label: "Color detected" },
+    { value: false, label: "No color detected" },
+  ],
+  closed_eye_candidate: [
+    { value: true, label: "Closed-eye candidate" },
+    { value: false, label: "Not a closed-eye candidate" },
+  ],
+  possible_blink: [
+    { value: true, label: "Possible blink" },
+    { value: false, label: "No blink signal" },
+  ],
+  faces_present: [
+    { value: true, label: "Contains faces" },
+    { value: false, label: "No faces detected" },
+  ],
+  smiling: [
+    { value: true, label: "Smiling" },
+    { value: false, label: "Not smiling" },
+  ],
+  dark: [
+    { value: true, label: "Dark" },
+    { value: false, label: "Not dark" },
+  ],
+  bright: [
+    { value: true, label: "Bright" },
+    { value: false, label: "Not bright" },
+  ],
+  flagged: [
+    { value: true, label: "Flagged" },
+    { value: false, label: "Not flagged" },
+  ],
+};
+
+const RATING_OPERATOR_OPTIONS: readonly OpDef[] = [
+  { op: ">=", label: "At least" },
+  { op: "=", label: "Exactly" },
+  { op: "<=", label: "At most" },
+];
+
+const RATING_VALUE_OPTIONS: readonly FilterValueOption[] = [
+  { value: 0, label: "Unrated" },
+  { value: 1, label: "1 star" },
+  { value: 2, label: "2 stars" },
+  { value: 3, label: "3 stars" },
+  { value: 4, label: "4 stars" },
+  { value: 5, label: "5 stars" },
+];
+
+const QUICK_PRESENTATION: Partial<Record<QuickRangeField, Pick<FilterPresentation,
+  "description" | "values" | "min" | "max" | "step" | "unit" | "defaultValue" | "icon"
+>>> = {
+  brightness: { description: "Limit photos by measured brightness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "brightness" },
+  sharpness: { description: "Limit photos by measured edge sharpness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "sharpness" },
+  contrast: { description: "Limit photos by measured contrast.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "contrast" },
+  highlight_clipping: { description: "Limit photos by clipped highlight coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "highlight-clipping" },
+  shadow_clipping: { description: "Limit photos by clipped shadow coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "shadow-clipping" },
+  eye_closure_confidence: { description: "Limit photos by locally measured eye-closure confidence.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "closed-eye-candidate" },
+  iso: { description: "Limit photos by recorded ISO sensitivity.", values: STANDARD_FILTER_STOPS.iso, min: 25, max: 102400, defaultValue: [25, 102400], icon: "iso" },
+  focal_length: { description: "Limit photos by recorded focal length.", values: STANDARD_FILTER_STOPS.focal_length, min: 8, max: 1200, unit: " mm", defaultValue: [8, 1200], icon: "focal-length" },
+};
+
+export function filterPresentationCategory(area: string): string {
+  if (area.includes("local") || area === "Burst context") return "People & content";
+  if (["Camera & lens", "Exposure", "Time"].includes(area)) return "Camera & date";
+  if (["Marking", "Review"].includes(area)) return "Rating & review";
+  if (area === "Technical") return "Image properties";
+  return "Appearance";
+}
+
+function labelValue(value: string): string {
+  return value.replaceAll("_", " ").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+/** Adapt one engine-backed field for human-facing controls. */
+export function getFilterPresentation(field: string): FilterPresentation | null {
+  const definition = FIELD_BY_NAME[field];
+  if (!definition) return null;
+  const quick = QUICK_PRESENTATION[field as QuickRangeField];
+  const controlType: FilterControlType = field === "rating" ? "rating"
+    : definition.kind === "palette" ? "color"
+    : quick ? "range"
+    : definition.kind === "bool" ? "boolean"
+    : definition.values ? "enum"
+    : definition.kind === "datetime" ? "date"
+    : definition.kind === "real" || definition.kind === "int" ? "number"
+    : "text";
+  const engineOperators = OPS_BY_KIND[definition.kind];
+  const operatorOptions = field === "rating" ? RATING_OPERATOR_OPTIONS
+    : definition.kind === "bool" ? [{ op: "=" as const, label: "is" }]
+    : engineOperators.map((operator) => ({
+      ...operator,
+      label: definition.kind === "datetime" || definition.kind === "palette" ? operator.label
+        : NATURAL_OPERATOR_LABELS[operator.op] ?? operator.label,
+    }));
+  const valueOptions = definition.kind === "bool"
+    ? BOOLEAN_VALUE_OPTIONS[field] ?? [{ value: true, label: "Yes" }, { value: false, label: "No" }]
+    : field === "rating"
+      ? RATING_VALUE_OPTIONS
+    : definition.kind === "palette"
+      ? PALETTE_COLORS.map(({ id, label }) => ({ value: id, label }))
+      : definition.values?.map((value) => ({ value, label: labelValue(value) }));
+
+  return {
+    field,
+    label: definition.label,
+    category: filterPresentationCategory(definition.area),
+    description: quick?.description ?? `Filter photos by ${definition.label.toLowerCase()}.`,
+    controlType,
+    operatorOptions,
+    valueOptions,
+    supportsUnmeasured: engineOperators.some(({ op }) => op === "is-null"),
+    ...(definition.kind === "bool" ? { defaultValue: true } : {}),
+    ...(field === "rating" ? { min: 0, max: 5, step: 1, defaultValue: 1 } : {}),
+    ...quick,
+  };
+}
 
 const OP_SYMBOL: Record<string, string> = {
   "=": "=",
@@ -569,14 +731,47 @@ export function chipLabel(c: FilterCondition): string {
     return `${label.toLowerCase()} ${lo} → ${hiTxt}`;
   }
   if (def?.kind === "bool") {
-    const phrase = BOOL_PHRASES[c.field] ?? label.toLowerCase();
-    return c.operator === "!=" ? `not ${phrase}` : phrase;
+    const effectiveValue = c.operator === "!=" ? c.value === false : c.value !== false;
+    const valueLabel = (BOOLEAN_VALUE_OPTIONS[c.field]
+      ?? [{ value: true, label: "Yes" }, { value: false, label: "No" }])
+      .find((option) => option.value === effectiveValue)?.label;
+    return valueLabel ?? `${label}: ${effectiveValue ? "Yes" : "No"}`;
   }
   return `${label.toLowerCase()} ${OP_SYMBOL[c.operator] ?? c.operator} ${String(c.value)}`;
 }
 
 export function draftToFilter(conditions: FilterCondition[]): Filter {
   return { operator: "AND", conditions };
+}
+
+/**
+ * Serializes the visible Library filter with its project-session boundary.
+ * Keeping this in one pure helper ensures the applied grid and Advanced
+ * draft preview can never disagree about which project is in scope.
+ */
+export function serializeLibraryFilter(
+  conditions: FilterCondition[],
+  sessionId: number | null,
+  hasActiveFolder: boolean,
+): string {
+  const base = draftToFilter(conditions);
+  // A newly opened folder has no session until its first scan completes.
+  // Match nothing during that interval instead of showing another project's
+  // photos from the shared local catalog.
+  if (sessionId === null && hasActiveFolder) {
+    return JSON.stringify({
+      operator: "AND",
+      conditions: [{ field: "session_id", operator: "=", value: -1 }],
+    });
+  }
+  if (sessionId === null) return JSON.stringify(base);
+  return JSON.stringify({
+    ...base,
+    conditions: [
+      ...base.conditions,
+      { field: "session_id", operator: "=", value: sessionId },
+    ],
+  });
 }
 
 export function filterToDraft(filter: Filter): FilterCondition[] {

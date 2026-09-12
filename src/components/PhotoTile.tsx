@@ -92,7 +92,7 @@ export function PhotoTile({
           if (!selectionMode) onOpen(photo.id);
         }}
         disabled={selectionMode}
-        title={photo.filename}
+        title={`${photo.filename} · ${dims}`}
       >
         {state.kind === "loading" && <div className="tile-skeleton" aria-label="Generating preview" />}
         {state.kind === "ok" && (
@@ -130,6 +130,7 @@ export function PhotoTile({
             className={`tile-sel-btn${selection === "selected" ? " is-on" : ""}`}
             title="Keep (select)"
             aria-label="Keep"
+            aria-pressed={selection === "selected"}
             onClick={() => (selection === "selected" ? onClear?.(photo.id) : onKeep?.(photo.id))}
           >
             ✓
@@ -138,6 +139,7 @@ export function PhotoTile({
             className={`tile-sel-btn tile-sel-reject${selection === "rejected" ? " is-on" : ""}`}
             title="Reject"
             aria-label="Reject"
+            aria-pressed={selection === "rejected"}
             onClick={() => (selection === "rejected" ? onClear?.(photo.id) : onReject?.(photo.id))}
           >
             ✕

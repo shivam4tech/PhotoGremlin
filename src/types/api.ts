@@ -425,11 +425,21 @@ export interface PhotoFull {
 
 export type ThumbKind = "grid" | "viewer";
 
+export interface PhotoHistogram {
+  source: "rendered_preview";
+  pixel_count: number;
+  luma: number[];
+  red: number[];
+  green: number[];
+  blue: number[];
+}
+
 export interface ThumbData {
   data_url: string;
   width: number;
   height: number;
   from_cache: boolean;
+  histogram: PhotoHistogram | null;
 }
 
 /** Payload of the `analysis-complete` event: exactly one field set. */

@@ -7,7 +7,9 @@ import {
   buildCondition,
   chipLabel,
   draftToFilter,
+  serializeLibraryFilter,
   endOfDay,
+  getFilterPresentation,
   quickRangeBounds,
   quickRangeCondition,
   QUICK_FILTER_PRESETS,
@@ -20,6 +22,7 @@ import {
   STANDARD_FILTER_STOPS,
 } from "@/features/library/filterFields";
 import { ADVANCED_FILTER_FIELDS } from "@/features/library/FilterBar";
+import type { FilterCondition } from "@/types/api";
 
 describe("filter registry", () => {
   it("keeps measured quick ranges out of the advanced composer", () => {
@@ -80,6 +83,50 @@ describe("filter registry", () => {
     }
   });
 
+  it("derives human-facing controls without changing the engine registry", () => {
+    const sharpness = getFilterPresentation("sharpness")!;
+    expect(sharpness).toMatchObject({
+      label: FIELD_BY_NAME.sharpness.label,
+      category: "Image properties",
+      controlType: "range",
+      min: 0,
+      max: 100,
+      step: 1,
+      defaultValue: [0, 100],
+      supportsUnmeasured: true,
+      icon: "sharpness",
+    });
+    expect(sharpness.operatorOptions.find(({ op }) => op === ">=")?.label).toBe("at least");
+    expect(getFilterPresentation("monochrome")).toMatchObject({
+      controlType: "boolean",
+      defaultValue: true,
+      operatorOptions: [{ op: "=", label: "is" }],
+      valueOptions: [{ value: true, label: "Black & white" }, { value: false, label: "Color" }],
+    });
+    expect(getFilterPresentation("faces_present")?.valueOptions).toEqual([
+      { value: true, label: "Contains faces" },
+      { value: false, label: "No faces detected" },
+    ]);
+    expect(getFilterPresentation("rating")).toMatchObject({
+      controlType: "rating",
+      defaultValue: 1,
+      operatorOptions: [
+        { op: ">=", label: "At least" },
+        { op: "=", label: "Exactly" },
+        { op: "<=", label: "At most" },
+      ],
+    });
+    expect(getFilterPresentation("orientation")).toMatchObject({
+      controlType: "enum",
+      valueOptions: [
+        { value: "landscape", label: "Landscape" },
+        { value: "portrait", label: "Portrait" },
+        { value: "square", label: "Square" },
+      ],
+    });
+    expect(getFilterPresentation("missing-field")).toBeNull();
+  });
+
   it("orientation is a fixed value set", () => {
     expect(FIELD_BY_NAME.orientation.values).toEqual(["landscape", "portrait", "square"]);
   });
@@ -92,7 +139,7 @@ describe("filter registry", () => {
     expect(c).toEqual({ field: "color_label", operator: "=", value: "green" });
     expect(buildCondition("color_label", "=", "mauve", "")).toBeNull();
     expect(chipLabel(buildCondition("rating", "is-null", "", "")!)).toBe("rating: not recorded");
-    expect(chipLabel(buildCondition("flagged", "=", "true", "")!)).toBe("flagged");
+    expect(chipLabel(buildCondition("flagged", "=", "true", "")!)).toBe("Flagged");
   });
 });
 
@@ -214,14 +261,15 @@ describe("chipLabel", () => {
   });
 
   it("phrases booleans as properties, not verdicts", () => {
-    expect(chipLabel({ field: "monochrome", operator: "=", value: true })).toBe("monochrome");
+    expect(chipLabel({ field: "monochrome", operator: "=", value: true })).toBe("Black & white");
     expect(chipLabel({ field: "faces_present", operator: "=", value: true })).toBe(
-      "contains faces",
+      "Contains faces",
     );
     expect(chipLabel({ field: "possible_blink", operator: "=", value: true })).toBe(
-      "possible blink",
+      "Possible blink",
     );
-    expect(chipLabel({ field: "color", operator: "!=", value: false })).toBe("not in color");
+    expect(chipLabel({ field: "color", operator: "!=", value: false })).toBe("Color detected");
+    expect(chipLabel({ field: "color", operator: "=", value: false })).toBe("No color detected");
   });
 
   it("shows date ranges without the hidden end-of-day", () => {
@@ -375,5 +423,23 @@ describe("draftToFilter", () => {
     expect(j).toBe(
       '{"operator":"AND","conditions":[{"field":"sharpness","operator":">=","value":70},{"field":"orientation","operator":"=","value":"portrait"}]}',
     );
+  });
+});
+
+describe("serializeLibraryFilter", () => {
+  it("adds the active project session without changing the draft", () => {
+    const draft: FilterCondition[] = [{ field: "rating", operator: ">=", value: 4 }];
+    expect(JSON.parse(serializeLibraryFilter(draft, 9, true))).toEqual({
+      operator: "AND",
+      conditions: [...draft, { field: "session_id", operator: "=", value: 9 }],
+    });
+    expect(draft).toEqual([{ field: "rating", operator: ">=", value: 4 }]);
+  });
+
+  it("matches nothing while an opened project is waiting for its first session", () => {
+    expect(JSON.parse(serializeLibraryFilter([], null, true))).toEqual({
+      operator: "AND",
+      conditions: [{ field: "session_id", operator: "=", value: -1 }],
+    });
   });
 });

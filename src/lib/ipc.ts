@@ -110,8 +110,12 @@ export const api = {
     invoke("numeric_filter_stats", { field, sessionId }),
   getPhotoFull: (id: number): Promise<PhotoFull> =>
     invoke("get_photo_full", { id }),
-  getThumbnail: (photoId: number, kind: ThumbKind): Promise<ThumbData> =>
-    invoke("get_thumbnail", { photoId, kind }),
+  getThumbnail: (
+    photoId: number,
+    kind: ThumbKind,
+    options?: { includeHistogram?: boolean },
+  ): Promise<ThumbData> =>
+    invoke("get_thumbnail", { photoId, kind, includeHistogram: options?.includeHistogram ?? false }),
   reviewQueue: (sessionId: number): Promise<ReviewQueue> =>
     invoke("review_queue", { sessionId }),
   getReviewProgress: (sessionId: number): Promise<ReviewProgress | null> =>

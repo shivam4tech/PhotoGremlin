@@ -44,10 +44,11 @@ pub async fn get_thumbnail(
     state: State<'_, AppState>,
     photo_id: i64,
     kind: String,
+    include_histogram: bool,
 ) -> AppResult<ThumbData> {
     let kind = parse_kind(kind)?;
     let thumb = state.thumb.clone();
     let db = state.db()?;
     drop(state);
-    thumb.get(&db, photo_id, kind).await
+    thumb.get(&db, photo_id, kind, include_histogram).await
 }
