@@ -46,8 +46,9 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   per app holds: the cache dir, a generation semaphore
   (`THUMB_GENERATE_CONCURRENCY = 3` full-res decodes at most), and an
   in-flight dedup map (waiters poll the cache file with a 10 s bounded
-  deadline instead of decoding twice). `get(db, photo_id, kind)` = photo row
-  lookup → previewable-format check (HEIC returns a friendly unsupported
+  deadline instead of decoding twice). `get(db, photo_id, kind,
+  include_histogram)` = photo row lookup → previewable-format check (HEIC
+  returns a friendly unsupported
   error; RAW uses the local preview ladder) → missing-file check →
   cache hit? → else `spawn_blocking` generation: header-only
   `image_dimensions` check (≤ ~500 MP guard) → `resize_exact` (triangle
@@ -57,6 +58,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   `path|size|mtime|width|THUMB_VERSION` (std's `DefaultHasher` is randomly
   seeded and must not be used for cache keys); version bump invalidates all.
   Base64 is a ~40-line local impl (round-trip tested), not a dependency.
+  Viewer callers may explicitly request a `PhotoHistogram`; after the cache
+  or generation path resolves, Rust decodes the exact q82 JPEG bytes returned
+  in the same response and counts 256 luma/R/G/B bins in a bounded
+  `spawn_blocking` task. Grid and contact-sheet kinds ignore the opt-in, and
+  histogram data is not persisted.
   RAW files take a different branch inside generation: `decode.rs` tries a
   paired JPEG, embedded preview, embedded thumbnail, then a preflight-capped
   develop through rawler — see RAW_PREVIEWS.md. Sprint 27 adds a configurable
@@ -64,7 +70,8 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   64 writes, cache status, and an explicit clear action. Maintenance runs via
   `spawn_blocking` and only touches generated `.jpg`/`.part` files.
 - `commands/photos.rs` — `list_photos` (paginated grid), `get_photo_full`
-  (viewer metadata), `get_thumbnail` (async; clones the state Arcs and drops
+  (viewer metadata), `get_thumbnail` (async, with an explicit optional
+  viewer-histogram flag; clones the state Arcs and drops
   the `State` guard before awaiting — Tauri command futures must be `Send`).
 - `commands/review.rs` — `review_queue(sessionId)` returns lightweight,
   capture-time-ordered photo rows together with existing local burst/similar
@@ -81,6 +88,11 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   Once every indexed photograph has a decision, the surface exposes an
   explicit finish state with factual totals, a return-to-kept-set action, and
   the optional local editor handoff described in `EDITOR_HANDOFF.md`.
+- `components/PhotoHistogram.tsx` — shared focused-photo histogram for the
+  single-photo viewer and Shoot Review. It defaults to luma, offers a
+  persistent-per-mounted-surface RGB toggle, and draws unsmoothed SVG area
+  paths with linear scaling. Its “Rendered preview” label distinguishes the
+  displayed JPEG measurement from sensor RAW or a develop-pipeline histogram.
 - `features/review/ReviewCompareDialog.tsx` (Sprint 29) — on-demand comparison
   for a capture-order window of at most four frames. It requests only local
   viewer thumbnails, applies one shared zoom level, and maps scroll positions
@@ -325,8 +337,9 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   filter — the unfiltered grid is the empty filter); each tile requests
   exactly one grid-size thumbnail (`components/PhotoTile.tsx`). The UI must
   never request full-resolution images for the grid. The viewer
-  (`features/viewer/Viewer.tsx`) loads a viewer-size thumbnail +
-  `get_photo_full` for the metadata panel; ←/→ move within the loaded page,
+  (`features/viewer/Viewer.tsx`) loads a viewer-size thumbnail with its
+  optional rendered-preview histogram plus `get_photo_full` for the metadata
+  panel; ←/→ move within the loaded page,
   Esc closes.
  - Filtering (Sprint 5, hoisted to the store in Sprint 8): the active filter is
    **structured data** held in `stores/appStore.ts` (`filterConditions:

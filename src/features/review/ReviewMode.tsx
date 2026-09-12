@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { PhotoHistogram, type HistogramMode } from "@/components/PhotoHistogram";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { useAppStore, type SelectionState } from "@/stores/appStore";
 import { ReviewCompareDialog } from "@/features/review/ReviewCompareDialog";
@@ -8,24 +9,17 @@ import {
   firstUnreviewedId,
   reviewCounts,
 } from "@/features/review/reviewQueue";
-import type { EditorConfig, PhotoFull, PhotoSummary, ReviewQueue } from "@/types/api";
+import type { EditorConfig, PhotoFull, PhotoHistogram as PhotoHistogramData, PhotoSummary, ReviewQueue } from "@/types/api";
 
-type ImageState = { kind: "loading" } | { kind: "ready"; url: string } | { kind: "unavailable"; message: string };
+type ImageState =
+  | { kind: "loading" }
+  | { kind: "ready"; photoId: number; url: string; histogram: PhotoHistogramData | null }
+  | { kind: "unavailable"; photoId: number; message: string };
 type LastAction = { photoId: number; previous: SelectionState | null; unitIndex: number };
 
-function ReviewImage({ photo }: { photo: PhotoSummary }) {
-  const [image, setImage] = useState<ImageState>({ kind: "loading" });
-  useEffect(() => {
-    let cancelled = false;
-    setImage({ kind: "loading" });
-    api.getThumbnail(photo.id, "viewer")
-      .then((thumbnail) => { if (!cancelled) setImage({ kind: "ready", url: thumbnail.data_url }); })
-      .catch((error) => { if (!cancelled) setImage({ kind: "unavailable", message: toErrorMessage(error) }); });
-    return () => { cancelled = true; };
-  }, [photo.id]);
-
-  if (image.kind === "ready") return <img className="review-image" src={image.url} alt={photo.filename} />;
-  if (image.kind === "unavailable") return <div className="review-image-placeholder">Preview unavailable<br /><span>{image.message}</span></div>;
+function ReviewImage({ photo, image }: { photo: PhotoSummary; image: ImageState }) {
+  if (image.kind === "ready" && image.photoId === photo.id) return <img className="review-image" src={image.url} alt={photo.filename} />;
+  if (image.kind === "unavailable" && image.photoId === photo.id) return <div className="review-image-placeholder">Preview unavailable<br /><span>{image.message}</span></div>;
   return <div className="review-image-placeholder">Loading local preview…</div>;
 }
 
@@ -75,6 +69,8 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
   const [unitIndex, setUnitIndex] = useState(0);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [full, setFull] = useState<PhotoFull | null>(null);
+  const [image, setImage] = useState<ImageState>({ kind: "loading" });
+  const [histogramMode, setHistogramMode] = useState<HistogramMode>("luma");
   const [lastAction, setLastAction] = useState<LastAction | null>(null);
   const [finishDismissed, setFinishDismissed] = useState(false);
   const [editor, setEditor] = useState<EditorConfig | null>(null);
@@ -134,8 +130,21 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
   useEffect(() => {
     let cancelled = false;
     setFull(null);
+    setImage({ kind: "loading" });
     if (focusedId === null) return;
     api.getPhotoFull(focusedId).then((photo) => { if (!cancelled) setFull(photo); }).catch(() => {});
+    api.getThumbnail(focusedId, "viewer", { includeHistogram: true })
+      .then((thumbnail) => {
+        if (!cancelled) setImage({
+          kind: "ready",
+          photoId: focusedId,
+          url: thumbnail.data_url,
+          histogram: thumbnail.histogram,
+        });
+      })
+      .catch((error) => {
+        if (!cancelled) setImage({ kind: "unavailable", photoId: focusedId, message: toErrorMessage(error) });
+      });
     return () => { cancelled = true; };
   }, [focusedId]);
 
@@ -295,9 +304,17 @@ export function ReviewMode({ sessionId, sessionName, onClose }: { sessionId: num
       </header>
 
       <main className="review-stage">
-        <div className="review-photo-wrap"><ReviewImage photo={currentPhoto} /></div>
+        <div className="review-photo-wrap"><ReviewImage photo={currentPhoto} image={image} /></div>
         <aside className="review-details">
           <div className="mono review-filename">{currentPhoto.filename}</div>
+          {image.kind === "ready" && image.photoId === currentPhoto.id && image.histogram && (
+            <PhotoHistogram
+              histogram={image.histogram}
+              mode={histogramMode}
+              onModeChange={setHistogramMode}
+              className="review-photo-histogram"
+            />
+          )}
           <p className="faint">{measurement ?? "No local measurements yet — decide from the photograph."}</p>
           {full?.capture_datetime && <p className="faint">Captured {new Date(full.capture_datetime).toLocaleString()}</p>}
           <div className="review-actions">

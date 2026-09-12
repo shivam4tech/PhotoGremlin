@@ -45,13 +45,13 @@ async fn dng_previews_and_garbage_raw_keeps_placeholder() {
     let svc = ThumbService::new(root.join("cache"));
 
     // A decodable DNG produces a real preview.
-    let dng: ThumbData = svc.get(&db, dng_id, ThumbKind::Grid).await.unwrap();
+    let dng: ThumbData = svc.get(&db, dng_id, ThumbKind::Grid, false).await.unwrap();
     assert!(!dng.data_url.is_empty());
     assert!(dng.width > 0 && dng.height > 0);
 
     // An undecodable raw degrades to the placeholder error (same contract
     // as HEIC tiles), and must NOT leave a corrupt cache entry behind.
-    let err = svc.get(&db, cr2_id, ThumbKind::Grid).await.unwrap_err().to_string();
+    let err = svc.get(&db, cr2_id, ThumbKind::Grid, false).await.unwrap_err().to_string();
     assert!(err.contains("Unsupported"), "got: {err}");
     let cache_files = std::fs::read_dir(&svc.cache_dir())
         .unwrap()

@@ -81,7 +81,15 @@ pub fn export_contact_sheet(
                 if cancel_task.load(Ordering::Relaxed) {
                     return Ok((Vec::new(), true));
                 }
-                match thumb.get(&db, photo_ids[i], crate::thumbnailer::ThumbKind::Sheet).await {
+                match thumb
+                    .get(
+                        &db,
+                        photo_ids[i],
+                        crate::thumbnailer::ThumbKind::Sheet,
+                        false,
+                    )
+                    .await
+                {
                     Ok(t) => {
                         if let Some(bytes) = crate::thumbnailer::b64_decode(
                             t.data_url.trim_start_matches("data:image/jpeg;base64,"),

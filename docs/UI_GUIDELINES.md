@@ -76,6 +76,13 @@ its own graphite/silver tokens, language, and local-first controls.
 - Analysis diagnostics such as sharpness and eye-closure confidence never sit
   on normal photo cards. They remain available in the filter inspector and
   detail surfaces, where their meaning and context can be read deliberately.
+- Histograms belong only beside a focused photograph in the single-photo
+  viewer and Shoot Review, where they can inform an immediate exposure/channel
+  inspection. They do not appear in the Library filter rail, grid tiles, bulk
+  culling, or Review Compare: those placements add decode work and visual
+  authority without enough decision context. The histogram defaults to luma,
+  offers an RGB toggle, and says “Rendered preview” because it measures the
+  exact local JPEG shown rather than sensor RAW or developed source values.
 - Rating stars are cumulative: a rating of four illuminates stars one through
   four. The inspector rating control is a minimum threshold (`1+` through
   `5+`), plus Any and Unrated.
