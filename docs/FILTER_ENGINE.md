@@ -110,6 +110,8 @@ no matching measured hue until analysis completes.
 ### Quick filters (Sprints 32–34)
 
 The Library inspector places one-click presets above the measured controls.
+They are presented as a compact two-column grid with borderless rows; checked
+state and the selected background communicate activation without table lines.
 Sprint 33 adds **Potentially soft** (`sharpness < 40`), **Highlight clipping**
 and **Shadow clipping** (each ≥ 5%), and **Closed-eye candidate** to the
 existing color, brightness, orientation and face-presence shortcuts. They are

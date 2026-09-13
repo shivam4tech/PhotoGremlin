@@ -113,7 +113,7 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 ### Known gaps that must not be mistaken for completion
 
 - [x] Simple numeric rows use a compact collapsed rhythm and disclose exact controls only on demand.
-- [x] Quick filters are lightweight in Simple and use a compact two-column layout in Advanced where space permits.
+- [x] Quick filters use a compact, borderless two-column grid in Simple and Advanced where space permits.
 - [x] Search discovers filters and routes selections into the Advanced add/edit composer.
 - [x] The Advanced `Add filter` state model is explicit, duplicate-safe, and wired through the picker/editor workflow.
 - [x] Shared presentation labels and registry-derived typed editors replace raw boolean/operator values in Advanced.
