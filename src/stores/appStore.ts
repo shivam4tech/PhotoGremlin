@@ -77,9 +77,8 @@ interface AppState {
   /** Similar + burst groups (null = not loaded yet). */
   similarityGroups: SimilarityGroup[] | null;
   /**
-   * Local intelligence (Sprint 9): the stored preference. AI is off by
-   * default; when on, face detection auto-runs after each scan (and the
-   * user can always run it on demand from Settings).
+   * Local intelligence (Sprint 9): the stored preference. Face and eye-state
+   * analysis is on by default; an explicit opt-out is persisted.
    */
   aiEnabled: boolean;
   /** ai_status result (null = not loaded yet). */
@@ -157,8 +156,8 @@ interface AppState {
   loadSimilarityGroups: () => Promise<void>;
 
   loadAiStatus: () => Promise<void>;
-  /** Persist the AI on/off preference (fire-and-forget, optimistic). */
-  setAiEnabled: (b: boolean) => void;
+  /** Persist the AI on/off preference, reverting the optimistic value on error. */
+  setAiEnabled: (b: boolean) => Promise<void>;
   setDetectingFaces: (b: boolean) => void;
   setFacesProgress: (p: ProgressPayload | null) => void;
   setFacesSummary: (s: FaceSummary | null) => void;
@@ -208,7 +207,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   similarityProgress: null,
   similaritySummary: null,
   similarityGroups: null,
-  aiEnabled: false,
+  aiEnabled: true,
   aiStatus: null,
   detectingFaces: false,
   facesProgress: null,
@@ -427,10 +426,15 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  setAiEnabled: (aiEnabled) => {
+  setAiEnabled: async (aiEnabled) => {
+    const previous = get().aiEnabled;
     set({ aiEnabled });
-    const err = (m: string) => set({ error: m, aiEnabled: !aiEnabled });
-    api.setAiEnabled(aiEnabled).catch((e) => err(toErrorMessage(e)));
+    try {
+      await api.setAiEnabled(aiEnabled);
+    } catch (e) {
+      set({ error: toErrorMessage(e), aiEnabled: previous });
+      throw e;
+    }
   },
 
   setDetectingFaces: (detectingFaces) => set({ detectingFaces }),

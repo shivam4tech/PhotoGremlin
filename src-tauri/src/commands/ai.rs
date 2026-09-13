@@ -1,7 +1,7 @@
 //! Local-AI commands (Sprint 9): status, the on/off preference, and
 //! start/stop of the background face-detection pass.
 //!
-//! Core rules: the app is fully useful with AI off (default); the pass runs
+//! Core rules: the app is fully useful with AI off; the pass runs
 //! like the similarity pass (one slot, cooperative cancel, progress events);
 //! a missing ONNX Runtime is a status, never an error state of the app.
 
@@ -20,11 +20,20 @@ use crate::state::{AppState, Job};
 /// The shipped local model, reported as-is for transparency.
 const MODEL_NAME: &str = "YuNet 2023mar (OpenCV Zoo, Apache-2.0)";
 const EYE_MODEL_NAME: &str = "OCEC-S eye state (PINTO0309, MIT)";
+const DEFAULT_AI_ENABLED: bool = true;
+
+fn ai_enabled_from_setting(value: Option<&str>) -> bool {
+    match value {
+        Some("true") => true,
+        Some("false") => false,
+        _ => DEFAULT_AI_ENABLED,
+    }
+}
 
 /// One row of the Settings "Local intelligence" card.
 #[derive(Debug, serde::Serialize)]
 pub struct AiStatus {
-    /// The stored preference (`ai_enabled`); AI is off by default.
+    /// The stored preference (`ai_enabled`); AI is on by default.
     pub enabled: bool,
     /// `true` when the ONNX Runtime library loaded on this machine.
     pub runtime_available: bool,
@@ -47,13 +56,8 @@ pub struct AiStatus {
 /// Local-AI status (cheap; called when Settings opens and after runs).
 #[tauri::command]
 pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
-    let enabled: bool = state
-        .settings_db
-        .get_setting("ai_enabled")
-        .ok()
-        .flatten()
-        .as_deref()
-        == Some("true");
+    let stored_preference = state.settings_db.get_setting("ai_enabled")?;
+    let enabled = ai_enabled_from_setting(stored_preference.as_deref());
     let runtime = ml::runtime_status();
     let runtime_available = runtime.is_ok();
     let runtime_note = runtime.err();
@@ -75,14 +79,24 @@ pub fn ai_status(state: State<'_, AppState>) -> AppResult<AiStatus> {
     })
 }
 
-/// Persist the AI on/off preference. Turning it on does NOT start anything —
-/// the UI starts the pass (and it auto-starts after a scan) so the user sees
-/// progress; the preference alone only gates future auto-runs.
+/// Persist the AI on/off preference. The UI drains pending work after turning
+/// it on; turning it off also cooperatively stops an in-flight face/eye pass.
 #[tauri::command]
 pub fn set_ai_enabled(state: State<'_, AppState>, enabled: bool) -> AppResult<()> {
     state
         .settings_db
-        .set_setting("ai_enabled", if enabled { "true" } else { "false" })
+        .set_setting("ai_enabled", if enabled { "true" } else { "false" })?;
+
+    if !enabled {
+        let slot = state
+            .faces
+            .lock()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        if let Some(job) = slot.as_ref() {
+            job.cancel.store(true, Ordering::Relaxed);
+        }
+    }
+    Ok(())
 }
 
 /// Payload for the `faces-complete` event: exactly one is set.
@@ -96,6 +110,13 @@ pub struct FaceCompletePayload {
 /// a face run is already in flight.
 #[tauri::command]
 pub async fn start_faces(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
+    let stored_preference = state.settings_db.get_setting("ai_enabled")?;
+    if !ai_enabled_from_setting(stored_preference.as_deref()) {
+        return Err(AppError::operation(
+            "Local intelligence is turned off. Turn it on in Settings before analyzing faces and eye state.",
+        ));
+    }
+
     let job = {
         let mut slot = state
             .faces
@@ -178,6 +199,22 @@ pub fn stop_faces(state: State<'_, AppState>) -> AppResult<bool> {
         }
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod preference_tests {
+    use super::ai_enabled_from_setting;
+
+    #[test]
+    fn local_intelligence_defaults_on_without_a_stored_preference() {
+        assert!(ai_enabled_from_setting(None));
+        assert!(ai_enabled_from_setting(Some("true")));
+    }
+
+    #[test]
+    fn an_explicit_opt_out_stays_off() {
+        assert!(!ai_enabled_from_setting(Some("false")));
+    }
 }
 
 /// Payload for the `scenes-complete` event: exactly one is set.

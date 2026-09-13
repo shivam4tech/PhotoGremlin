@@ -34,7 +34,7 @@ describe("filter registry", () => {
     expect(advanced.has("camera_model")).toBe(true);
     expect(advanced.has("palette_color")).toBe(false);
   });
-  it("mirrors the Rust field registry (names + kinds)", () => {
+  it("exposes the supported user-facing filter registry", () => {
     const expectField = (field: string, kind: string, area: string) => {
       const def = FIELD_BY_NAME[field];
       expect(def, `missing field ${field}`).toBeDefined();
@@ -62,8 +62,10 @@ describe("filter registry", () => {
     expectField("shutter_speed", "real", "Exposure");
     expectField("focal_length", "real", "Exposure");
     expectField("capture_datetime", "datetime", "Time");
-    expectField("faces_present", "bool", "Faces & smiles (local models)");
-    expectField("smiling", "bool", "Faces & smiles (local models)");
+    expectField("faces_present", "bool", "Faces & eyes (local models)");
+    // smile_count is reserved in storage for a future local model. Do not
+    // offer a filter that cannot currently produce results.
+    expect(FIELD_BY_NAME.smiling).toBeUndefined();
     expectField("rating", "int", "Marking");
     expectField("flagged", "bool", "Marking");
     expectField("color_label", "text", "Marking");

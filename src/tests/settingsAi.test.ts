@@ -4,6 +4,7 @@ import {
   formatFacesProgressLine,
   formatEyesProgressLine,
   formatFaceSummaryLine,
+  hasPendingFaceAnalysis,
   runtimeLine,
 } from "@/features/settings/ai";
 import type { AiStatus, FaceSummary } from "@/types/api";
@@ -41,6 +42,15 @@ describe("formatModelSize", () => {
     expect(formatModelSize(232 * 1024)).toBe("232 KB");
     expect(formatModelSize(1500)).toBe("1.5 KB");
     expect(formatModelSize(5 * 1024 * 1024)).toBe("5.0 MB");
+  });
+});
+
+describe("hasPendingFaceAnalysis", () => {
+  it("starts only when local intelligence is enabled, available, and incomplete", () => {
+    expect(hasPendingFaceAnalysis({ ...baseStatus, enabled: true, photo_count: 3 })).toBe(true);
+    expect(hasPendingFaceAnalysis({ ...baseStatus, enabled: false, photo_count: 3 })).toBe(false);
+    expect(hasPendingFaceAnalysis({ ...baseStatus, enabled: true, runtime_available: false, photo_count: 3 })).toBe(false);
+    expect(hasPendingFaceAnalysis({ ...baseStatus, enabled: true, photo_count: 3, faces_done: 3, eyes_done: 3 })).toBe(false);
   });
 });
 

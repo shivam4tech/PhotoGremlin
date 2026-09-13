@@ -15,7 +15,11 @@ import type {
   ScanCompletePayload,
   SimilarityCompletePayload,
 } from "@/types/api";
-import { formatFaceSummaryLine, formatSceneSummaryLine } from "@/features/settings/ai";
+import {
+  formatFaceSummaryLine,
+  formatSceneSummaryLine,
+  hasPendingFaceAnalysis,
+} from "@/features/settings/ai";
 import { isTypingTarget, shortcutFor } from "@/features/shortcuts";
 import { LibraryView } from "@/views/LibraryView";
 import { DashboardView } from "@/views/DashboardView";
@@ -37,6 +41,38 @@ function reportClientError(source: string, value: unknown) {
 
 function debugCompletion(kind: string, payload: unknown) {
   console.debug(`[PhotoGremlin] ${kind} complete`, payload);
+}
+
+/**
+ * Drain the incremental face/eye queue when local intelligence is enabled.
+ * Reading status immediately before the decision makes a persisted opt-out
+ * authoritative and picks up photographs added by a just-finished scan.
+ */
+async function startPendingFaceAnalysis() {
+  const initial = useAppStore.getState();
+  if (initial.scanning || initial.detectingFaces) return;
+
+  await initial.loadAiStatus();
+  const current = useAppStore.getState();
+  if (
+    current.scanning
+    || current.detectingFaces
+    || !current.aiStatus
+    || !hasPendingFaceAnalysis(current.aiStatus)
+  ) {
+    return;
+  }
+
+  current.setDetectingFaces(true);
+  current.setFacesProgress({ total: 0, done: 0, stage: "detecting faces", current: null });
+  try {
+    await api.startFaces();
+  } catch (error) {
+    const latest = useAppStore.getState();
+    latest.setDetectingFaces(false);
+    latest.setFacesProgress(null);
+    latest.setError(toErrorMessage(error));
+  }
 }
 
 function useClientErrorLogging() {
@@ -115,7 +151,7 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { setAppInfo, setPaths, setError, refreshStatus } = useAppStore.getState();
+      const { setAppInfo, setPaths, setError, refreshStatus, loadAiStatus } = useAppStore.getState();
       try {
         const [info, paths] = await Promise.all([api.appInfo(), api.appPaths()]);
         if (cancelled) return;
@@ -125,10 +161,25 @@ export default function App() {
         if (!cancelled) setError(toErrorMessage(e));
         return;
       }
-      await refreshStatus();
+      await Promise.all([refreshStatus(), loadAiStatus()]);
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // Local-intelligence reliability: resume the incremental face/eye backlog
+  // after opening the app or a restored project. This also covers libraries
+  // created before the default changed. An explicit off preference is checked
+  // in the backend status immediately before starting.
+  useEffect(() => {
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      if (!cancelled) void startPendingFaceAnalysis();
+    }, 1400);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
     };
   }, []);
 
@@ -243,15 +294,9 @@ export default function App() {
               st.setMetadataPaused(false);
               st.setProgress(null);
             });
-          // …and, when the user turned local intelligence on, detect faces
-          // in the new photographs too (a no-op when nothing is queued).
-          if (useAppStore.getState().aiEnabled) {
-            api.startFaces().catch(() => {
-              const st = useAppStore.getState();
-              st.setDetectingFaces(false);
-              st.setFacesProgress(null);
-            });
-          }
+          // …and drain the supported face/eye-state work. The helper reloads
+          // the persisted preference, so an explicit opt-out always wins.
+          void startPendingFaceAnalysis();
         }
       });
       const uop = await onProgress<ProgressPayload>("operation-progress", (p) => {

@@ -4,6 +4,14 @@
  */
 import type { AiStatus, FaceSummary, SceneSummary } from "@/types/api";
 
+/** Whether the current library still has face or eye-state work to do. */
+export function hasPendingFaceAnalysis(status: AiStatus): boolean {
+  return status.enabled
+    && status.runtime_available
+    && status.photo_count > 0
+    && (status.faces_done < status.photo_count || status.eyes_done < status.photo_count);
+}
+
 /** "232 KB" style size line for the embedded model. */
 export function formatModelSize(bytes: number): string {
   if (bytes < 1000) return `${bytes} B`;

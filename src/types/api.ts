@@ -77,7 +77,7 @@ export interface DbStatus {
 
 /** Local-AI status — the Settings "Local intelligence" card. */
 export interface AiStatus {
-  /** Stored preference (ai_enabled); AI is off by default. */
+  /** Stored preference (ai_enabled); face and eye-state analysis defaults on. */
   enabled: boolean;
   /** True when the ONNX Runtime loaded on this machine. */
   runtime_available: boolean;

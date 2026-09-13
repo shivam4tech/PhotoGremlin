@@ -113,7 +113,6 @@ function SessionDetail({ summary }: { summary: SessionSummary }) {
             ["Monochrome", fmtShare(s.monochrome_share)],
             ["Color", fmtShare(s.color_share)],
             ["Faces present", fmtShare(s.faces_present_share)],
-            ["Smiling", fmtShare(s.smiling_share)],
           ] as [string, string][]
         ).map(([label, value]) => (
           <div key={label}>

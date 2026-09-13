@@ -234,12 +234,14 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   incremental); cancellation between files.
 - `commands/ai.rs` — `ai_status` (enabled, runtime availability + friendly
   note, both model provenances/sizes, `faces_done`/`eyes_done`/`photo_count`), `set_ai_enabled`
-  (persists the preference; does not start anything), `start_faces`
+  (defaults on when unset, persists explicit choices, and cancellation-signals
+  an active pass when turned off), `start_faces`
   (claims the faces slot, `spawn_blocking`s the pass) / `stop_faces`;
   `faces-progress` + `faces-complete` events carry the `FaceSummary
   { processed, with_faces, failed, cancelled, elapsed_ms, errors }`.
-  Auto-run: the UI starts the pass after a scan that indexed new photos,
-  only when the stored `ai_enabled` preference is on.
+  Auto-run: the UI drains pending face/eye work after startup, after a scan,
+  and when the feature is turned on, only when the stored `ai_enabled`
+  preference permits it.
 - `commands/views.rs` + `commands/collections.rs` (Sprint 8) — saved views and
     collections over the v2/v3 tables. Views: `list_saved_views` /
    `save_view` (validated with the grid's own filter engine before persist) /
@@ -390,12 +392,15 @@ Tauri commands (src-tauri/src/commands/*)   ← thin, validated entry points
   - Local intelligence (Sprint 9, frontend): configured only from the
     Settings "Local intelligence" card (`views/SettingsView.tsx` + pure
     wording helpers in `features/settings/ai.ts`, unit-tested in
-    `src/tests/settingsAi.test.ts`): on/off toggle (off by default), runtime
+    `src/tests/settingsAi.test.ts`): on/off toggle (on by default, explicit
+    opt-out persisted), runtime
     availability line (with the friendly note when ONNX Runtime is missing),
     model provenance + embedded size, "N of M checked for faces", run-now /
     stop buttons with live progress, last-pass summary. `App.tsx` owns the
-    `faces-progress` / `faces-complete` listeners and the post-scan auto-run
-    (only when the stored preference is on). The dashboard's face statistics
+    `faces-progress` / `faces-complete` listeners and the startup/post-scan
+    incremental auto-run (only when the stored preference is on). The
+    unsupported Smiling filter stays hidden until a local smile model exists.
+    The dashboard's face statistics
     (`faces_present_share`) were already wired in Sprint 6 against the
     `face_count` column and now get their data from this pass.
   - Appearance (dark/light themes): the whole UI draws from one design-token

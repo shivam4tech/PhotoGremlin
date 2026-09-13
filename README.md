@@ -11,7 +11,7 @@ It indexes the folders you choose and runs everything on your own machine:
 - **Similarity & bursts** — perceptual-hash grouping of near-duplicate and burst photographs
 - **Organization** — saved views, collections, and safe rename / copy / move / trash operations with collision protection
 - **Dashboard & sessions** — period-scoped statistics and per-import session reviews
-- **Local intelligence (optional, off by default)** — on-device face detection with a small bundled model; the entire core product works with it disabled
+- **Local intelligence (optional, on by default)** — on-device face and eye-state detection with small bundled models; it can be disabled and the entire core product still works
 
 **Your photos never leave your computer.** PhotoGremlin makes no network requests at runtime — no accounts, no cloud, no telemetry, no remote AI.
 
