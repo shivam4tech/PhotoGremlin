@@ -73,6 +73,10 @@ its own graphite/silver tokens, language, and local-first controls.
   open only when requested and retain preview-first safety.
 - Normal Library tiles reveal marks on hover, focus or selection. Cull and
   Collections keep marks visible because they are active decision surfaces.
+- Grid thumbnails preserve the photograph's complete native aspect ratio
+  inside their fixed virtualized tile. Portrait and panoramic photographs may
+  have neutral space around them; they are never enlarged and cropped merely
+  to fill the card.
 - Analysis diagnostics such as sharpness and eye-closure confidence never sit
   on normal photo cards. They remain available in the filter inspector and
   detail surfaces, where their meaning and context can be read deliberately.
