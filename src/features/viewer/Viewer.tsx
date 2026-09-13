@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { PhotoHistogram, type HistogramMode } from "@/components/PhotoHistogram";
 import { api, toErrorMessage } from "@/lib/ipc";
 import { MARK_COLORS } from "@/features/library/marks";
@@ -146,9 +147,15 @@ export function Viewer({
 
   const analyzed = full != null && (full.sharpness != null || full.brightness != null);
 
-  return (
+  return createPortal(
     <div className="viewer-backdrop" onClick={onClose}>
-      <div className="viewer" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="viewer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Photo viewer"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="viewer-stage">
           {image.kind === "loading" && <div className="viewer-loader" />}
           {image.kind === "ok" && <img className="viewer-img" src={image.url} alt={full?.filename ?? "photograph"} />}
@@ -337,6 +344,7 @@ export function Viewer({
           </div>
         </aside>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
