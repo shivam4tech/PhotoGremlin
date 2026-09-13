@@ -69,9 +69,8 @@ export const FILTER_FIELDS: FieldDef[] = [
     field: "faces_present",
     label: "Contains faces",
     kind: "bool",
-    area: "Faces & smiles (local models)",
+    area: "Faces & eyes (local models)",
   },
-  { field: "smiling", label: "Smiling", kind: "bool", area: "Faces & smiles (local models)" },
   {
     field: "scene_group",
     label: "Scene group",
@@ -473,10 +472,6 @@ const BOOLEAN_VALUE_OPTIONS: Record<string, readonly FilterValueOption[]> = {
   faces_present: [
     { value: true, label: "Contains faces" },
     { value: false, label: "No faces detected" },
-  ],
-  smiling: [
-    { value: true, label: "Smiling" },
-    { value: false, label: "Not smiling" },
   ],
   dark: [
     { value: true, label: "Dark" },

@@ -21,7 +21,9 @@ capture datetime fall back to `indexed_at`.
 - totals: photos, sessions, photos/session
 - averages: sharpness, brightness, contrast, saturation (analyzed rows only —
   unanalyzed photos are excluded, and the UI says so)
-- shares: monochrome %, color %, face-present %, smiling %
+- shares: monochrome %, color %, face-present %; the statistics service keeps
+  the reserved nullable smiling share for forward compatibility, but the UI
+  does not present it until a local smile model produces real measurements
 - EXIF distributions (histograms, fixed bins):
   - ISO: 100–400 · 400–800 · 800–1600 · 1600–3200 · 3200+
   - aperture: f/1.4–2.0 · f/2.0–2.8 · f/2.8–4.0 · f/4–8 · f/8+

@@ -8,6 +8,7 @@ import {
   formatEyesProgressLine,
   formatScenesProgressLine,
   formatModelSize,
+  hasPendingFaceAnalysis,
   runtimeLine,
 } from "@/features/settings/ai";
 import { SHORTCUTS } from "@/features/shortcuts";
@@ -204,8 +205,8 @@ function EditingApplicationCard() {
 }
 
 /**
- * Local intelligence (Sprint 9): optional face detection, entirely local.
- * Off by default; the card is the only place it is configured.
+ * Local intelligence (Sprint 9): optional face and eye-state detection,
+ * entirely local. On by default, with a persisted opt-out here.
  */
 function LocalIntelligenceCard() {
   const aiStatus = useAppStore((s) => s.aiStatus);
@@ -235,13 +236,27 @@ function LocalIntelligenceCard() {
     const s = store();
     const next = !s.aiEnabled;
     s.setError(null);
-    s.setAiEnabled(next);
-    // Persisted state may differ (e.g. a failed write); trust the backend.
-    await s.loadAiStatus();
+    try {
+      await s.setAiEnabled(next);
+      await s.loadAiStatus();
+      const current = store();
+      if (!next) {
+        if (current.detectingFaces) await stop();
+      } else if (
+        !current.detectingFaces
+        && current.aiStatus
+        && hasPendingFaceAnalysis(current.aiStatus)
+      ) {
+        await runNow();
+      }
+    } catch (e) {
+      store().setError(toErrorMessage(e));
+    }
   }
 
   async function runNow() {
     const s = store();
+    if (!s.aiEnabled || s.detectingFaces) return;
     s.setError(null);
     s.setDetectingFaces(true);
     s.setFacesProgress({ total: 0, done: 0, stage: "detecting faces", current: null });
@@ -277,8 +292,9 @@ function LocalIntelligenceCard() {
     <div className="card" style={{ marginBottom: 16 }}>
       <h3>Local intelligence</h3>
       <p className="faint" style={{ marginTop: 0, marginBottom: 12 }}>
-        Optional face detection, run entirely on this machine by a small local
-        model. Everything else in PhotoGremlin works with it off.
+        Face and eye-state analysis is on by default and runs entirely on this
+        machine with small local models. Everything else in PhotoGremlin works
+        with it off.
       </p>
 
       <div
@@ -295,8 +311,8 @@ function LocalIntelligenceCard() {
         <div>
           <div style={{ fontSize: 14 }}>Detect faces and eye state in photographs</div>
           <div className="faint" style={{ fontSize: 12.5, marginTop: 2 }}>
-            When on, new photographs are checked for faces and eye state automatically after
-            each scan; you can also run it on demand below.
+            When on, pending photographs are checked automatically after each
+            scan and whenever a project is reopened.
           </div>
         </div>
         <button
@@ -326,6 +342,9 @@ function LocalIntelligenceCard() {
             never downloaded).
           </div>
           <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
+            Smile detection is not included in the current local models, so it is not offered as a filter.
+          </div>
+          <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
             {formatFacesProgressLine(aiStatus)}
           </div>
           <div className="faint" style={{ fontSize: 12.5, margin: "6px 0 0" }}>
@@ -348,9 +367,11 @@ function LocalIntelligenceCard() {
               <button
                 className="btn btn-sm"
                 onClick={() => void runNow()}
-                disabled={aiStatus.photo_count === 0}
+                disabled={!aiEnabled || aiStatus.photo_count === 0}
                 title={
-                  aiStatus.photo_count === 0
+                  !aiEnabled
+                    ? "Turn on local intelligence to analyze faces and eye state."
+                    : aiStatus.photo_count === 0
                     ? "Add a photo folder first."
                     : "Run local face and eye-state analysis over every photograph that still needs it (re-runs are incremental)."
                 }

@@ -37,7 +37,7 @@ field lives.
  | exposure | iso, aperture, shutter_speed, focal_length | photos (EXIF) |
  | time | capture_datetime (point, range via `between`) | photos |
  | session | session_id (int) | photos (`= != in is-null not-null`; "open a session in the Library") |
- | local intelligence | faces_present, face_count, closed_eye_candidate, eye_closure_confidence, smiling, smile_count | analysis (nullable until the relevant local pass) |
+ | local intelligence | faces_present, face_count, closed_eye_candidate, eye_closure_confidence, possible_blink | analysis (nullable until the relevant local pass) |
 | scene (Sprint 18) | scene_group (`analysis.scene_coarse`, the MERGED product chip from the local scene model; NULL until the pass runs) | analysis |
 | marking (Sprint 13) | rating (int, null = unrated — `is-null`/`not-null` select unrated/rated), flagged (bool, `photos.flag = 1`), color_label (text, fixed enum) | photos (curatorial marks) |
 | review (Sprint 19) | review_state (`selected`, `rejected`, `needs_attention`; `is-null` = unreviewed) | correlated local `selections` row |
@@ -172,9 +172,9 @@ only `review_state`.
   `LEFT JOIN`, so **unanalyzed photos never match a technical or flag
   condition** (NULL comparison is false — a photo we have not measured is
   neither "sharpness ≥ 70" nor "monochrome"). `color` is stored as the
-  inverse of the `is_monochrome` flag. `faces_present` / `smiling` compare
-   `(face_count IS NOT NULL AND face_count > 0)` — always false until the
-   local-model sprints (9/10) fill those columns. `capture_datetime` is TEXT
+  inverse of the `is_monochrome` flag. `faces_present` compares
+   `(face_count IS NOT NULL AND face_count > 0)` — NULL stays distinct from a
+   completed result of zero. `capture_datetime` is TEXT
    (UTC RFC3339), so comparisons are lexicographic and equal to time order.
    `closed_eye_candidate` is true only when `closed_eye_face_count > 0`;
    unavailable eye analysis never matches it. `eye_closure_confidence` is the
@@ -194,12 +194,17 @@ only `review_state`.
   same `WHERE` will feed `SELECT COUNT(*)` and the statistics engine
   (Sprint 10) for scoped aggregates.
 - The UI half (`src/features/library/filterFields.ts` + `FilterBar.tsx`)
-  mirrors the registry 1:1 and emits the exact wire object; date pickers send
+  exposes the supported user-facing registry and emits the exact wire object;
+  date pickers send
   bare dates and the upper `between` bound is extended to end-of-day so
   "this day" is inclusive (a visible, stored part of the condition).
 - `filterDiscovery.ts`, `FilterPicker.tsx` and `ActiveFilterList.tsx` are
   presentation adapters over that registry and the existing presets. Removing
   a hue chip updates only that hue; removing other chips removes that condition.
+- The database and Rust registry retain the reserved `smile_count` / `smiling`
+  fields for schema and saved-filter compatibility. They are intentionally not
+  offered by the UI because the current release has no local smile model and
+  therefore writes no smile results. See `LOCAL_AI.md`.
 - `useFilteredPhotos.ts` keeps the current grid visible during refresh and
   ignores stale request completions. Pagination is guarded against duplicate
   requests; a reload replaces page zero instead of appending stale pages.

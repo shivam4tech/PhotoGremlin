@@ -279,8 +279,9 @@ Key/value for application state. Keys in use: `active_folder` (the scanned
 folder — persisted on open, restored on next start, and auto-cleared by
 `get_active_folder` when the path no longer exists on disk, so a deleted or
 renamed folder is never resurrected), `ai_enabled` (Sprint 9: local-intelligence
-preference, `"true"` / `"false"`, **off by default** — turning it on gates the
-post-scan face pass auto-run, it never forces inference).
+preference, `"true"` / `"false"`, **on by default when the key is absent** —
+an explicit opt-out remains off; when on, the UI incrementally drains pending
+face/eye work after startup and scans).
 
 ### schema_version
 `version`, `applied_at`.

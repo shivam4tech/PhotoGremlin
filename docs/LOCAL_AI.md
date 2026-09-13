@@ -23,9 +23,10 @@ ml::runtime_status()        -> Result<(), friendly reason>
 ml::run_faces_pass(db, progress, cancel) -> AppResult<FaceSummary>
 ```
 
-If the module is absent/disabled, `analysis.face_count`, the eye-state fields,
-and `smile_count` remain `NULL`; related statistics stay honestly unavailable
-(not 0, not "none"), and everything else is unaffected. The rest of the
+If the module is absent/disabled, `analysis.face_count` and the eye-state
+fields remain `NULL`; related statistics stay honestly unavailable (not 0,
+not "none"), and everything else is unaffected. `smile_count` also remains
+`NULL` because no smile model ships in the current release. The rest of the
 codebase never names `ort` and never knows the models exist.
 
 ## Scope by release
@@ -45,10 +46,12 @@ justified, it is deferred — never at the expense of core stability.
 
 ## Presenting results
 
-Faces, eye state and smiles are **technical measurements** shown alongside
-sharpness and clipping: "faces: 2", "closed-eye candidate: 92%", "smiling:
-1". Filters use the same measurable wording. No "bad photo", "happy photo",
-or "good portrait".
+Faces and eye state are **technical measurements** shown alongside sharpness
+and clipping: "faces: 2", "closed-eye candidate: 92%". Filters use the same
+measurable wording. No "bad photo", "happy photo", or "good portrait". A
+Smiling filter is deliberately not exposed until a real local smile model
+produces `smile_count`; presenting the reserved NULL column as a working
+filter would falsely imply that smile analysis had run.
 
 ---
 
@@ -219,17 +222,20 @@ version:
 - `ai_status` reports both embedded model names and sizes plus
   `faces_done`, `eyes_done`, and `photo_count` (the Settings card).
 - `set_ai_enabled(bool)` — persists the preference (`app_settings` key
-  `ai_enabled`, **off by default**). Turning it on starts nothing by itself.
+  `ai_enabled`, **on by default when no preference has been stored**). An
+  explicit `false` remains authoritative and cooperatively cancels an active
+  face/eye pass.
 - `start_faces` / `stop_faces` — claim the **faces** job slot (separate
   from the similarity slot; the UI keeps them exclusive), spawn the
   sequential pass, stream `faces-progress` / `faces-complete`
   (`FaceSummary { processed, with_faces, failed, cancelled, elapsed_ms,
   errors }`). Cancellation is cooperative between files; already-stamped
   results are kept.
-- **Auto-run:** when `ai_enabled` is on, the app starts the face pass
-  automatically after a scan that indexed new photographs (right after the
-  existing metadata auto-run; a no-op when nothing is queued). Manual runs
-  are always available from Settings.
+- **Auto-run:** when `ai_enabled` is on, the app drains the incremental
+  face/eye queue after a scan, after a project is restored on startup, and
+  immediately when the setting is turned on. Each decision reloads backend
+  status first, so an explicit opt-out is never bypassed. Manual runs are
+  available from Settings only while the feature is on.
 - The pass is sequential by design: one decode + one 640² inference per
   file through a single session — a few hundred photos per minute on CPU.
   The queue stays small because it is incremental; if a future library gets
@@ -240,7 +246,7 @@ version:
 
 - `AiStatus` / `FaceSummary` / `FaceCompletePayload` in `src/types/api.ts`;
   `aiStatus`/`setAiEnabled`/`startFaces`/`stopFaces` in `src/lib/ipc.ts`.
-- `appStore`: `aiEnabled` (off by default), `aiStatus`, `detectingFaces`,
+- `appStore`: `aiEnabled` (on by default), `aiStatus`, `detectingFaces`,
   `facesProgress`, `facesSummary`.
 - Settings → **"Local intelligence"** card (`views/SettingsView.tsx`):
   on/off toggle (disabled + explained when the runtime is missing), runtime
@@ -251,8 +257,10 @@ version:
   `src/features/settings/ai.ts` (unit-tested in
   `src/tests/settingsAi.test.ts`); the language is factual
   ("42 of 1,000 photographs checked for faces"), never evaluative.
-- `App.tsx` owns the two faces listeners + the scan auto-run (same place as
-  the metadata auto-run).
+- `App.tsx` owns the two faces listeners plus startup/post-scan backlog
+  draining (same place as the metadata auto-run). It loads `ai_status` during
+  shell startup so the persisted preference is honored without requiring the
+  user to visit Settings first.
 
 ## Tests
 
