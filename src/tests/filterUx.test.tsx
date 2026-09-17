@@ -200,12 +200,26 @@ describe("advanced filter workspace", () => {
     expect(apply).toHaveBeenCalledWith([{ field: "monochrome", operator: "=", value: true }]);
   });
   it("opens a camera metadata editor beside its selected row", async () => {
+    vi.mocked(api.filterValueOptions).mockResolvedValue({
+      values: ["Canon EOS R5", "Canon EOS R6", "Fujifilm X-T5", "Nikon Z8", "Sony A7 IV", "Sony A7R V", "Sony A9 III"]
+        .map((value) => ({ value, count: 1 })),
+      unidentified_count: 0,
+    });
     await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
     await click(textButton("Camera & date"));
     const row = Array.from(container.querySelectorAll<HTMLElement>(".filter-category-item"))
-      .find((item) => item.querySelector('[data-filter-field="camera_make"]'))!;
+      .find((item) => item.querySelector('[data-filter-field="camera_model"]'))!;
     await click(row.querySelector<HTMLButtonElement>(".filter-category-field")!);
-    expect(row.querySelector(".more-filters-panel")?.textContent).toContain("Camera make");
+    expect(row.querySelector(".more-filters-panel")?.textContent).toContain("Camera model");
+    expect(row.querySelector(".filter-compose-control-value.is-wide")).not.toBeNull();
+    await click(row.querySelector<HTMLButtonElement>('.filter-option-trigger')!);
+    expect(row.querySelector('.filter-option-popover [role="listbox"]')).not.toBeNull();
+    expect(row.querySelectorAll('.filter-option-popover [role="option"]')).toHaveLength(8);
+    expect(row.nextElementSibling).not.toBeNull();
+    await click(Array.from(row.querySelectorAll<HTMLButtonElement>('[role="option"]'))
+      .find((item) => item.textContent?.includes("Canon EOS R5"))!);
+    expect(row.querySelector('.filter-option-popover')).toBeNull();
+    expect(row.querySelector('.filter-option-trigger')?.textContent).toContain("Canon EOS R5");
     expect(container.querySelector(".advanced-category-content > .more-filters")).toBeNull();
     expect(container.querySelector('[aria-label="Search filters"]')).toBeNull();
   });
