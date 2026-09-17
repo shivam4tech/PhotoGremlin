@@ -542,7 +542,7 @@ export function FilterBar({
           )}
           {needsValue && presentation.controlType !== "range" && (
             <ComposerControl label={presentation.controlType === "boolean" ? "Show" : presentation.controlType === "rating" ? "Rating" : "Value"}
-              select={false} wide={valueUsesPair} className="filter-compose-control-value">
+              select={false} wide={valueUsesPair || (Boolean(category) && hasMetadataOptions)} className="filter-compose-control-value">
               {valueInput()}
             </ComposerControl>
           )}
