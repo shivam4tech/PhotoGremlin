@@ -105,9 +105,9 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .range-filter-reveal.is-open { display: block; }
 .range-filter-detail { min-height: 0; min-width: 0; overflow: hidden; margin: 0; padding: 0; border: 0; background: transparent; animation: none; }
 .range-filter-note { font-size: 12px; }
-.range-filter-actions { padding-bottom: 12px; }
+.range-filter-actions { padding-bottom: 12px; flex-wrap: wrap; justify-content: flex-start; }
 .range-filter-actions button { min-height: 32px; font-size: 12px; }
-.range-filter-actions .range-filter-reset { color: var(--text-tertiary); }
+.range-filter-actions .range-filter-reset { color: var(--text-tertiary); margin-left: auto; }
 .range-track-base { background: var(--border); }
 .range-track-selected { background: transparent; }
 .range-scrubber.is-filtered .range-track-selected { background: var(--accent); }
@@ -121,6 +121,30 @@ input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .filterbar-inspector .more-filters { border: 0; border-radius: 0; }
 .filterbar-inspector .more-filters-panel { padding: 0 0 12px; border: 0; border-bottom: 1px solid var(--border-subtle); animation: filter-popover-in 180ms var(--ease-out); }
 .filterbar-inspector .filterbar-compose { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.filter-compose-range { grid-column: 1 / -1; min-width: 0; }
+.filter-compose-range .range-filter-row { border: 0; }
+.filter-compose-range .range-filter-detail { padding: 0; }
+.filter-compose-range .range-filter-actions { padding-bottom: 2px; }
+.filter-boolean-choices { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.filter-boolean-choices button { min-height: 32px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text-dim); font: 12px var(--font-ui); cursor: pointer; }
+.filter-boolean-choices button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.filter-boolean-choices button:focus-visible, .filter-rating-choices button:focus-visible, .filter-option-picker button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.filter-rating-choices { display: flex; gap: 3px; }
+.filter-rating-choices button { border: 0; background: transparent; color: var(--text-faint); font-size: 21px; cursor: pointer; }
+.filter-rating-choices button.is-on { color: var(--accent); }
+.filter-rating-choices .filter-rating-unrated { align-self: center; padding: 3px 6px; border-radius: var(--radius-sm); color: var(--text-dim); font: 11px var(--font-ui); }
+.filter-rating-choices .filter-rating-unrated[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.filter-option-picker { position: relative; min-width: 0; width: 100%; }
+.filter-option-trigger { width: 100%; min-height: 34px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 10px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-panel); color: var(--text); font: 12px var(--font-ui); text-align: left; cursor: pointer; }
+.filter-option-trigger:hover { border-color: var(--border-hover); }
+.filter-option-trigger span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-option-popover { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; width: 100%; max-height: 260px; padding: 5px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-elevated); box-shadow: var(--shadow-pop); }
+.filter-option-popover input { width: 100%; margin-bottom: 5px; }
+.filter-option-list { max-height: 210px; overflow-y: auto; }
+.filter-option-list button { width: 100%; min-height: 32px; display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: 12px var(--font-ui); text-align: left; cursor: pointer; }
+.filter-option-list button:hover, .filter-option-list button.is-highlighted { background: var(--bg-hover); }
+.filter-option-list button[aria-selected="true"] span:last-child { color: var(--accent); }
+.filter-option-empty { display: block; padding: 8px; color: var(--text-faint); font-size: 12px; }
 .filter-editor-heading { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
 .filter-editor-heading .btn { width: 32px; font-size: 18px; }
 .filterbar-inspector .filterbar-compose-add { grid-column: 1 / -1; width: 100%; }

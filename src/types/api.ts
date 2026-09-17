@@ -338,6 +338,7 @@ export type QuickNumericFilterField =
   | "sharpness"
   | "brightness"
   | "contrast"
+  | "saturation"
   | "highlight_clipping"
   | "shadow_clipping"
   | "eye_closure_confidence"

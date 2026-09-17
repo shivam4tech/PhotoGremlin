@@ -1144,44 +1144,33 @@ select:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 .range-scrubber {
+  --range-inset: 12px;
   position: relative;
   min-height: 44px;
+  min-width: 0;
 }
 .range-track {
   position: absolute;
-  right: 11px;
+  right: var(--range-inset);
   bottom: 17px;
-  left: 11px;
-  height: 8px;
+  left: var(--range-inset);
+  height: 4px;
 }
 .range-track-base,
 .range-track-selected {
   position: absolute;
-  top: 1px;
-  height: 6px;
+  top: 0;
+  height: 4px;
   border-radius: 999px;
 }
 .range-track-base {
   right: 0;
   left: 0;
-  border: 1px solid var(--border-hover);
-  background: linear-gradient(
-    90deg,
-    var(--range-low),
-    var(--range-mid),
-    var(--range-high)
-  );
-  opacity: 0.62;
+  background: var(--border-hover);
 }
 .range-track-selected { background: transparent; }
 .range-scrubber.is-filtered .range-track-selected {
-  background: linear-gradient(
-    90deg,
-    var(--range-low),
-    var(--range-mid),
-    var(--range-high)
-  );
-  box-shadow: inset 0 0 0 1px var(--accent-border-strong);
+  background: var(--accent);
 }
 .range-value-bubble {
   position: absolute;
@@ -1214,10 +1203,10 @@ select:focus {
 .range-input {
   appearance: none;
   position: absolute;
-  right: 0;
+  right: calc(var(--range-inset) - 8px);
   bottom: 0;
-  left: 0;
-  width: 100%;
+  left: calc(var(--range-inset) - 8px);
+  width: calc(100% - 2 * (var(--range-inset) - 8px));
   height: 40px;
   margin: 0;
   padding: 0;
@@ -1231,29 +1220,29 @@ select:focus {
 .range-input-upper { z-index: 2; }
 .range-input:focus { z-index: 4; }
 .range-input::-webkit-slider-runnable-track {
-  height: 6px;
+  height: 4px;
   background: transparent;
 }
 .range-input::-webkit-slider-thumb {
   appearance: none;
-  width: 20px;
-  height: 20px;
-  margin-top: -7px;
-  border: 3px solid var(--bg-panel);
+  width: 16px;
+  height: 16px;
+  margin-top: -6px;
+  border: 2px solid var(--bg-panel);
   border-radius: 50%;
-  background: var(--text-dim);
-  box-shadow: 0 0 0 1px var(--text-dim);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--border-strong);
   cursor: grab;
   pointer-events: auto;
 }
-.range-input::-moz-range-track { height: 6px; background: transparent; }
+.range-input::-moz-range-track { height: 4px; background: transparent; }
 .range-input::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
-  border: 3px solid var(--bg-panel);
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--bg-panel);
   border-radius: 50%;
-  background: var(--text-dim);
-  box-shadow: 0 0 0 1px var(--text-dim);
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 1px var(--border-strong);
   cursor: grab;
   pointer-events: auto;
 }
@@ -1261,10 +1250,10 @@ select:focus {
 .range-scrubber.is-filtered .range-input::-moz-range-thumb { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .range-input.is-active::-webkit-slider-thumb { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); cursor: grabbing; }
 .range-input.is-active::-moz-range-thumb { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); cursor: grabbing; }
-.range-scrubber.is-collapsed .range-input-lower::-webkit-slider-thumb { transform: translateX(-5px); }
-.range-scrubber.is-collapsed .range-input-upper::-webkit-slider-thumb { transform: translateX(5px); }
-.range-scrubber.is-collapsed .range-input-lower::-moz-range-thumb { transform: translateX(-5px); }
-.range-scrubber.is-collapsed .range-input-upper::-moz-range-thumb { transform: translateX(5px); }
+.range-scrubber.is-collapsed .range-input-lower::-webkit-slider-thumb { transform: translateX(-3px); }
+.range-scrubber.is-collapsed .range-input-upper::-webkit-slider-thumb { transform: translateX(3px); }
+.range-scrubber.is-collapsed .range-input-lower::-moz-range-thumb { transform: translateX(-3px); }
+.range-scrubber.is-collapsed .range-input-upper::-moz-range-thumb { transform: translateX(3px); }
 .range-input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
 .range-input:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--accent-soft); }
 .range-scrubber.is-disabled { opacity: 0.42; }
