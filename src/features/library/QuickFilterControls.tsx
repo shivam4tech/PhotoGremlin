@@ -22,7 +22,7 @@ interface QuickFilterControlsProps {
   fields?: readonly string[];
 }
 
-interface RangeSpec {
+export interface RangeSpec {
   field: QuickRangeField;
   label: string;
   values: readonly number[];
@@ -46,6 +46,7 @@ const RANGE_NOUNS: Record<QuickRangeField, Pick<RangeSpec, "recordedNoun" | "mis
   brightness: { recordedNoun: "measured", missingNoun: "unmeasured" },
   sharpness: { recordedNoun: "measured", missingNoun: "unmeasured" },
   contrast: { recordedNoun: "measured", missingNoun: "unmeasured" },
+  saturation: { recordedNoun: "measured", missingNoun: "unmeasured" },
   highlight_clipping: { recordedNoun: "measured", missingNoun: "unmeasured" },
   shadow_clipping: { recordedNoun: "measured", missingNoun: "unmeasured" },
   eye_closure_confidence: { recordedNoun: "evaluated", missingNoun: "not evaluated" },
@@ -53,7 +54,7 @@ const RANGE_NOUNS: Record<QuickRangeField, Pick<RangeSpec, "recordedNoun" | "mis
   focal_length: { recordedNoun: "recorded", missingNoun: "not recorded" },
 };
 
-const RANGE_SPECS: readonly RangeSpec[] = QUICK_RANGE_FIELDS.map((field) => {
+export const RANGE_SPECS: readonly RangeSpec[] = QUICK_RANGE_FIELDS.map((field) => {
   const presentation = getFilterPresentation(field)!;
   return {
     field,
@@ -91,22 +92,22 @@ function conditionSummary(condition: FilterCondition | undefined, spec: RangeSpe
   ) {
     return `${formatValue(condition.value[0] as number, spec.unit)}–${formatValue(condition.value[1] as number, spec.unit)}`;
   }
-  if (typeof condition.value === "number") {
-    return `${condition.operator} ${formatValue(condition.value, spec.unit)}`;
-  }
+  if (typeof condition.value === "number") return `${({
+    "=": "Exactly", ">=": "At least", ">": "More than", "<=": "At most", "<": "Less than",
+  } as Partial<Record<FilterCondition["operator"], string>>)[condition.operator] ?? condition.operator} ${formatValue(condition.value, spec.unit)}`;
   return "Custom condition";
 }
 
-interface RangeFilterRowProps {
+interface PrecisionRangeFilterProps {
   spec: RangeSpec;
   condition?: FilterCondition;
   stats?: NumericFilterStats;
   statsReady: boolean;
   disabled?: boolean;
-  draft: FilterCondition[];
-  onChange: (conditions: FilterCondition[]) => void;
+  onConditionChange: (condition: FilterCondition | null) => void;
   expanded: boolean;
   onToggle: () => void;
+  editor?: boolean;
 }
 
 function RangeNumberInput({ label, value, min, max, step, disabled, onCommit }: {
@@ -120,7 +121,7 @@ function RangeNumberInput({ label, value, min, max, step, disabled, onCommit }: 
     if (!raw.trim() || !Number.isFinite(parsed)) { setRaw(String(value)); return; }
     const bounded = Math.max(min, Math.min(max, parsed));
     onCommit(bounded);
-    setRaw(String(value));
+    setRaw(String(bounded));
   }
   return <input className="input" type="number" aria-label={label} min={min} max={max} step={step} value={raw}
     disabled={disabled} onChange={(event) => setRaw(event.target.value)} onBlur={commit}
@@ -130,25 +131,24 @@ function RangeNumberInput({ label, value, min, max, step, disabled, onCommit }: 
     }} />;
 }
 
-function RangeFilterRow({
+export function PrecisionRangeFilter({
   spec,
   condition,
   stats,
   statsReady,
   disabled,
-  draft,
-  onChange,
+  onConditionChange,
   expanded,
   onToggle,
-}: RangeFilterRowProps) {
+  editor = false,
+}: PrecisionRangeFilterProps) {
   const domainLower = spec.values[0];
   const domainUpper = spec.values[spec.values.length - 1];
   const bounds = quickRangeBounds(condition, domainLower, domainUpper);
   // A compact inclusive scrubber cannot faithfully edit strict operators or
   // values outside its stops. Keep those exact conditions in the composer.
   const parsed = { ...bounds, editable: bounds.editable
-    && !["<", ">"].includes(condition?.operator ?? "")
-    && spec.values.includes(bounds.lower) && spec.values.includes(bounds.upper) };
+    && !["<", ">"].includes(condition?.operator ?? "") };
   const initialLower = nearestValueIndex(spec.values, parsed.lower);
   const initialUpper = Math.max(initialLower, nearestValueIndex(spec.values, parsed.upper));
   const [lowerIndex, setLowerIndex] = useState(initialLower);
@@ -170,6 +170,7 @@ function RangeFilterRow({
   const lowerPercent = lowerIndex / (spec.values.length - 1) * 100;
   const upperPercent = upperIndex / (spec.values.length - 1) * 100;
   const isFilteredRange = Boolean(condition && !parsed.missingOnly && parsed.editable);
+  const isExact = condition?.operator === "=" && typeof condition.value === "number";
 
   function updateLower(next: number) {
     const lower = Math.min(next, boundsRef.current.upper);
@@ -200,7 +201,19 @@ function RangeFilterRow({
     const signature = JSON.stringify(replacement);
     if (signature === lastCommitRef.current) return;
     lastCommitRef.current = signature;
-    onChange(replaceFieldConditions(draft, spec.field, replacement));
+    onConditionChange(replacement);
+  }
+
+  function commitExact(handle: "lower" | "upper", value: number) {
+    const lower = handle === "lower" ? value : bounds.lower;
+    const upper = handle === "upper" ? value : bounds.upper;
+    if (lower > upper) return;
+    // Exact input is independent of the slider's useful photographic stops.
+    // A typed ISO of 640, for example, must not become the 800 stop.
+    const replacement = lower === upper
+      ? { field: spec.field, operator: "=" as const, value: lower }
+      : quickRangeCondition(spec.field, lower, upper, domainLower, domainUpper);
+    onConditionChange(replacement);
   }
 
   function beginKeyboardInteraction(
@@ -224,15 +237,15 @@ function RangeFilterRow({
   const availability = stats
     ? noRecordedValues
       ? "Not recorded in this shoot"
-      : `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun} · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}`
+      : `${stats.recorded_count.toLocaleString()} ${spec.recordedNoun}${stats.missing_count ? ` · ${stats.missing_count.toLocaleString()} ${spec.missingNoun}` : ""}`
     : statsReady ? "Values unavailable" : "Checking local values…";
   const exactInputStep = spec.values.every((value, index) => index === 0 || value - spec.values[index - 1] === 1)
     ? 1
     : "any";
   const detailId = useId();
   return (
-    <div className={`range-filter-row${condition ? " has-filter" : ""}`}>
-      <button
+    <div className={`range-filter-row${condition ? " has-filter" : ""}${editor ? " is-editor" : ""}`}>
+      {!editor && <button
         type="button"
         className="range-filter-heading"
         aria-expanded={expanded}
@@ -248,7 +261,7 @@ function RangeFilterRow({
           </span>
           <span className="range-filter-chevron" aria-hidden="true">⌄</span>
         </span>
-      </button>
+      </button>}
 
       <div className={`range-filter-reveal${expanded ? " is-open" : ""}`} aria-hidden={!expanded}>
         <fieldset className="range-filter-detail" id={detailId} aria-label={`${spec.label} range`} disabled={!expanded || disabled}>
@@ -266,7 +279,7 @@ function RangeFilterRow({
                 {activeHandle && (
                   <output
                     className="range-value-bubble mono"
-                    style={{ left: `clamp(24px, ${activeHandle === "lower" ? lowerPercent : upperPercent}%, calc(100% - 24px))` }}
+                    style={{ left: `calc(var(--range-inset) + (100% - 2 * var(--range-inset)) * ${(activeHandle === "lower" ? lowerPercent : upperPercent) / 100})` }}
                   >
                     {formatValue(spec.values[activeHandle === "lower" ? lowerIndex : upperIndex], spec.unit)}
                   </output>
@@ -308,16 +321,20 @@ function RangeFilterRow({
               </div>
 
               <div className="range-numeric-values">
+                {isExact ? <label>Exact <RangeNumberInput label={`${spec.label} exact value`}
+                  min={domainLower} max={domainUpper} step={exactInputStep} value={bounds.lower}
+                  disabled={sliderDisabled} onCommit={(value) => onConditionChange({ field: spec.field, operator: "=", value })} /></label> : <>
                 <label>Min <RangeNumberInput label={`${spec.label} minimum value`}
-                  min={domainLower} max={spec.values[upperIndex]} step={exactInputStep} value={spec.values[lowerIndex]}
+                  min={domainLower} max={bounds.upper} step={exactInputStep} value={bounds.lower}
                   disabled={sliderDisabled} onCommit={(value) => {
-                    updateLower(nearestValueIndex(spec.values, value)); commitRange();
+                    commitExact("lower", value);
                   }} /></label>
                 <label>Max <RangeNumberInput label={`${spec.label} maximum value`}
-                  min={spec.values[lowerIndex]} max={domainUpper} step={exactInputStep} value={spec.values[upperIndex]}
+                  min={bounds.lower} max={domainUpper} step={exactInputStep} value={bounds.upper}
                   disabled={sliderDisabled} onCommit={(value) => {
-                    updateUpper(nearestValueIndex(spec.values, value)); commitRange();
+                    commitExact("upper", value);
                   }} /></label>
+                </>}
               </div>
             </>
           )}
@@ -326,15 +343,22 @@ function RangeFilterRow({
             <p className="range-filter-note">This custom condition remains unchanged. Use Search filters to add an exact condition.</p>
           )}
           <div className="range-filter-actions">
+            {!noRecordedValues && parsed.editable && !parsed.missingOnly && (
+              <button type="button" className={`range-filter-exact${isExact ? " is-active" : ""}`}
+                aria-pressed={isExact} disabled={sliderDisabled}
+                onClick={() => onConditionChange({ field: spec.field, operator: "=", value: spec.values[lowerIndex === 0 ? Math.floor(spec.values.length / 2) : lowerIndex] })}>
+                Exact value
+              </button>
+            )}
             <button
               type="button"
               className={`range-filter-missing${parsed.missingOnly ? " is-active" : ""}`}
               disabled={disabled || !stats || stats.missing_count === 0}
-              onClick={() => onChange(replaceFieldConditions(draft, spec.field, {
+              onClick={() => onConditionChange({
                 field: spec.field,
                 operator: "is-null",
                 value: null,
-              }))}
+              })}
             >
               {spec.missingNoun[0].toUpperCase()}{spec.missingNoun.slice(1)} only
             </button>
@@ -342,7 +366,7 @@ function RangeFilterRow({
               type="button"
               className="range-filter-reset"
               disabled={disabled || !condition}
-              onClick={() => onChange(replaceFieldConditions(draft, spec.field, null))}
+              onClick={() => onConditionChange(null)}
             >
               Reset to any
             </button>
@@ -400,7 +424,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId, fiel
             {RANGE_SPECS.filter((spec) => !fields || fields.includes(spec.field)).map((spec) => {
               const condition = draft.find((item) => item.field === spec.field);
               return (
-                <RangeFilterRow
+                <PrecisionRangeFilter
                   key={spec.field}
                   expanded={expandedFields.has(spec.field)}
                   onToggle={() => toggleExpandedField(spec.field)}
@@ -409,8 +433,7 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId, fiel
                   stats={stats[spec.field]}
                   statsReady={statsReady}
                   disabled={disabled}
-                  draft={draft}
-                  onChange={onChange}
+                  onConditionChange={(replacement) => onChange(replaceFieldConditions(draft, spec.field, replacement))}
                 />
               );
             })}

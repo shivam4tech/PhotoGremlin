@@ -1445,6 +1445,7 @@ pub fn upsert_exif(
             "sharpness" => "a.sharpness",
             "brightness" => "a.brightness",
             "contrast" => "a.contrast",
+            "saturation" => "a.saturation",
             "highlight_clipping" => "a.highlight_clipping",
             "shadow_clipping" => "a.shadow_clipping",
             "eye_closure_confidence" => "a.max_eye_closure_confidence",

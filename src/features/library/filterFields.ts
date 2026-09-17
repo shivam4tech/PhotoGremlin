@@ -157,6 +157,7 @@ export type QuickRangeField =
   | "brightness"
   | "sharpness"
   | "contrast"
+  | "saturation"
   | "highlight_clipping"
   | "shadow_clipping"
   | "eye_closure_confidence"
@@ -167,6 +168,7 @@ export const QUICK_RANGE_FIELDS: readonly QuickRangeField[] = [
   "brightness",
   "sharpness",
   "contrast",
+  "saturation",
   "highlight_clipping",
   "shadow_clipping",
   "eye_closure_confidence",
@@ -508,6 +510,7 @@ const QUICK_PRESENTATION: Partial<Record<QuickRangeField, Pick<FilterPresentatio
   brightness: { description: "Limit photos by measured brightness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "brightness" },
   sharpness: { description: "Limit photos by measured edge sharpness.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "sharpness" },
   contrast: { description: "Limit photos by measured contrast.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100], icon: "contrast" },
+  saturation: { description: "Limit photos by measured saturation.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, defaultValue: [0, 100] },
   highlight_clipping: { description: "Limit photos by clipped highlight coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "highlight-clipping" },
   shadow_clipping: { description: "Limit photos by clipped shadow coverage.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "shadow-clipping" },
   eye_closure_confidence: { description: "Limit photos by locally measured eye-closure confidence.", values: Array.from({ length: 101 }, (_, index) => index), min: 0, max: 100, step: 1, unit: "%", defaultValue: [0, 100], icon: "closed-eye-candidate" },

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
-import type { FilterCondition, FilterValueOptions } from "@/types/api";
+import type { FilterCondition, FilterValueOptions, NumericFilterStats } from "@/types/api";
 import {
   FILTER_FIELDS,
   FIELD_BY_NAME,
@@ -11,7 +11,7 @@ import {
   isQuickFilterPresetActive,
   toggleQuickFilterPreset,
 } from "./filterFields";
-import { QuickFilterControls } from "./QuickFilterControls";
+import { PrecisionRangeFilter, QuickFilterControls, RANGE_SPECS } from "./QuickFilterControls";
 import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
 import { FilterPicker } from "./FilterPicker";
 import { ActiveFilterList } from "./ActiveFilterList";
@@ -167,6 +167,53 @@ function ComposerControl({
   );
 }
 
+function OptionPicker({ label, value, options, onChange, disabled = false }: {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [highlighted, setHighlighted] = useState(0);
+  const filtered = options.filter((option) => option.label.toLowerCase().includes(search.toLowerCase()));
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+  function choose(next: string) {
+    onChange(next); setOpen(false); setSearch(""); trigger.current?.focus();
+  }
+  return <div className="filter-option-picker" ref={root} onKeyDown={(event) => {
+    if (event.key === "Escape" && open) { event.stopPropagation(); setOpen(false); trigger.current?.focus(); }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault(); setOpen(true);
+      setHighlighted((current) => Math.max(0, Math.min(filtered.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))));
+    }
+    if (event.key === "Enter" && open && filtered[highlighted]) { event.preventDefault(); choose(filtered[highlighted].value); }
+  }}>
+    <button ref={trigger} type="button" className="filter-option-trigger" aria-label={label} aria-expanded={open} disabled={disabled}
+      onClick={() => { setOpen((current) => !current); setHighlighted(Math.max(0, options.findIndex((option) => option.value === value))); }}>
+      <span>{options.find((option) => option.value === value)?.label ?? "Choose…"}</span><span aria-hidden="true">⌄</span>
+    </button>
+    {open && <div className="filter-option-popover">
+      {options.length > 6 && <input className="input" type="search" value={search} placeholder="Find a value…" aria-label={`Search ${label}`}
+        onChange={(event) => { setSearch(event.target.value); setHighlighted(0); }} autoFocus />}
+      <div className="filter-option-list" role="listbox" aria-label={label}>{filtered.map((option, index) => <button key={option.value} type="button" role="option"
+        aria-selected={option.value === value} className={index === highlighted ? "is-highlighted" : ""}
+        onMouseEnter={() => setHighlighted(index)} onClick={() => choose(option.value)}>
+        <span>{option.label}</span><span aria-hidden="true">{option.value === value ? "✓" : ""}</span>
+      </button>)}</div>
+      {filtered.length === 0 && <span className="filter-option-empty">No values found</span>}
+    </div>}
+  </div>;
+}
+
 /**
  * The library's active filter, edited as structured conditions (not UI
  * state): what's rendered here is exactly the object sent to the Rust
@@ -200,6 +247,9 @@ export function FilterBar({
   const [op, setOp] = useState<FilterCondition["operator"]>(ops[0].op);
   const [raw, setRaw] = useState("");
   const [raw2, setRaw2] = useState("");
+  const [rangeCandidate, setRangeCandidate] = useState<FilterCondition | null>(null);
+  const [rangeStats, setRangeStats] = useState<NumericFilterStats | undefined>();
+  const [rangeStatsReady, setRangeStatsReady] = useState(false);
   const [metadataOptions, setMetadataOptions] = useState<FilterValueOptions | null>(null);
   const [metadataOptionsLoading, setMetadataOptionsLoading] = useState(false);
   const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
@@ -227,6 +277,7 @@ export function FilterBar({
     setOp(nextOperator);
     setRaw(nextRaw);
     setRaw2(nextRaw2);
+    setRangeCandidate(getFilterPresentation(nextField)?.controlType === "range" ? seed : null);
   }, [editorIdentity]);
 
   useEffect(() => {
@@ -260,19 +311,30 @@ export function FilterBar({
     return () => { cancelled = true; };
   }, [field, sessionId, hasMetadataOptions]);
 
+  useEffect(() => {
+    if (!editorDisclosed || presentation.controlType !== "range") return;
+    let cancelled = false;
+    setRangeStats(undefined);
+    setRangeStatsReady(false);
+    void api.numericFilterStats(field as (typeof QUICK_RANGE_FIELDS)[number], sessionId)
+      .then((value) => { if (!cancelled) setRangeStats(value); })
+      .catch(() => { if (!cancelled) setRangeStats(undefined); })
+      .finally(() => { if (!cancelled) setRangeStatsReady(true); });
+    return () => { cancelled = true; };
+  }, [editorDisclosed, field, presentation.controlType, sessionId]);
+
   const needsTwoValues = op === "between" && def.kind !== "datetime";
   const needsValue = !["is-null", "not-null"].includes(op);
-  const valueUsesSelect = needsValue && (presentation.controlType === "boolean"
-    || presentation.controlType === "rating"
-    || presentation.controlType === "enum" || hasMetadataOptions);
   const valueUsesPair = needsValue && op === "between";
   const configuredRaw = raw === "" && !Array.isArray(presentation.defaultValue)
     && presentation.defaultValue !== undefined
     ? String(presentation.defaultValue)
     : raw;
-  const candidate = useMemo(() => configuredRaw === UNIDENTIFIED
-    ? { field, operator: "is-null" as const, value: null }
-    : buildCondition(field, op, configuredRaw, raw2), [configuredRaw, field, op, raw2]);
+  const candidate = useMemo(() => presentation.controlType === "range" ? rangeCandidate
+    : presentation.controlType === "boolean" && raw === "__any__" ? null
+    : configuredRaw === UNIDENTIFIED
+      ? { field, operator: "is-null" as const, value: null }
+      : buildCondition(field, op, configuredRaw, raw2), [configuredRaw, field, op, raw2, rangeCandidate, presentation.controlType]);
   const editorConfigured = candidate !== null;
   const expanded = mode === "inspector" || open;
   const categoryFields = FILTER_CHOICES.filter((choice) => !choice.preset && choice.category === category && choice.field !== "palette_color");
@@ -309,6 +371,7 @@ export function FilterBar({
     setOp(first);
     setRaw("");
     setRaw2("");
+    setRangeCandidate(null);
   }
 
   function add() {
@@ -331,16 +394,13 @@ export function FilterBar({
     if (!needsValue) return null;
     if (presentation.controlType === "rating") {
       return (
-        <select
-          className="input"
-          value={configuredRaw}
-          onChange={(event) => setRaw(event.target.value)}
-          aria-label="Rating value"
-        >
-          {presentation.valueOptions?.map((option) => (
-            <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
-          ))}
-        </select>
+        <div className="filter-rating-choices" aria-label="Rating value">
+          <button type="button" className="filter-rating-unrated" aria-pressed={Number(configuredRaw) === 0}
+            onClick={() => setRaw("0")}>Unrated</button>
+          {[1, 2, 3, 4, 5].map((star) => <button key={star} type="button" aria-label={`${star} ${star === 1 ? "star" : "stars"}`}
+            aria-pressed={Number(configuredRaw) === star} className={Number(configuredRaw) >= star ? "is-on" : ""}
+            onClick={() => setRaw(String(star))}>★</button>)}
+        </div>
       );
     }
     switch (def.kind) {
@@ -348,57 +408,32 @@ export function FilterBar({
         return null;
       case "bool":
         return (
-          <select
-            className="input"
-            value={raw === "false" ? "false" : "true"}
-            onChange={(e) => setRaw(e.target.value)}
-            aria-label={`${def.label} value`}
-          >
-            {presentation.valueOptions?.map((option) => (
-              <option key={String(option.value)} value={String(option.value)}>{option.label}</option>
-            ))}
-          </select>
+          <div className="filter-boolean-choices" aria-label={`${def.label} value`}>
+            {[{ value: "__any__", label: "Any" }, ...(presentation.valueOptions ?? []).map((option) => ({ value: String(option.value), label: option.label }))].map((option) =>
+              <button key={option.value} type="button" aria-pressed={(raw || "true") === option.value}
+                onClick={() => setRaw(option.value)}>{option.label}</button>)}
+          </div>
         );
       case "text":
         if (hasMetadataOptions) {
           return (
-            <select
-              className="input"
-              value={raw}
-              onChange={(e) => {
-                const value = e.target.value;
+            <OptionPicker label={`${def.label} value`} value={raw} disabled={metadataOptionsLoading}
+              options={[
+                { value: "", label: metadataOptionsLoading ? "Loading values…" : "Choose from this shoot" },
+                ...(metadataOptions?.values.map((option) => ({ value: option.value, label: `${option.value} (${option.count.toLocaleString()})` })) ?? []),
+                ...((metadataOptions?.unidentified_count ?? 0) > 0 ? [{ value: UNIDENTIFIED, label: `Unidentified (${metadataOptions!.unidentified_count.toLocaleString()})` }] : []),
+              ]}
+              onChange={(value) => {
                 setRaw(value);
                 if (value === UNIDENTIFIED) setOp("is-null");
                 else if (op === "is-null" || op === "not-null") setOp("=");
-              }}
-              disabled={metadataOptionsLoading}
-              aria-label={`${def.label} value`}
-            >
-              <option value="">{metadataOptionsLoading ? "Loading values…" : "— Select from this shoot —"}</option>
-              {metadataOptions?.values.map((option) => (
-                <option key={option.value} value={option.value}>{option.value} ({option.count.toLocaleString()})</option>
-              ))}
-              {(metadataOptions?.unidentified_count ?? 0) > 0 && (
-                <option value={UNIDENTIFIED}>Unidentified ({metadataOptions!.unidentified_count.toLocaleString()})</option>
-              )}
-            </select>
+              }} />
           );
         }
         if (def.values) {
           return (
-            <select
-              className="input"
-              value={raw}
-              onChange={(e) => setRaw(e.target.value)}
-              aria-label={`${def.label} value`}
-            >
-              <option value="">—</option>
-              {presentation.valueOptions?.map((option) => (
-                <option key={String(option.value)} value={String(option.value)}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <OptionPicker label={`${def.label} value`} value={raw} onChange={setRaw}
+              options={[{ value: "", label: "Choose…" }, ...(presentation.valueOptions ?? []).map((option) => ({ value: String(option.value), label: option.label }))]} />
           );
         }
         return (
@@ -578,7 +613,22 @@ export function FilterBar({
                     <button type="button" className="btn btn-ghost btn-sm" aria-label="Close filter editor"
                       onClick={closeEditor}>×</button>
                   </div>
-                  {presentation.controlType !== "boolean" && (
+                  {presentation.controlType === "range" && RANGE_SPECS.find((item) => item.field === field) && (
+                    <div className="filter-compose-range">
+                      <PrecisionRangeFilter
+                        editor
+                        spec={RANGE_SPECS.find((item) => item.field === field)!}
+                        condition={rangeCandidate ?? undefined}
+                        stats={rangeStats}
+                        statsReady={rangeStatsReady}
+                        disabled={disabled}
+                        expanded
+                        onToggle={() => {}}
+                        onConditionChange={setRangeCandidate}
+                      />
+                    </div>
+                  )}
+                  {presentation.controlType !== "boolean" && presentation.controlType !== "range" && (
                     <ComposerControl label="Condition" select>
                       <select
                         className="input"
@@ -594,10 +644,10 @@ export function FilterBar({
                       </select>
                     </ComposerControl>
                   )}
-                  {needsValue && (
+                  {needsValue && presentation.controlType !== "range" && (
                     <ComposerControl
                       label={presentation.controlType === "boolean" ? "Show" : presentation.controlType === "rating" ? "Rating" : "Value"}
-                      select={valueUsesSelect}
+                      select={false}
                       wide={valueUsesPair}
                       className="filter-compose-control-value"
                     >

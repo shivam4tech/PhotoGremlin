@@ -55,29 +55,32 @@ also offers `Unidentified (n)`, which writes the normal `is-null` condition
 the same filter wire format — no value is inferred, sent to a service, or
 embedded into SQL.
 
-### Quick measured controls (Sprints 22–23, revamped Sprints 25–26)
+### Quick measured controls (Sprints 22–23, revamped Sprints 25–26 and filter controls Sprint 2)
 
 The Library presents common numeric filters without requiring photographers
 to compose raw operators:
 
-- brightness, sharpness, contrast, highlight clipping, shadow clipping and
+- brightness, sharpness, contrast, saturation, highlight clipping, shadow clipping and
   eye-closure confidence use inclusive ranges from 0–100;
 - ISO and focal length use the existing increasing photographic stop lists;
 - leaving both handles at the full domain removes that field, moving only the
   lower handle writes `>=`, moving only the upper handle writes `<=`, and
   moving both writes `between`.
 
-Eight shallow measured rows show their current condition without opening a
-parent accordion. One row expands at a time, revealing two keyboard-accessible
-native range inputs and editable minimum/maximum numbers. ISO and focal length
-numbers snap to the photographic stop lists. Pointer release, keyboard release,
+Measured rows show their current condition without opening a parent accordion.
+Each row expands independently, revealing keyboard-accessible inset range thumbs
+and editable minimum/maximum numbers. A selected range is highlighted and the
+active thumb shows its value while dragging. The slider uses photographic stops
+for ISO and focal length, while typed values retain their exact number. Choosing
+**Exact value** switches to a single number. Pointer release, keyboard release,
 or blur commits the draft range, avoiding a stream of SQLite queries during a
-drag. The searchable **Add filter** picker also exposes every measured field
-through the exact operator composer; the compact controls are shortcuts, not a
-replacement for the engine's full capabilities.
+drag. The same range control is used in the Advanced editor, where changes stay
+temporary until **Add filter** or **Save change**. Search still exposes fields
+whose engine conditions need more specific operators.
 
-Every control reports locally recorded and missing counts from
-`numeric_filter_stats`. A numeric range follows SQL NULL semantics
+Every control reports locally recorded counts from `numeric_filter_stats`,
+including missing counts only when nonzero. Saturation is included in this
+statistics allowlist. A numeric range follows SQL NULL semantics
 and therefore excludes unmeasured photographs. `Unmeasured` (visual analysis)
 or `Not recorded` (EXIF) writes `is-null`; `Reset to any` removes that field's
 quick/advanced condition and includes both known and missing values. Missing
@@ -85,10 +88,13 @@ values are never guessed from filenames, pixels, or neighboring photographs.
 
 Saved views keep the ordinary filter wire format. Legacy strict `<`/`>` quick
 conditions and arbitrary advanced numeric conditions load without being
-rewritten. Strict bounds, values outside the control domain, and values between
-photographic stops disable the approximate scrubber and direct users to the
-exact composer. All conditions remain visible and removable in the sticky
+rewritten. Strict bounds and values outside the control domain disable the
+scrubber and keep the original condition visible. All conditions remain visible and removable in the sticky
 active-filter list, even when their measured row is collapsed.
+
+Boolean editors use named segmented choices, rating uses stars, and enum and
+shoot-specific metadata values use a searchable keyboard-operated picker. These
+controls continue to emit the existing structured condition wire format.
 
 ### Color explorer (Sprint 35)
 
