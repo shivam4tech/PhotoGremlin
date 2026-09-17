@@ -103,17 +103,6 @@ describe("advanced filter workspace state", () => {
     expect(state.currentEditor).toEqual({ kind: "idle" });
   });
 
-  it("keeps a typed candidate intact when Search opens above it", () => {
-    let state = createAdvancedFilterWorkspaceState([cameraCondition]);
-    state = advancedFilterWorkspaceReducer(state, { type: "begin-edit", index: 0 });
-    const editing = state.currentEditor;
-
-    state = advancedFilterWorkspaceReducer(state, { type: "open-picker" });
-
-    expect(state.currentEditor).toEqual(editing);
-    expect(state.draftFilters).toEqual([cameraCondition]);
-  });
-
   it("clears temporary editing on category changes while preserving staged filters", () => {
     let state = createAdvancedFilterWorkspaceState([]);
     state = advancedFilterWorkspaceReducer(state, { type: "begin-add", field: "monochrome" });

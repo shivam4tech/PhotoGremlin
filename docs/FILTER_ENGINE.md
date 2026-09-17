@@ -219,12 +219,13 @@ only `review_state`.
   workspace has five registry-backed categories and places palette colors in
   Appearance only. Its reducer owns the selected category and temporary editor:
   switching categories clears an unfinished editor while staged conditions
-  remain available as a compact summary. Opening a staged condition or choosing
-  a result from the global search navigates to that field's category. Advanced
-  search omits sidebar Quick Filter presets. Apply replaces the shared store's
-  conditions once; Cancel/Escape discard the snapshot. No query, operator,
-  analysis or persistence semantics change. Each category shows measured rows
-  and rating stars once; their precise editors remain available through search.
+  remain available as a compact summary. Advanced has no search picker; its
+  category rows open temporary editors directly beneath the selected row.
+  Staged conditions navigate to their category and open beside their matching
+  row. Rating's precise options open beneath its stars, and measured condition
+  editors open beneath their measured row. The Simple sidebar retains search.
+  Apply replaces the shared store's conditions once; Cancel/Escape discard the
+  snapshot. No query, operator, analysis or persistence semantics change.
 
 ## Saved views (Sprint 8)
 

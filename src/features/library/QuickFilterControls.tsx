@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/ipc";
 import type {
   FilterCondition,
@@ -20,6 +20,7 @@ interface QuickFilterControlsProps {
   disabled?: boolean;
   sessionId: number | null;
   fields?: readonly string[];
+  renderAfterField?: (field: QuickRangeField) => ReactNode;
 }
 
 export interface RangeSpec {
@@ -248,6 +249,7 @@ export function PrecisionRangeFilter({
       {!editor && <button
         type="button"
         className="range-filter-heading"
+        data-filter-field={spec.field}
         aria-expanded={expanded}
         aria-controls={detailId}
         onClick={onToggle}
@@ -340,7 +342,7 @@ export function PrecisionRangeFilter({
           )}
 
           {!parsed.editable && !parsed.missingOnly && (
-            <p className="range-filter-note">This custom condition remains unchanged. Use Search filters to add an exact condition.</p>
+            <p className="range-filter-note">This custom condition remains unchanged. Edit its staged filter for precise options.</p>
           )}
           <div className="range-filter-actions">
             {!noRecordedValues && parsed.editable && !parsed.missingOnly && (
@@ -377,7 +379,7 @@ export function PrecisionRangeFilter({
   );
 }
 
-export function QuickFilterControls({ draft, onChange, disabled, sessionId, fields }: QuickFilterControlsProps) {
+export function QuickFilterControls({ draft, onChange, disabled, sessionId, fields, renderAfterField }: QuickFilterControlsProps) {
   const headingId = useId();
   const [stats, setStats] = useState<Partial<Record<QuickNumericFilterField, NumericFilterStats>>>({});
   const [statsReady, setStatsReady] = useState(false);
@@ -424,17 +426,19 @@ export function QuickFilterControls({ draft, onChange, disabled, sessionId, fiel
             {RANGE_SPECS.filter((spec) => !fields || fields.includes(spec.field)).map((spec) => {
               const condition = draft.find((item) => item.field === spec.field);
               return (
-                <PrecisionRangeFilter
-                  key={spec.field}
-                  expanded={expandedFields.has(spec.field)}
-                  onToggle={() => toggleExpandedField(spec.field)}
-                  spec={spec}
-                  condition={condition}
-                  stats={stats[spec.field]}
-                  statsReady={statsReady}
-                  disabled={disabled}
-                  onConditionChange={(replacement) => onChange(replaceFieldConditions(draft, spec.field, replacement))}
-                />
+                <Fragment key={spec.field}>
+                  <PrecisionRangeFilter
+                    expanded={expandedFields.has(spec.field)}
+                    onToggle={() => toggleExpandedField(spec.field)}
+                    spec={spec}
+                    condition={condition}
+                    stats={stats[spec.field]}
+                    statsReady={statsReady}
+                    disabled={disabled}
+                    onConditionChange={(replacement) => onChange(replaceFieldConditions(draft, spec.field, replacement))}
+                  />
+                  {renderAfterField?.(spec.field)}
+                </Fragment>
               );
             })}
           </div>
