@@ -13,7 +13,6 @@ function categoryFor(field: string): AdvancedFilterCategory | null {
 
 export type AdvancedFilterEditorState =
   | { kind: "idle" }
-  | { kind: "picker" }
   | {
       kind: "editing";
       category: AdvancedFilterCategory;
@@ -41,7 +40,6 @@ export type AdvancedFilterWorkspaceAction =
   | { type: "change-category"; category: AdvancedFilterCategory }
   | { type: "replace-draft"; filters: FilterCondition[] }
   | { type: "clear-draft" }
-  | { type: "open-picker" }
   | { type: "begin-add"; field: string }
   | { type: "begin-edit"; index: number }
   | { type: "update-candidate"; candidate: FilterCondition | null }
@@ -127,13 +125,6 @@ export function advancedFilterWorkspaceReducer(
         draftFilters: [],
         currentEditor: { kind: "idle" },
       };
-    case "open-picker":
-      // Search is a temporary layer. Opening it while a typed editor is
-      // visible must not discard that editor's candidate; Escape can then
-      // close Search first and the editor second.
-      return state.currentEditor.kind === "editing"
-        ? state
-        : { ...state, currentEditor: { kind: "picker" } };
     case "begin-add": {
       const category = categoryFor(action.field);
       if (!category) return state;

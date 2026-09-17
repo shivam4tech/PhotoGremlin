@@ -32,8 +32,6 @@ interface FilterBarProps {
   /** Advanced mode may own editor transitions alongside its private draft. */
   editorState?: AdvancedFilterEditorState;
   editorDispatch?: Dispatch<AdvancedFilterWorkspaceAction>;
-  onPaletteSelect?: () => void;
-  autoFocusSearch?: boolean;
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
@@ -230,8 +228,6 @@ export function FilterBar({
   onAdvanced,
   editorState,
   editorDispatch,
-  onPaletteSelect,
-  autoFocusSearch = true,
 }: FilterBarProps) {
   const headingId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -255,6 +251,7 @@ export function FilterBar({
   const hasMetadataOptions = METADATA_VALUE_FIELDS.has(field);
   const controlledEditor = editorState?.kind === "editing" ? editorState : null;
   const editorDisclosed = editorState ? controlledEditor !== null : localEditorDisclosed;
+  const editorField = controlledEditor?.field ?? field;
 
   const editorIdentity = controlledEditor
     ? `${controlledEditor.intent}:${controlledEditor.field}:${controlledEditor.intent === "edit" ? controlledEditor.index : "new"}`
@@ -284,10 +281,20 @@ export function FilterBar({
     if (editorDisclosed) composer.current?.querySelector<HTMLSelectElement>("select")?.focus();
   }, [editorDisclosed, field]);
 
+  useEffect(() => {
+    if (category && editorDisclosed) composer.current?.scrollIntoView?.({ block: "nearest" });
+  }, [category, editorDisclosed, editorIdentity]);
+
   function closeEditor() {
     if (editorState) editorDispatch?.({ type: "cancel-editor" });
     else setLocalEditorDisclosed(false);
-    root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
+    focusFieldTrigger(editorField);
+  }
+
+  function focusFieldTrigger(name: string) {
+    const trigger = Array.from(root.current?.querySelectorAll<HTMLButtonElement>("[data-filter-field]") ?? [])
+      .find((item) => item.dataset.filterField === name);
+    (trigger ?? root.current?.querySelector<HTMLInputElement>(".filter-search"))?.focus();
   }
 
   // Keep the operator valid when the field's kind changes.
@@ -381,7 +388,7 @@ export function FilterBar({
       editorDispatch?.({ type: "commit-editor" });
       setRaw("");
       setRaw2("");
-      root.current?.querySelector<HTMLInputElement>(".filter-search")?.focus();
+      window.requestAnimationFrame(() => focusFieldTrigger(field));
       return;
     }
     onChange([...draft, candidate]);
@@ -509,6 +516,45 @@ export function FilterBar({
     }
   }
 
+  const editorPanel = editorDisclosed ? (
+    <div className="more-filters is-open">
+      <div key={editorIdentity || field} className="more-filters-panel" ref={composer} onKeyDown={(event) => {
+        if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
+      }}>
+        <div className="filterbar-compose">
+          <div className="filter-editor-heading">
+            <strong>{def.label}</strong>
+            <button type="button" className="btn btn-ghost btn-sm" aria-label="Close filter editor" onClick={closeEditor}>×</button>
+          </div>
+          {presentation.controlType === "range" && RANGE_SPECS.find((item) => item.field === field) && (
+            <div className="filter-compose-range">
+              <PrecisionRangeFilter editor spec={RANGE_SPECS.find((item) => item.field === field)!}
+                condition={rangeCandidate ?? undefined} stats={rangeStats} statsReady={rangeStatsReady}
+                disabled={disabled} expanded onToggle={() => {}} onConditionChange={setRangeCandidate} />
+            </div>
+          )}
+          {presentation.controlType !== "boolean" && presentation.controlType !== "range" && (
+            <ComposerControl label="Condition" select>
+              <select className="input" value={op} onChange={(e) => setOp(e.target.value as FilterCondition["operator"])} aria-label="Filter condition">
+                {ops.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
+              </select>
+            </ComposerControl>
+          )}
+          {needsValue && presentation.controlType !== "range" && (
+            <ComposerControl label={presentation.controlType === "boolean" ? "Show" : presentation.controlType === "rating" ? "Rating" : "Value"}
+              select={false} wide={valueUsesPair} className="filter-compose-control-value">
+              {valueInput()}
+            </ComposerControl>
+          )}
+          <button type="button" className={`btn btn-sm filterbar-compose-add${category ? "" : " btn-primary"}`} onClick={add} disabled={!editorConfigured || disabled}>
+            {controlledEditor?.intent === "edit" ? "Save change" : "Add filter"}
+          </button>
+        </div>
+        {needsTwoValues && <div className="faint mono more-filters-hint">between: two values, min → max</div>}
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className={`filterbar filterbar-${mode}`} ref={root}>
       {mode === "bar" && (
@@ -527,18 +573,15 @@ export function FilterBar({
 
       {expanded && (
         <div className="filterbar-panel">
-          <div className="filter-discovery">
-            <FilterPicker draft={draft} disabled={disabled} includePresets={!category} autoFocus={editorState?.kind === "idle" && autoFocusSearch} onOpenChange={editorState ? (isOpen) => {
-              if (isOpen) editorDispatch?.({ type: "open-picker" });
-            } : undefined} onSelect={(choice) => {
+          {!category && <div className="filter-discovery">
+            <FilterPicker draft={draft} disabled={disabled} includePresets onSelect={(choice) => {
               if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
               else if (choice.field === "palette_color") {
-                if (onPaletteSelect) onPaletteSelect();
-                else (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
+                (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
               } else selectField(choice.field);
             }} />
-            {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
-          </div>
+            <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />
+          </div>}
           {!category && <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />}
 
           {!category && <section className="quick-presets" aria-labelledby={`${headingId}-quick`}>
@@ -569,6 +612,8 @@ export function FilterBar({
           {(!category || category === "Rating & review") && <section className="rating-filter" aria-labelledby={`${headingId}-rating`}>
             <div className="rating-filter-head">
               <strong id={`${headingId}-rating`}>Rating</strong>
+              {category && <button type="button" data-filter-field="rating" disabled={disabled}
+                aria-expanded={editorDisclosed && editorField === "rating"} onClick={() => selectField("rating")}>More options</button>}
               <button type="button" className={!rating ? "is-active" : ""} disabled={disabled} aria-pressed={!rating} onClick={() => setRatingFilter("any")}>Any</button>
               <button type="button" className={unratedOnly ? "is-active" : ""} disabled={disabled} aria-pressed={unratedOnly} onClick={() => setRatingFilter("unrated")}>Unrated</button>
             </div>
@@ -586,6 +631,7 @@ export function FilterBar({
               ))}
               <span className="faint mono">{ratingThreshold ? `${ratingThreshold}+` : unratedOnly ? "0" : "Any"}</span>
             </div>
+            {category === "Rating & review" && editorField === "rating" && editorPanel}
           </section>}
 
           {(!category || rangeFields.length > 0) && <QuickFilterControls
@@ -594,78 +640,20 @@ export function FilterBar({
             disabled={disabled}
             sessionId={sessionId}
             fields={category ? rangeFields : undefined}
+            renderAfterField={category ? (name) => editorField === name ? editorPanel : null : undefined}
           />}
           {category && specificFields.length > 0 && <div className="filter-category-fields">
             <h4 className="filter-section-title">Specific conditions</h4>
-            {specificFields.map((choice) => <button key={choice.id} type="button" disabled={disabled}
-              className="filter-category-field" onClick={() => selectField(choice.field)}>
-              <span>{choice.label}</span><span>{draft.some((condition) => condition.field === choice.field) ? "Added" : "Any"} <span aria-hidden="true">›</span></span>
-            </button>)}
+            {specificFields.map((choice) => <div className="filter-category-item" key={choice.id}>
+              <button type="button" disabled={disabled} data-filter-field={choice.field}
+                className="filter-category-field" aria-expanded={editorDisclosed && editorField === choice.field}
+                onClick={() => selectField(choice.field)}>
+                <span>{choice.label}</span><span>{draft.some((condition) => condition.field === choice.field) ? "Added" : "Any"} <span aria-hidden="true">›</span></span>
+              </button>
+              {editorField === choice.field && editorPanel}
+            </div>)}
           </div>}
-          <div className={`more-filters${editorDisclosed ? " is-open" : ""}`}>
-            {editorDisclosed && (
-              <div key={editorIdentity || field} className="more-filters-panel" ref={composer} onKeyDown={(event) => {
-                if (event.key === "Escape") { event.stopPropagation(); closeEditor(); }
-              }}>
-                <div className="filterbar-compose">
-                  <div className="filter-editor-heading">
-                    <strong>{def.label}</strong>
-                    <button type="button" className="btn btn-ghost btn-sm" aria-label="Close filter editor"
-                      onClick={closeEditor}>×</button>
-                  </div>
-                  {presentation.controlType === "range" && RANGE_SPECS.find((item) => item.field === field) && (
-                    <div className="filter-compose-range">
-                      <PrecisionRangeFilter
-                        editor
-                        spec={RANGE_SPECS.find((item) => item.field === field)!}
-                        condition={rangeCandidate ?? undefined}
-                        stats={rangeStats}
-                        statsReady={rangeStatsReady}
-                        disabled={disabled}
-                        expanded
-                        onToggle={() => {}}
-                        onConditionChange={setRangeCandidate}
-                      />
-                    </div>
-                  )}
-                  {presentation.controlType !== "boolean" && presentation.controlType !== "range" && (
-                    <ComposerControl label="Condition" select>
-                      <select
-                        className="input"
-                        value={op}
-                        onChange={(e) => setOp(e.target.value as FilterCondition["operator"])}
-                        aria-label="Filter condition"
-                      >
-                        {ops.map((o) => (
-                          <option key={o.op} value={o.op}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </ComposerControl>
-                  )}
-                  {needsValue && presentation.controlType !== "range" && (
-                    <ComposerControl
-                      label={presentation.controlType === "boolean" ? "Show" : presentation.controlType === "rating" ? "Rating" : "Value"}
-                      select={false}
-                      wide={valueUsesPair}
-                      className="filter-compose-control-value"
-                    >
-                      {valueInput()}
-                    </ComposerControl>
-                  )}
-                  <button type="button" className={`btn btn-sm filterbar-compose-add${category ? "" : " btn-primary"}`} onClick={add} disabled={!editorConfigured || disabled}>
-                    {controlledEditor?.intent === "edit" ? "Save change" : "Add filter"}
-                  </button>
-                </div>
-                {needsTwoValues && (
-                  <div className="faint mono more-filters-hint">
-                    between: two values, min → max
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {!category && editorPanel}
         </div>
       )}
     </div>

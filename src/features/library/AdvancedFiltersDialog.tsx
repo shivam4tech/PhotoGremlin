@@ -37,7 +37,6 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
   const setDraft = (filters: FilterCondition[]) =>
     dispatch({ type: "replace-draft", filters });
   const category = CATEGORIES.find((item) => item.label === workspace.activeCategory)!;
-  const [autoFocusSearch, setAutoFocusSearch] = useState(true);
   const [preview, setPreview] = useState<{ count: number | null; loading: boolean; failed: boolean }>({
     count: null,
     loading: !!loadPreviewCount,
@@ -96,7 +95,7 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
     <div className="advanced-filters-body">
       <nav className="advanced-filters-categories" aria-label="Filter categories">
         {CATEGORIES.map((item) => <button key={item.label} type="button" aria-current={category.label === item.label ? "page" : undefined}
-          onClick={() => { setAutoFocusSearch(false); dispatch({ type: "change-category", category: item.label }); }}><item.icon size={18} />{item.label}</button>)}
+          onClick={() => dispatch({ type: "change-category", category: item.label })}><item.icon size={18} />{item.label}</button>)}
       </nav>
       <main className="advanced-filters-main" aria-label={category.label}>
         <div className="advanced-category-heading"><h3>{category.label}</h3><p>{category.description}</p></div>
@@ -104,7 +103,6 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
           <ActiveFilterList draft={draft} onChange={setDraft} disabled={disabled} label="Staged filters"
             onEdit={(index) => {
               if (draft[index]?.field === "palette_color") {
-                setAutoFocusSearch(false);
                 dispatch({ type: "change-category", category: "Appearance" });
                 window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLButtonElement>(".color-swatch")?.focus());
               } else {
@@ -116,15 +114,10 @@ export function AdvancedFiltersDialog({ initialConditions, sessionId, disabled, 
         <div key={category.label} className="advanced-category-content">
           {category.label === "Appearance" && <ColorSpectrumFilter draft={draft} onChange={setDraft} disabled={disabled} />}
           <FilterBar mode="inspector" category={category.label} draft={draft}
-            onChange={setDraft} sessionId={sessionId} disabled={disabled} autoFocusSearch={autoFocusSearch}
+            onChange={setDraft} sessionId={sessionId} disabled={disabled}
             editorState={workspace.currentEditor.kind === "editing" && workspace.currentEditor.category !== category.label
               ? { kind: "idle" } : workspace.currentEditor}
-            editorDispatch={dispatch}
-            onPaletteSelect={() => {
-              setAutoFocusSearch(false);
-              dispatch({ type: "change-category", category: "Appearance" });
-              window.requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLButtonElement>(".color-swatch")?.focus());
-            }} />
+            editorDispatch={dispatch} />
         </div>
       </main>
     </div>
