@@ -54,15 +54,55 @@ describe("advanced filter workspace", () => {
     return Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((item) => item.textContent?.trim() === label)!;
   }
-  it("uses a two-column drawer and keeps the draft selection inside its main workspace", async () => {
+  it("uses a two-column drawer with five focused categories and no empty staged box", async () => {
     await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
     const dialog = container.querySelector("dialog")!;
     const body = dialog.querySelector(".advanced-filters-body")!;
     expect(dialog.classList.contains("advanced-filters-drawer")).toBe(true);
     expect(body.children).toHaveLength(2);
     expect(dialog.querySelector(".advanced-filters-summary")).toBeNull();
-    expect(dialog.querySelector(".advanced-filters-main .advanced-filters-selection")).not.toBeNull();
-    expect(dialog.querySelectorAll(".advanced-filters-categories button")).toHaveLength(6);
+    expect(dialog.querySelector(".advanced-filters-selection .active-filter-list")).toBeNull();
+    expect(dialog.querySelectorAll(".advanced-filters-categories button")).toHaveLength(5);
+    expect(textButton("Quick filters")).toBeUndefined();
+    expect(dialog.querySelector(".quick-presets")).toBeNull();
+    expect(Array.from(dialog.querySelectorAll(".filter-picker-category"))
+      .some((item) => item.textContent === "Quick filters")).toBe(false);
+  });
+  it("shows colors only in Appearance and swaps category content completely", async () => {
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
+    expect(button("Yellow")).toBeTruthy();
+    await click(textButton("Rating & review"));
+    expect(container.querySelector(".color-filter")).toBeNull();
+    expect(container.querySelector(".rating-filter")).not.toBeNull();
+    await click(textButton("Image properties"));
+    expect(container.querySelector(".color-filter")).toBeNull();
+    expect(container.querySelector(".advanced-category-content")?.textContent).toContain("Sharpness");
+    expect(container.querySelector(".filter-category-fields")?.textContent).not.toContain("Sharpness");
+    await click(textButton("Camera & date"));
+    expect(container.querySelector(".color-filter")).toBeNull();
+    expect(container.querySelector(".rating-filter")).toBeNull();
+    expect(container.querySelector(".filter-category-fields")?.textContent).not.toContain("Brightness");
+    expect(container.querySelector(".advanced-category-content")?.textContent).toContain("ISO");
+    expect(container.querySelector(".filter-category-fields")?.textContent).not.toContain("ISO");
+    await click(textButton("Appearance"));
+    expect(button("Yellow")).toBeTruthy();
+  });
+  it("closes an unfinished editor on category switch but keeps added filters staged", async () => {
+    await render(<AdvancedFiltersDialog initialConditions={[]} sessionId={1} onApply={vi.fn()} onClose={vi.fn()} />);
+    await click(Array.from(container.querySelectorAll<HTMLButtonElement>(".filter-category-field"))
+      .find((item) => item.textContent?.includes("Monochrome"))!);
+    expect(container.querySelector(".more-filters-panel")?.textContent).toContain("Monochrome");
+    await click(textButton("Camera & date"));
+    expect(container.querySelector(".more-filters-panel")).toBeNull();
+    await click(textButton("Appearance"));
+    expect(container.querySelector(".more-filters-panel")).toBeNull();
+    await click(Array.from(container.querySelectorAll<HTMLButtonElement>(".filter-category-field"))
+      .find((item) => item.textContent?.includes("Monochrome"))!);
+    await click(textButton("Add filter"));
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("Black & white");
+    await click(textButton("Camera & date"));
+    expect(container.querySelector(".more-filters-panel")).toBeNull();
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("Black & white");
   });
   it("previews the exact draft match count after a short debounce", async () => {
     const loadPreviewCount = vi.fn(async (conditions: FilterCondition[]) => conditions.length ? 12 : 277);
@@ -90,7 +130,7 @@ describe("advanced filter workspace", () => {
     expect(apply).not.toHaveBeenCalled();
     expect(initial).toEqual([{ field: "rating", operator: ">=", value: 4 }]);
     await click(textButton("Camera & date"));
-    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("Yellow");
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("Yellow");
     await click(textButton("Apply filters (2)"));
     expect(apply).toHaveBeenCalledWith([
       ...initial, { field: "palette_color", operator: "in", value: ["yellow"] },
@@ -113,7 +153,7 @@ describe("advanced filter workspace", () => {
       sessionId={1} onApply={apply} onClose={vi.fn()} />);
     await click(textButton("Clear all"));
     expect(apply).not.toHaveBeenCalled();
-    expect(container.querySelector('[aria-label="Selected filters"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Staged filters"]')).toBeNull();
     await click(textButton("Apply filters"));
     expect(apply).toHaveBeenCalledWith([]);
   });
@@ -124,14 +164,14 @@ describe("advanced filter workspace", () => {
 
     await type(search, "iso");
     await click(container.querySelector<HTMLElement>('[role="option"]')!);
-    expect(textButton("Add to filters").disabled).toBe(true);
+    expect(textButton("Add filter").disabled).toBe(true);
     await type(container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!, "400");
-    await click(textButton("Add to filters"));
+    await click(textButton("Add filter"));
 
-    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso = 400");
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("iso = 400");
     expect(container.querySelector(".more-filters")?.classList.contains("is-open")).toBe(false);
 
-    await type(search, "iso");
+    await type(container.querySelector<HTMLInputElement>('[aria-label="Search filters"]')!, "iso");
     expect(container.querySelector('[role="option"]')?.textContent).toContain("Added");
     await click(container.querySelector<HTMLElement>('[role="option"]')!);
     expect(textButton("Save change")).toBeTruthy();
@@ -150,7 +190,9 @@ describe("advanced filter workspace", () => {
 
     await type(search, "mono");
     await click(container.querySelector<HTMLElement>('[role="option"]')!);
-    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("Black & white");
+    expect(container.querySelector(".more-filters-panel")?.textContent).toContain("Monochrome");
+    await click(textButton("Add filter"));
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("Black & white");
     await click(textButton("Apply filters (1)"));
 
     expect(apply).toHaveBeenCalledWith([{ field: "monochrome", operator: "=", value: true }]);
@@ -164,7 +206,7 @@ describe("advanced filter workspace", () => {
     const isoValue = container.querySelector<HTMLInputElement>('[aria-label="ISO value"]')!;
     await type(isoValue, "200");
     await click(textButton("Save change"));
-    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso ≥ 200");
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("iso ≥ 200");
     await click(textButton("Cancel"));
 
     expect(initial).toEqual([{ field: "iso", operator: ">=", value: 100 }]);
@@ -181,10 +223,10 @@ describe("advanced filter workspace", () => {
     expect(isoValue.value).toBe("100");
     await type(isoValue, "200");
     await click(textButton("Save change"));
-    expect(container.querySelector('[aria-label="Selected filters"]')?.textContent).toContain("iso ≥ 200");
+    expect(container.querySelector('[aria-label="Staged filters"]')?.textContent).toContain("iso ≥ 200");
 
     await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Remove iso"]')!);
-    expect(container.querySelector('[aria-label="Selected filters"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Staged filters"]')).toBeNull();
     await click(textButton("Apply filters"));
     expect(apply).toHaveBeenCalledWith([]);
   });
@@ -227,7 +269,7 @@ describe("advanced filter workspace", () => {
     await type(brightness, "20");
     await key(brightness, "Enter");
 
-    const selected = container.querySelector('[aria-label="Selected filters"]')!;
+    const selected = container.querySelector('[aria-label="Staged filters"]')!;
     expect(selected.textContent).toContain("sharpness ≥ 70");
     expect(selected.textContent).toContain("brightness ≥ 20");
     await click(container.querySelector<HTMLButtonElement>('button[aria-label^="Remove sharpness"]')!);
@@ -286,7 +328,7 @@ describe("advanced filter workspace", () => {
     expect(value.value).toBe("1");
     await selectValue(condition, "<=");
     await selectValue(value, "3");
-    await click(textButton("Add to filters"));
+    await click(textButton("Add filter"));
     await click(textButton("Apply filters (1)"));
     expect(apply).toHaveBeenCalledWith([{ field: "rating", operator: "<=", value: 3 }]);
   });

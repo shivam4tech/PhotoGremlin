@@ -2,10 +2,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { FilterCondition } from "@/types/api";
 import { choiceIsActive, searchFilterChoices, type FilterChoice } from "./filterDiscovery";
 
-export function FilterPicker({ draft, disabled, autoFocus, onSelect, onOpenChange }: {
+export function FilterPicker({ draft, disabled, autoFocus, includePresets = true, onSelect, onOpenChange }: {
   draft: FilterCondition[];
   disabled?: boolean;
   autoFocus?: boolean;
+  includePresets?: boolean;
   onSelect: (choice: FilterChoice) => void;
   onOpenChange?: (open: boolean) => void;
 }) {
@@ -16,7 +17,7 @@ export function FilterPicker({ draft, disabled, autoFocus, onSelect, onOpenChang
   const input = useRef<HTMLInputElement>(null);
   const openRef = useRef(false);
   const listId = useId();
-  const choices = searchFilterChoices(query);
+  const choices = searchFilterChoices(query).filter((choice) => includePresets || !choice.preset);
   function updateOpen(next: boolean) {
     if (openRef.current === next) return;
     openRef.current = next;

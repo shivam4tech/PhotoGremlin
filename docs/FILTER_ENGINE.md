@@ -208,10 +208,17 @@ only `review_state`.
 - `useFilteredPhotos.ts` keeps the current grid visible during refresh and
   ignores stale request completions. Pagination is guarded against duplicate
   requests; a reload replaces page zero instead of appending stale pages.
-- Sidebar edits remain live. `AdvancedFiltersDialog.tsx` reuses the same
-  controls with a private condition snapshot. Apply replaces the shared store's
-  conditions once; Cancel/Escape discard the snapshot. Category changes retain
-  draft conditions. No query, operator, analysis or persistence semantics change.
+- Sidebar edits remain live and retain Quick Filters. `AdvancedFiltersDialog.tsx`
+  reuses the same controls with a private condition snapshot. The Advanced
+  workspace has five registry-backed categories and places palette colors in
+  Appearance only. Its reducer owns the selected category and temporary editor:
+  switching categories clears an unfinished editor while staged conditions
+  remain available as a compact summary. Opening a staged condition or choosing
+  a result from the global search navigates to that field's category. Advanced
+  search omits sidebar Quick Filter presets. Apply replaces the shared store's
+  conditions once; Cancel/Escape discard the snapshot. No query, operator,
+  analysis or persistence semantics change. Each category shows measured rows
+  and rating stars once; their precise editors remain available through search.
 
 ## Saved views (Sprint 8)
 
