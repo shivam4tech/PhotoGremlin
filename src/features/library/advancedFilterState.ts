@@ -1,16 +1,29 @@
 import type { FilterCondition } from "@/types/api";
+import { getFilterPresentation } from "./filterFields";
+
+export const ADVANCED_FILTER_CATEGORIES = [
+  "Appearance", "Rating & review", "Image properties", "People & content", "Camera & date",
+] as const;
+export type AdvancedFilterCategory = (typeof ADVANCED_FILTER_CATEGORIES)[number];
+
+function categoryFor(field: string): AdvancedFilterCategory | null {
+  const category = getFilterPresentation(field)?.category;
+  return ADVANCED_FILTER_CATEGORIES.find((item) => item === category) ?? null;
+}
 
 export type AdvancedFilterEditorState =
   | { kind: "idle" }
   | { kind: "picker" }
   | {
       kind: "editing";
+      category: AdvancedFilterCategory;
       intent: "add";
       field: string;
       candidate: FilterCondition | null;
     }
   | {
       kind: "editing";
+      category: AdvancedFilterCategory;
       intent: "edit";
       field: string;
       index: number;
@@ -18,12 +31,14 @@ export type AdvancedFilterEditorState =
     };
 
 export interface AdvancedFilterWorkspaceState {
+  activeCategory: AdvancedFilterCategory;
   appliedFilters: FilterCondition[];
   draftFilters: FilterCondition[];
   currentEditor: AdvancedFilterEditorState;
 }
 
 export type AdvancedFilterWorkspaceAction =
+  | { type: "change-category"; category: AdvancedFilterCategory }
   | { type: "replace-draft"; filters: FilterCondition[] }
   | { type: "clear-draft" }
   | { type: "open-picker" }
@@ -44,6 +59,7 @@ export function createAdvancedFilterWorkspaceState(
   const appliedSnapshot = cloneConditions(appliedFilters);
 
   return {
+    activeCategory: "Appearance",
     appliedFilters: appliedSnapshot,
     draftFilters: cloneConditions(appliedSnapshot),
     currentEditor: { kind: "idle" },
@@ -93,6 +109,12 @@ export function advancedFilterWorkspaceReducer(
   action: AdvancedFilterWorkspaceAction,
 ): AdvancedFilterWorkspaceState {
   switch (action.type) {
+    case "change-category":
+      return action.category === state.activeCategory ? state : {
+        ...state,
+        activeCategory: action.category,
+        currentEditor: { kind: "idle" },
+      };
     case "replace-draft":
       return {
         ...state,
@@ -112,24 +134,33 @@ export function advancedFilterWorkspaceReducer(
       return state.currentEditor.kind === "editing"
         ? state
         : { ...state, currentEditor: { kind: "picker" } };
-    case "begin-add":
+    case "begin-add": {
+      const category = categoryFor(action.field);
+      if (!category) return state;
       return {
         ...state,
+        activeCategory: category,
         currentEditor: {
           kind: "editing",
+          category,
           intent: "add",
           field: action.field,
           candidate: null,
         },
       };
+    }
     case "begin-edit": {
       const condition = state.draftFilters[action.index];
       if (!condition) return state;
+      const category = categoryFor(condition.field);
+      if (!category) return state;
 
       return {
         ...state,
+        activeCategory: category,
         currentEditor: {
           kind: "editing",
+          category,
           intent: "edit",
           field: condition.field,
           index: action.index,
@@ -138,7 +169,9 @@ export function advancedFilterWorkspaceReducer(
       };
     }
     case "update-candidate":
-      if (state.currentEditor.kind !== "editing") return state;
+      if (state.currentEditor.kind !== "editing" ||
+        state.currentEditor.category !== state.activeCategory ||
+        (action.candidate && action.candidate.field !== state.currentEditor.field)) return state;
       return {
         ...state,
         currentEditor: {
@@ -150,7 +183,8 @@ export function advancedFilterWorkspaceReducer(
       };
     case "commit-editor": {
       const editor = state.currentEditor;
-      if (editor.kind !== "editing" || !editor.candidate) return state;
+      if (editor.kind !== "editing" || !editor.candidate ||
+        editor.category !== state.activeCategory || editor.candidate.field !== editor.field) return state;
 
       return {
         ...state,

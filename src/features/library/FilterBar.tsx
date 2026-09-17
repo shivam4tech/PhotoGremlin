@@ -16,7 +16,6 @@ import { ColorSpectrumFilter } from "./ColorSpectrumFilter";
 import { FilterPicker } from "./FilterPicker";
 import { ActiveFilterList } from "./ActiveFilterList";
 import { FILTER_CHOICES } from "./filterDiscovery";
-import { QuickFilterIcon } from "./QuickFilterIcon";
 import type { AdvancedFilterEditorState, AdvancedFilterWorkspaceAction } from "./advancedFilterState";
 
 interface FilterBarProps {
@@ -33,6 +32,8 @@ interface FilterBarProps {
   /** Advanced mode may own editor transitions alongside its private draft. */
   editorState?: AdvancedFilterEditorState;
   editorDispatch?: Dispatch<AdvancedFilterWorkspaceAction>;
+  onPaletteSelect?: () => void;
+  autoFocusSearch?: boolean;
 }
 
 const METADATA_VALUE_FIELDS = new Set(["camera_make", "camera_model", "lens"]);
@@ -182,6 +183,8 @@ export function FilterBar({
   onAdvanced,
   editorState,
   editorDispatch,
+  onPaletteSelect,
+  autoFocusSearch = true,
 }: FilterBarProps) {
   const headingId = useId();
   const root = useRef<HTMLDivElement>(null);
@@ -274,6 +277,8 @@ export function FilterBar({
   const expanded = mode === "inspector" || open;
   const categoryFields = FILTER_CHOICES.filter((choice) => !choice.preset && choice.category === category && choice.field !== "palette_color");
   const rangeFields = categoryFields.map((choice) => choice.field).filter((name) => QUICK_RANGE_FIELDS.some((field) => field === name));
+  const specificFields = categoryFields.filter((choice) => !BESPOKE_FILTER_FIELDS.has(choice.field)
+    && !(category === "Rating & review" && choice.field === "rating"));
   const rating = draft.find((condition) => condition.field === "rating");
   const ratingThreshold = rating?.operator === ">=" && typeof rating.value === "number" ? rating.value : null;
   const unratedOnly = rating?.operator === "=" && rating.value === 0;
@@ -488,19 +493,20 @@ export function FilterBar({
       {expanded && (
         <div className="filterbar-panel">
           <div className="filter-discovery">
-            <FilterPicker draft={draft} disabled={disabled} autoFocus={editorState?.kind === "idle"} onOpenChange={editorState ? (isOpen) => {
+            <FilterPicker draft={draft} disabled={disabled} includePresets={!category} autoFocus={editorState?.kind === "idle" && autoFocusSearch} onOpenChange={editorState ? (isOpen) => {
               if (isOpen) editorDispatch?.({ type: "open-picker" });
             } : undefined} onSelect={(choice) => {
               if (choice.preset) onChange(toggleQuickFilterPreset(draft, choice.preset));
               else if (choice.field === "palette_color") {
-                (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
+                if (onPaletteSelect) onPaletteSelect();
+                else (root.current?.closest("dialog") ?? root.current)?.querySelector<HTMLButtonElement>(".color-swatch")?.focus();
               } else selectField(choice.field);
             }} />
             {!category && <ActiveFilterList draft={draft} onChange={onChange} disabled={disabled} />}
           </div>
           {!category && <ColorSpectrumFilter draft={draft} onChange={onChange} disabled={disabled} />}
 
-          {(!category || category === "Quick filters") && <section className="quick-presets" aria-labelledby={`${headingId}-quick`}>
+          {!category && <section className="quick-presets" aria-labelledby={`${headingId}-quick`}>
             <div className="quick-presets-head">
               <strong id={`${headingId}-quick`}>Quick filters</strong>
               {onAdvanced && <button type="button" className="btn btn-ghost btn-sm" onClick={onAdvanced}>See all</button>}
@@ -517,7 +523,6 @@ export function FilterBar({
                     disabled={disabled}
                     onClick={() => onChange(toggleQuickFilterPreset(draft, preset))}
                   >
-                    {category && <QuickFilterIcon id={preset.id} />}
                     <span className="quick-preset-check" aria-hidden="true">{isActive ? "✓" : ""}</span>
                     <span>{preset.label}</span>
                   </button>
@@ -555,9 +560,9 @@ export function FilterBar({
             sessionId={sessionId}
             fields={category ? rangeFields : undefined}
           />}
-          {category && categoryFields.length > 0 && <div className="filter-category-fields">
+          {category && specificFields.length > 0 && <div className="filter-category-fields">
             <h4 className="filter-section-title">Specific conditions</h4>
-            {categoryFields.map((choice) => <button key={choice.id} type="button" disabled={disabled}
+            {specificFields.map((choice) => <button key={choice.id} type="button" disabled={disabled}
               className="filter-category-field" onClick={() => selectField(choice.field)}>
               <span>{choice.label}</span><span>{draft.some((condition) => condition.field === choice.field) ? "Added" : "Any"} <span aria-hidden="true">›</span></span>
             </button>)}
@@ -599,8 +604,8 @@ export function FilterBar({
                       {valueInput()}
                     </ComposerControl>
                   )}
-                  <button type="button" className="btn btn-primary btn-sm filterbar-compose-add" onClick={add} disabled={!editorConfigured || disabled}>
-                    {controlledEditor?.intent === "edit" ? "Save change" : editorState ? "Add to filters" : "Add filter"}
+                  <button type="button" className={`btn btn-sm filterbar-compose-add${category ? "" : " btn-primary"}`} onClick={add} disabled={!editorConfigured || disabled}>
+                    {controlledEditor?.intent === "edit" ? "Save change" : "Add filter"}
                   </button>
                 </div>
                 {needsTwoValues && (

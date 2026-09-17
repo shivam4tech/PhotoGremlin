@@ -113,12 +113,13 @@ Preserve existing Rust filtering semantics, typed IPC, saved views, local analys
 ### Known gaps that must not be mistaken for completion
 
 - [x] Simple numeric rows use a compact collapsed rhythm and disclose exact controls only on demand.
-- [x] Quick filters use a compact, borderless two-column grid in Simple and Advanced where space permits.
+- [x] Quick filters remain in the Simple sidebar; Advanced uses five deeper categories without repeating the presets.
 - [x] Search discovers filters and routes selections into the Advanced add/edit composer.
 - [x] The Advanced `Add filter` state model is explicit, duplicate-safe, and wired through the picker/editor workflow.
 - [x] Shared presentation labels and registry-derived typed editors replace raw boolean/operator values in Advanced.
 - [x] Advanced is a right-side drawer and preserves a recognizable gallery at normal desktop widths.
 - [x] The persistent third Advanced column has been removed.
+- [x] Palette colors appear only in Appearance; switching categories clears temporary editors and preserves staged filters.
 - [x] Draft preview uses the existing deterministic local filter query, debounced by 180ms and limited to one returned row while reading its exact total.
 - [x] Clicking a staged non-color filter opens it for first-class in-place editing; color chips return focus to the palette control.
 - [x] Advanced prevents unsupported duplicate field conditions by editing/upserting the existing staged field.
